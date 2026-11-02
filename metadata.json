@@ -1,0 +1,6 @@
+{
+  "name": "Hollow Strike",
+  "description": "3D tactical team shooter with 5v5 plant/defuse rounds, procedural agents, responsive gunplay, and cross-platform controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Hollow Strike</title>
+    <meta name="description" content="3D tactical team shooter with 5v5 plant/defuse rounds, procedural agents, responsive gunplay, and cross-platform controls." />
+    <meta property="og:title" content="Hollow Strike" />
+    <meta property="og:description" content="3D tactical team shooter with 5v5 plant/defuse rounds, procedural agents, responsive gunplay, and cross-platform controls." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#090d16" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Hollow Strike" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+      /* Prevent mobile pull-to-refresh and elastic bounce during touch gestures */
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #080c14;
+        color: #f1f5f9;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        position: relative;
+      }
+    </style>
+  </head>
+  <body data-state="title">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

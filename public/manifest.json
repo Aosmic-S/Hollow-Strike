@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "Hollow Strike",
+  "short_name": "HollowStrike",
+  "description": "3D tactical team shooter with 5v5 plant/defuse rounds, procedural agents, and cross-platform controls.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "theme_color": "#090d16",
+  "background_color": "#080c14",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
