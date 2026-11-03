@@ -1,6 +1,6 @@
 /**
- * Hollow Strike - Valorant-Style Tactical Lobby
- * High-fidelity redesign matching the reference Valorant lobby layout.
+ * Hollow Strike - Tactical Match Lobby
+ * Widescreen tactical lobby with squad slots, queue modes, and agent selection.
  */
 
 import React, { useState } from 'react';
@@ -35,21 +35,26 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
   // Sample party slots (Player + 4 bot/invite slots)
   const [partyMembers, setPartyMembers] = useState<Array<{ name: string; agent: AgentDef; ready: boolean; isLeader: boolean }>>([
-    { name: 'VALORLEAKS', agent: currentAgent, ready: true, isLeader: true },
+    { name: 'OPERATOR', agent: currentAgent, ready: true, isLeader: true },
     { name: 'Ally Blitz', agent: AGENT_REGISTRY.BLITZ, ready: true, isLeader: false },
   ]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     soundEngine.init();
     try {
       if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
-      if (screen.orientation && 'lock' in screen.orientation) {
-        (screen.orientation as unknown as { lock: (mode: string) => Promise<void> }).lock('landscape').catch(() => {});
+        await document.documentElement.requestFullscreen();
       }
     } catch {
-      // Ignored
+      // Fullscreen denied or unsupported
+    }
+
+    try {
+      if (screen.orientation && 'lock' in screen.orientation) {
+        await (screen.orientation as unknown as { lock: (mode: string) => Promise<void> }).lock('landscape');
+      }
+    } catch {
+      // Orientation lock unsupported
     }
     onStartGame();
   };

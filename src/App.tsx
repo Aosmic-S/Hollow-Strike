@@ -26,6 +26,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { PauseModal } from './components/PauseModal';
 import { OrientationGuard } from './components/OrientationGuard';
+import { isTouchDevice } from './utils/device';
 
 type AppState = 'title' | 'playing' | 'paused' | 'gameover';
 
@@ -58,6 +59,7 @@ export default function App() {
   const [playerStats, setPlayerStats] = useState<PlayerStats[]>([]);
   const [killFeed, setKillFeed] = useState<KillEvent[]>([]);
   const [hitmarker, setHitmarker] = useState<{ active: boolean; isHeadshot: boolean } | null>(null);
+  const hitmarkerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fps, setFps] = useState<number>(60);
   const [matchWinner, setMatchWinner] = useState<TeamSide | null>(null);
 
@@ -70,7 +72,7 @@ export default function App() {
   // Device & Settings
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [settings, setSettings] = useState<GameSettings>(() => {
-    const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 800);
+    const isTouch = isTouchDevice();
     return {
       graphics: isTouch || isSoftwareGl ? 'LOW' : 'HIGH',
       fpsCap: 60,
@@ -91,9 +93,21 @@ export default function App() {
     document.body.dataset.state = appState;
   }, [appState]);
 
+  // Clear hitmarker timeout on component unmount
+  useEffect(() => {
+    return () => {
+      if (hitmarkerTimeoutRef.current) {
+        clearTimeout(hitmarkerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-pause tracking: whether pause was triggered automatically due to portrait or tab hidden
+  const autoPausedRef = useRef<boolean>(false);
+
   // Check ?autostart=1 on mount & detect mobile
   useEffect(() => {
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 800;
+    const isTouch = isTouchDevice();
     setIsMobile(isTouch);
 
     const params = new URLSearchParams(window.location.search);
@@ -101,6 +115,43 @@ export default function App() {
       startGame();
     }
   }, []);
+
+  // Pause engine when device is in portrait or tab is hidden (visibilitychange), resume on landscape
+  useEffect(() => {
+    const handleVisibilityOrOrientationChange = () => {
+      const isTouch = isTouchDevice();
+      const isPortrait = isTouch && window.innerHeight > window.innerWidth;
+      const isHidden = document.visibilityState === 'hidden';
+
+      if (isPortrait || isHidden) {
+        if (appState === 'playing') {
+          autoPausedRef.current = true;
+          setAppState('paused');
+          engineRef.current?.setPaused(true);
+        }
+      } else {
+        // Returned to landscape and tab is visible
+        if (appState === 'paused' && autoPausedRef.current) {
+          autoPausedRef.current = false;
+          setAppState('playing');
+          engineRef.current?.setPaused(false);
+          if (!isTouch) {
+            engineRef.current?.input.requestPointerLock();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrOrientationChange);
+    window.addEventListener('resize', handleVisibilityOrOrientationChange);
+    window.addEventListener('orientationchange', handleVisibilityOrOrientationChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrOrientationChange);
+      window.removeEventListener('resize', handleVisibilityOrOrientationChange);
+      window.removeEventListener('orientationchange', handleVisibilityOrOrientationChange);
+    };
+  }, [appState]);
 
   const startGame = () => {
     setAppState('playing');
@@ -148,7 +199,11 @@ export default function App() {
           },
           onHitmarker: (isHeadshot) => {
             setHitmarker({ active: true, isHeadshot });
-            setTimeout(() => setHitmarker(null), 140);
+            if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
+            hitmarkerTimeoutRef.current = setTimeout(() => {
+              setHitmarker(null);
+              hitmarkerTimeoutRef.current = null;
+            }, 140);
           },
           onFpsUpdate: (currentFps) => setFps(currentFps),
           onMatchOver: (winner) => {
@@ -157,6 +212,17 @@ export default function App() {
           },
         }
       );
+
+      // Pause the game when pointer lock is lost during play
+      engineRef.current.input.onPointerLockLoss = () => {
+        setAppState((prevState) => {
+          if (prevState === 'playing') {
+            engineRef.current?.setPaused(true);
+            return 'paused';
+          }
+          return prevState;
+        });
+      };
     }
   };
 
@@ -207,6 +273,11 @@ export default function App() {
   };
 
   const handleReturnToTitle = () => {
+    if (hitmarkerTimeoutRef.current) {
+      clearTimeout(hitmarkerTimeoutRef.current);
+      hitmarkerTimeoutRef.current = null;
+    }
+    setHitmarker(null);
     engineRef.current?.dispose();
     engineRef.current = null;
     setAppState('title');
@@ -216,6 +287,11 @@ export default function App() {
   };
 
   const handlePlayAgain = () => {
+    if (hitmarkerTimeoutRef.current) {
+      clearTimeout(hitmarkerTimeoutRef.current);
+      hitmarkerTimeoutRef.current = null;
+    }
+    setHitmarker(null);
     engineRef.current?.dispose();
     engineRef.current = null;
     setAttackerRoundsWon(0);
@@ -238,7 +314,7 @@ export default function App() {
   const playerCredits = playerStats[0]?.credits || 800;
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#070b14] text-white">
+    <div className="relative h-[100dvh] w-screen overflow-hidden bg-[#070b14] text-white">
       {/* Mobile Orientation Guard */}
       <OrientationGuard />
 
@@ -249,7 +325,7 @@ export default function App() {
         className="absolute inset-0 h-full w-full"
       />
 
-      {/* Screen 1: Valorant-Style Tactical Lobby */}
+      {/* Screen 1: Tactical Match Lobby */}
       {appState === 'title' && (
         <div className="absolute inset-0 z-30">
           <LobbyScreen
@@ -314,6 +390,7 @@ export default function App() {
                 (engineRef.current.playerCombatant.team === 'DEFENDERS' && spikeState === 'planted')
               }
               isPlantingOrDefusing={plantProgress > 0 || defuseProgress > 0}
+              touchScale={settings.touchScale}
             />
           )}
         </>
@@ -361,10 +438,7 @@ export default function App() {
           onUpdateSettings={(newSettings) => {
             setSettings(newSettings);
             if (engineRef.current) {
-              engineRef.current.settings = newSettings;
-              engineRef.current.applyGraphicsPreset(newSettings.graphics);
-              engineRef.current.input.mouseSensitivity = newSettings.mouseSensitivity;
-              engineRef.current.input.touchSensitivity = newSettings.touchSensitivity;
+              engineRef.current.applySettings(newSettings);
             }
           }}
           onClose={() => setShowSettings(false)}

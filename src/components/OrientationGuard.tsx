@@ -5,13 +5,14 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { isTouchDevice } from '../utils/device';
 
 export const OrientationGuard: React.FC = () => {
   const [isPortrait, setIsPortrait] = useState<boolean>(false);
 
   useEffect(() => {
     const checkOrientation = () => {
-      const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1000;
+      const isMobile = isTouchDevice();
       const portrait = isMobile && window.innerHeight > window.innerWidth;
       setIsPortrait(portrait);
     };
