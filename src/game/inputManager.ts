@@ -3,6 +3,8 @@
  * Manages PC Keyboard + Mouse (PointerLock) and Mobile Virtual Touch Controls.
  */
 
+import { isTouchDevice } from '../utils/device';
+
 export interface InputState {
   moveForward: number; // -1 to 1
   moveRight: number;   // -1 to 1
@@ -19,9 +21,6 @@ export interface InputState {
   abilityEJustPressed: boolean;
   abilityCJustPressed: boolean;
   abilityXJustPressed: boolean;
-  buyMenuJustPressed: boolean;
-  scoreboardHeld: boolean;
-  pauseJustPressed: boolean;
   weaponSlotJustPressed: number | null; // 1, 2, 3, 4
 }
 
@@ -42,9 +41,6 @@ export class InputManager {
     abilityEJustPressed: false,
     abilityCJustPressed: false,
     abilityXJustPressed: false,
-    buyMenuJustPressed: false,
-    scoreboardHeld: false,
-    pauseJustPressed: false,
     weaponSlotJustPressed: null,
   };
 
@@ -52,6 +48,8 @@ export class InputManager {
   public isPointerLocked: boolean = false;
   public mouseSensitivity: number = 0.0022;
   public touchSensitivity: number = 0.0035;
+
+  public onPointerLockLoss: (() => void) | null = null;
 
   private keysHeld: Set<string> = new Set();
   private element: HTMLElement | null = null;
@@ -61,13 +59,11 @@ export class InputManager {
   }
 
   public detectDevice(): void {
-    if (typeof window === 'undefined') return;
-    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    const isCoarse = window.matchMedia('(pointer: coarse)').matches;
-    this.isMobile = hasTouch || isCoarse || window.innerWidth < 800;
+    this.isMobile = isTouchDevice();
   }
 
   public attach(element: HTMLElement): void {
+    this.detach();
     this.element = element;
 
     // Keyboard events
@@ -76,12 +72,12 @@ export class InputManager {
     window.addEventListener('blur', this.handleBlur);
 
     // Mouse pointer lock & look
-    element.addEventListener('click', this.requestPointerLock);
+    element.addEventListener('click', this.handleClick);
     document.addEventListener('pointerlockchange', this.handlePointerLockChange);
     window.addEventListener('mousemove', this.handleMouseMove);
     window.addEventListener('mousedown', this.handleMouseDown);
     window.addEventListener('mouseup', this.handleMouseUp);
-    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('contextmenu', this.handleContextMenu);
   }
 
   public detach(): void {
@@ -92,7 +88,21 @@ export class InputManager {
     window.removeEventListener('mousemove', this.handleMouseMove);
     window.removeEventListener('mousedown', this.handleMouseDown);
     window.removeEventListener('mouseup', this.handleMouseUp);
+    window.removeEventListener('contextmenu', this.handleContextMenu);
+
+    if (this.element) {
+      this.element.removeEventListener('click', this.handleClick);
+      this.element = null;
+    }
   }
+
+  private handleClick = (): void => {
+    this.requestPointerLock();
+  };
+
+  private handleContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+  };
 
   public requestPointerLock = (): void => {
     if (this.isMobile || !this.element) return;
@@ -108,7 +118,11 @@ export class InputManager {
   }
 
   private handlePointerLockChange = (): void => {
+    const wasLocked = this.isPointerLocked;
     this.isPointerLocked = document.pointerLockElement === this.element;
+    if (wasLocked && !this.isPointerLocked) {
+      this.onPointerLockLoss?.();
+    }
   };
 
   private handleKeyDown = (e: KeyboardEvent): void => {
@@ -134,9 +148,6 @@ export class InputManager {
       case 'KeyX':
         this.state.abilityXJustPressed = true;
         break;
-      case 'KeyB':
-        this.state.buyMenuJustPressed = true;
-        break;
       case 'KeyF':
         this.state.plantDefuseHeld = true;
         break;
@@ -152,14 +163,6 @@ export class InputManager {
       case 'Digit4':
         this.state.weaponSlotJustPressed = 4;
         break;
-      case 'Tab':
-        e.preventDefault();
-        this.state.scoreboardHeld = true;
-        break;
-      case 'Escape':
-      case 'KeyP':
-        this.state.pauseJustPressed = true;
-        break;
     }
   };
 
@@ -168,9 +171,6 @@ export class InputManager {
 
     if (e.code === 'KeyF') {
       this.state.plantDefuseHeld = false;
-    }
-    if (e.code === 'Tab') {
-      this.state.scoreboardHeld = false;
     }
   };
 
@@ -199,7 +199,6 @@ export class InputManager {
     this.keysHeld.clear();
     this.state.fireHeld = false;
     this.state.plantDefuseHeld = false;
-    this.state.scoreboardHeld = false;
     this.state.moveForward = 0;
     this.state.moveRight = 0;
   };
@@ -245,10 +244,6 @@ export class InputManager {
     this.state.plantDefuseHeld = held;
   }
 
-  public triggerMobileBuy(): void {
-    this.state.buyMenuJustPressed = true;
-  }
-
   public update(): void {
     // Process keyboard continuous move if not overridden by mobile joystick
     if (!this.isMobile || (this.state.moveForward === 0 && this.state.moveRight === 0)) {
@@ -270,7 +265,7 @@ export class InputManager {
       this.state.moveRight = right;
     }
 
-    this.state.crouchHeld = this.keysHeld.has('ControlLeft') || this.keysHeld.has('KeyC');
+    this.state.crouchHeld = this.keysHeld.has('ControlLeft');
   }
 
   public clearFrameDeltas(): void {
@@ -283,8 +278,6 @@ export class InputManager {
     this.state.abilityEJustPressed = false;
     this.state.abilityCJustPressed = false;
     this.state.abilityXJustPressed = false;
-    this.state.buyMenuJustPressed = false;
-    this.state.pauseJustPressed = false;
     this.state.weaponSlotJustPressed = null;
   }
 }

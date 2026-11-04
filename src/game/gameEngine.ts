@@ -52,6 +52,13 @@ export const isSoftwareGl = (() => {
 const _vec3_1 = new THREE.Vector3();
 const _vec3_2 = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
+const _siteA_pos = new THREE.Vector3(BOMB_SITE_A.x, 0, BOMB_SITE_A.z);
+const _siteB_pos = new THREE.Vector3(BOMB_SITE_B.x, 0, BOMB_SITE_B.z);
+const _aimDir = new THREE.Vector3();
+const _forward = new THREE.Vector3();
+const _origin = new THREE.Vector3();
+const _endPoint = new THREE.Vector3();
+const _botEyeOffset = new THREE.Vector3(0, 1.4, 0);
 
 export interface EngineCallbacks {
   onStatsUpdate: (stats: PlayerStats[]) => void;
@@ -212,6 +219,26 @@ export class GameEngine {
     if (paused) {
       this.input.exitPointerLock();
     }
+  }
+
+  public applySettings(newSettings: GameSettings): void {
+    const oldSettings = this.settings;
+    this.settings = newSettings;
+
+    if (oldSettings.graphics !== newSettings.graphics) {
+      this.applyGraphicsPreset(newSettings.graphics);
+    }
+
+    this.input.mouseSensitivity = newSettings.mouseSensitivity;
+    this.input.touchSensitivity = newSettings.touchSensitivity;
+
+    // Apply Live FOV
+    this.camera.fov = newSettings.fov;
+    this.camera.updateProjectionMatrix();
+
+    // Apply Live Audio settings
+    soundEngine.setVolume(newSettings.volume);
+    soundEngine.setMuted(!newSettings.soundEnabled);
   }
 
   public applyGraphicsPreset(preset: GraphicsPreset): void {
@@ -497,6 +524,16 @@ export class GameEngine {
     if (this.isDestroyed) return;
 
     const now = performance.now();
+
+    // Check FPS Cap (30 / 60 / 120 or 0 for uncapped)
+    if (this.settings.fpsCap && this.settings.fpsCap > 0) {
+      const minFrameTime = 1000 / this.settings.fpsCap;
+      if (now - this.lastTime < minFrameTime - 1.0) {
+        this.frameId = requestAnimationFrame(this.tick);
+        return;
+      }
+    }
+
     const rawDt = (now - this.lastTime) / 1000;
     this.lastTime = now;
     const dt = Math.min(rawDt, 0.05); // Clamped simulation step per ultra skill
@@ -737,14 +774,13 @@ export class GameEngine {
         const spread = calculateSpread(p.weapon, isMoving, isJumping, this.input.state.crouchHeld, this.input.state.adsHeld);
 
         // Camera direction + spread
-        const aimDir = new THREE.Vector3();
-        this.camera.getWorldDirection(aimDir);
-        aimDir.x += (Math.random() - 0.5) * spread;
-        aimDir.y += (Math.random() - 0.5) * spread * 0.8;
-        aimDir.z += (Math.random() - 0.5) * spread;
-        aimDir.normalize();
+        this.camera.getWorldDirection(_aimDir);
+        _aimDir.x += (Math.random() - 0.5) * spread;
+        _aimDir.y += (Math.random() - 0.5) * spread * 0.8;
+        _aimDir.z += (Math.random() - 0.5) * spread;
+        _aimDir.normalize();
 
-        this.fireBullet(p, aimDir);
+        this.fireBullet(p, _aimDir);
 
         // Recoil kick on viewmodel and pitch
         p.pitch += p.weapon.recoilPerShot * 0.45;
@@ -769,8 +805,8 @@ export class GameEngine {
     const p = this.playerCombatant;
 
     // Check if in site A or B
-    const distA = p.position.distanceTo(new THREE.Vector3(BOMB_SITE_A.x, 0, BOMB_SITE_A.z));
-    const distB = p.position.distanceTo(new THREE.Vector3(BOMB_SITE_B.x, 0, BOMB_SITE_B.z));
+    const distA = p.position.distanceTo(_siteA_pos);
+    const distB = p.position.distanceTo(_siteB_pos);
     const inSiteA = distA < BOMB_SITE_A.radius;
     const inSiteB = distB < BOMB_SITE_B.radius;
 
@@ -837,13 +873,12 @@ export class GameEngine {
 
   private updatePlayerAbilities(): void {
     const p = this.playerCombatant;
-    const forward = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
+    this.camera.getWorldDirection(_forward);
 
     if (this.input.state.abilityEJustPressed) {
       if (p.agentId === 'ZEPHYR') {
         // Hollow Smoke: deploys 12m forward
-        const targetPos = p.position.clone().add(forward.clone().multiplyScalar(14));
+        const targetPos = p.position.clone().add(_forward.clone().multiplyScalar(14));
         this.abilityMgr.deploySmoke(targetPos.x, 0, targetPos.z);
       } else if (p.agentId === 'BLITZ') {
         // Blind Pulse flash
@@ -851,7 +886,7 @@ export class GameEngine {
         this.cameraShakeTrauma = 0.4;
       } else if (p.agentId === 'BASTION') {
         // Barrier Wall 4m forward
-        const wallPos = p.position.clone().add(forward.clone().multiplyScalar(5));
+        const wallPos = p.position.clone().add(_forward.clone().multiplyScalar(5));
         this.abilityMgr.deployBarrier(wallPos.x, 0, wallPos.z, p.yaw);
       } else if (p.agentId === 'LUMEN') {
         // Healing burst: heal player up to 100
@@ -864,7 +899,7 @@ export class GameEngine {
     if (this.input.state.abilityQJustPressed) {
       if (p.agentId === 'BLITZ') {
         // Kinetic dash
-        p.position.add(forward.clone().multiplyScalar(7));
+        p.position.add(_forward.clone().multiplyScalar(7));
         soundEngine.playAbility('DASH');
       } else if (p.agentId === 'LUMEN') {
         // Recon pulse
@@ -882,12 +917,14 @@ export class GameEngine {
   public fireBullet(shooter: BotCombatant, dir: THREE.Vector3): void {
     soundEngine.playGunshot(shooter.weapon.category);
 
-    const origin = shooter.isHuman
-      ? this.camera.position.clone()
-      : shooter.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+    if (shooter.isHuman) {
+      _origin.copy(this.camera.position);
+    } else {
+      _origin.copy(shooter.position).add(_botEyeOffset);
+    }
 
     // Raycast against all alive enemy combatants
-    _raycaster.set(origin, dir);
+    _raycaster.set(_origin, dir);
     _raycaster.far = 100;
 
     let closestHit: { combatant: BotCombatant; hitZone: 'head' | 'body' | 'leg'; point: THREE.Vector3 } | null = null;
@@ -923,22 +960,20 @@ export class GameEngine {
       worldPoint = worldHits[0].point;
     }
 
-    const endPoint = new THREE.Vector3();
-
     if (closestHit && closestDist < worldDist) {
       // Hit Enemy!
-      endPoint.copy(closestHit.point);
+      _endPoint.copy(closestHit.point);
       this.applyDamage(shooter, closestHit.combatant, closestHit.hitZone, closestDist);
     } else if (worldPoint) {
       // Hit Wall / Crate
-      endPoint.copy(worldPoint);
+      _endPoint.copy(worldPoint);
       this.spawnSparks(worldPoint);
     } else {
-      endPoint.copy(origin).add(dir.clone().multiplyScalar(80));
+      _endPoint.copy(_origin).addScaledVector(dir, 80);
     }
 
     // Spawn pooled visual tracer line
-    this.spawnTracer(origin, endPoint);
+    this.spawnTracer(_origin, _endPoint);
   }
 
   private applyDamage(
