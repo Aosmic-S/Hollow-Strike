@@ -130,8 +130,9 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
           <button
             onClick={onOpenSettings}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white transition cursor-pointer"
-            title="Settings"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 transition cursor-pointer"
+            title="Tactical Settings"
+            aria-label="Tactical Settings"
           >
             ⚙
           </button>
@@ -199,10 +200,14 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 <span className="text-cyan-400 font-bold">#HS-9204</span>
               </div>
               <div className="flex items-center justify-between text-slate-300">
-                <span>PARTY CLOSED</span>
+                <span id="party-closed-label">PARTY CLOSED</span>
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isPartyClosed}
+                  aria-labelledby="party-closed-label"
                   onClick={() => setIsPartyClosed(!isPartyClosed)}
-                  className={`h-5 w-9 rounded-full p-0.5 transition cursor-pointer ${
+                  className={`h-5 w-9 rounded-full p-0.5 transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
                     isPartyClosed ? 'bg-cyan-500' : 'bg-slate-800'
                   }`}
                 >
