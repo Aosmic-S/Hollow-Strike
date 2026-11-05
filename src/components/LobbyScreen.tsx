@@ -33,10 +33,9 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'PLAY' | 'AGENTS' | 'ARMORY' | 'CAREER'>('PLAY');
   const [showAgentModal, setShowAgentModal] = useState<boolean>(false);
 
-  // Sample party slots (Player + 4 bot/invite slots)
+  // Party slots (Player + empty invite slots)
   const [partyMembers, setPartyMembers] = useState<Array<{ name: string; agent: AgentDef; ready: boolean; isLeader: boolean }>>([
     { name: 'OPERATOR', agent: currentAgent, ready: true, isLeader: true },
-    { name: 'Ally Blitz', agent: AGENT_REGISTRY.BLITZ, ready: true, isLeader: false },
   ]);
 
   const handleStart = async () => {
