@@ -128,9 +128,11 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
 
           <button
+            type="button"
             onClick={onOpenSettings}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white transition cursor-pointer"
-            title="Settings"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 transition cursor-pointer"
+            title="Tactical Settings"
+            aria-label="Tactical Settings"
           >
             ⚙
           </button>
@@ -198,10 +200,14 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 <span className="text-cyan-400 font-bold">#HS-9204</span>
               </div>
               <div className="flex items-center justify-between text-slate-300">
-                <span>PARTY CLOSED</span>
+                <span id="party-closed-label">PARTY CLOSED</span>
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isPartyClosed}
+                  aria-labelledby="party-closed-label"
                   onClick={() => setIsPartyClosed(!isPartyClosed)}
-                  className={`h-5 w-9 rounded-full p-0.5 transition cursor-pointer ${
+                  className={`h-5 w-9 rounded-full p-0.5 transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
                     isPartyClosed ? 'bg-cyan-500' : 'bg-slate-800'
                   }`}
                 >
@@ -380,13 +386,22 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
       {/* AGENT SELECTION MODAL */}
       {showAgentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="agent-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none"
+        >
           <div className="relative w-full max-w-3xl rounded-xl border border-slate-700 bg-slate-950 p-6 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-              <h3 className="font-mono text-base font-black uppercase text-white">SELECT TACTICAL AGENT</h3>
+              <h3 id="agent-modal-title" className="font-mono text-base font-black uppercase text-white">
+                SELECT TACTICAL AGENT
+              </h3>
               <button
+                type="button"
                 onClick={() => setShowAgentModal(false)}
-                className="rounded border border-slate-700 bg-slate-800 px-3 py-1 font-mono text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+                className="rounded border border-slate-700 bg-slate-800 px-3 py-1 font-mono text-xs font-bold uppercase text-slate-300 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 transition cursor-pointer"
+                aria-label="Close Agent Selection"
               >
                 Close
               </button>
