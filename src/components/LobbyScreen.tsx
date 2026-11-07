@@ -129,7 +129,8 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
           <button
             onClick={onOpenSettings}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white transition cursor-pointer"
+            aria-label="Settings"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/80 bg-slate-900 text-slate-300 hover:border-cyan-500 hover:text-white transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             title="Settings"
           >
             ⚙
