@@ -32,12 +32,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none">
-      <div className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tactical-settings-title"
+        className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
-          <h2 className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
+          <h2 id="tactical-settings-title" className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
           <button
             onClick={onClose}
-            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+            aria-label="Save settings and exit"
+            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             Save & Exit
           </button>
@@ -112,33 +118,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="space-y-3">
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Mouse Look Sensitivity (PC)</span>
+                <label htmlFor="mouse-sensitivity" className="text-slate-400 uppercase cursor-pointer">Mouse Look Sensitivity (PC)</label>
                 <span className="text-white font-bold">{settings.mouseSensitivity.toFixed(4)}</span>
               </div>
               <input
+                id="mouse-sensitivity"
                 type="range"
                 min="0.0008"
                 max="0.006"
                 step="0.0002"
+                aria-label="Mouse Look Sensitivity"
                 value={settings.mouseSensitivity}
                 onChange={(e) => update('mouseSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 rounded"
               />
             </div>
 
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Touch Swipe Sensitivity (Mobile)</span>
+                <label htmlFor="touch-sensitivity" className="text-slate-400 uppercase cursor-pointer">Touch Swipe Sensitivity (Mobile)</label>
                 <span className="text-white font-bold">{settings.touchSensitivity.toFixed(4)}</span>
               </div>
               <input
+                id="touch-sensitivity"
                 type="range"
                 min="0.001"
                 max="0.008"
                 step="0.0002"
+                aria-label="Touch Swipe Sensitivity"
                 value={settings.touchSensitivity}
                 onChange={(e) => update('touchSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 rounded"
               />
             </div>
           </div>
@@ -146,34 +156,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* FOV */}
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-slate-400 uppercase">Field of View (FOV)</span>
+              <label htmlFor="fov-setting" className="text-slate-400 uppercase cursor-pointer">Field of View (FOV)</label>
               <span className="text-white font-bold">{settings.fov}°</span>
             </div>
             <input
+              id="fov-setting"
               type="range"
               min="80"
               max="115"
               step="1"
+              aria-label="Field of View"
               value={settings.fov}
               onChange={(e) => update('fov', parseInt(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 rounded"
             />
           </div>
 
           {/* Audio */}
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-slate-400 uppercase">Master Volume</span>
+              <label htmlFor="master-volume" className="text-slate-400 uppercase cursor-pointer">Master Volume</label>
               <span className="text-white font-bold">{Math.round(settings.volume * 100)}%</span>
             </div>
             <input
+              id="master-volume"
               type="range"
               min="0"
               max="1"
               step="0.05"
+              aria-label="Master Volume"
               value={settings.volume}
               onChange={(e) => update('volume', parseFloat(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 rounded"
             />
           </div>
 
