@@ -3,7 +3,7 @@
  * Configures graphics presets (Low/Medium/High/Ultra), FPS limits, sensitivities, and audio.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GameSettings, GraphicsPreset } from '../game/types';
 import { soundEngine } from '../game/audio';
 
@@ -18,6 +18,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onClose,
 }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const update = <K extends keyof GameSettings>(key: K, value: GameSettings[K]) => {
     const updated = { ...settings, [key]: value };
     onUpdateSettings(updated);
@@ -31,15 +42,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none"
+    >
       <div className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
-          <h2 className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
+          <h2 id="settings-title" className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
           <button
             onClick={onClose}
-            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+            aria-label="Save and exit settings"
+            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none transition cursor-pointer"
           >
-            Save & Exit
+            Save & Exit [Esc]
           </button>
         </div>
 
@@ -117,12 +134,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Mouse Look Sensitivity"
                 min="0.0008"
                 max="0.006"
                 step="0.0002"
                 value={settings.mouseSensitivity}
                 onChange={(e) => update('mouseSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none cursor-pointer"
               />
             </div>
 
@@ -133,12 +151,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
               <input
                 type="range"
+                aria-label="Touch Swipe Sensitivity"
                 min="0.001"
                 max="0.008"
                 step="0.0002"
                 value={settings.touchSensitivity}
                 onChange={(e) => update('touchSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none cursor-pointer"
               />
             </div>
           </div>
@@ -151,12 +170,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <input
               type="range"
+              aria-label="Field of View"
               min="80"
               max="115"
               step="1"
               value={settings.fov}
               onChange={(e) => update('fov', parseInt(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none cursor-pointer"
             />
           </div>
 
@@ -168,12 +188,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <input
               type="range"
+              aria-label="Master Volume"
               min="0"
               max="1"
               step="0.05"
               value={settings.volume}
               onChange={(e) => update('volume', parseFloat(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none cursor-pointer"
             />
           </div>
 
