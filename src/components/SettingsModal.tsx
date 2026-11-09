@@ -3,7 +3,7 @@
  * Configures graphics presets (Low/Medium/High/Ultra), FPS limits, sensitivities, and audio.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GameSettings, GraphicsPreset } from '../game/types';
 import { soundEngine } from '../game/audio';
 
@@ -18,6 +18,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onClose,
 }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const update = <K extends keyof GameSettings>(key: K, value: GameSettings[K]) => {
     const updated = { ...settings, [key]: value };
     onUpdateSettings(updated);
@@ -32,12 +43,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none">
-      <div className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tactical-settings-title"
+        className="relative max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl"
+      >
         <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
-          <h2 className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
+          <h2 id="tactical-settings-title" className="text-lg font-black uppercase tracking-widest text-white">TACTICAL SETTINGS</h2>
           <button
             onClick={onClose}
-            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+            aria-label="Save and exit settings"
+            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             Save & Exit
           </button>
@@ -96,8 +113,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div>
               <label className="block text-slate-400 uppercase tracking-wider mb-2 font-bold">FPS Counter</label>
               <button
+                type="button"
+                aria-pressed={settings.showFps}
                 onClick={() => update('showFps', !settings.showFps)}
-                className={`w-full rounded border py-1.5 font-bold uppercase transition cursor-pointer ${
+                className={`w-full rounded border py-1.5 font-bold uppercase transition cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   settings.showFps
                     ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
                     : 'border-slate-800 bg-slate-900/60 text-slate-500'
@@ -112,33 +131,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="space-y-3">
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Mouse Look Sensitivity (PC)</span>
+                <label htmlFor="settings-mouse-sens" className="text-slate-400 uppercase cursor-pointer">Mouse Look Sensitivity (PC)</label>
                 <span className="text-white font-bold">{settings.mouseSensitivity.toFixed(4)}</span>
               </div>
               <input
+                id="settings-mouse-sens"
                 type="range"
                 min="0.0008"
                 max="0.006"
                 step="0.0002"
                 value={settings.mouseSensitivity}
                 onChange={(e) => update('mouseSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400"
               />
             </div>
 
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Touch Swipe Sensitivity (Mobile)</span>
+                <label htmlFor="settings-touch-sens" className="text-slate-400 uppercase cursor-pointer">Touch Swipe Sensitivity (Mobile)</label>
                 <span className="text-white font-bold">{settings.touchSensitivity.toFixed(4)}</span>
               </div>
               <input
+                id="settings-touch-sens"
                 type="range"
                 min="0.001"
                 max="0.008"
                 step="0.0002"
                 value={settings.touchSensitivity}
                 onChange={(e) => update('touchSensitivity', parseFloat(e.target.value))}
-                className="w-full accent-cyan-400 cursor-pointer"
+                className="w-full accent-cyan-400 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400"
               />
             </div>
           </div>
@@ -146,42 +167,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* FOV */}
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-slate-400 uppercase">Field of View (FOV)</span>
+              <label htmlFor="settings-fov" className="text-slate-400 uppercase cursor-pointer">Field of View (FOV)</label>
               <span className="text-white font-bold">{settings.fov}°</span>
             </div>
             <input
+              id="settings-fov"
               type="range"
               min="80"
               max="115"
               step="1"
               value={settings.fov}
               onChange={(e) => update('fov', parseInt(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
           </div>
 
           {/* Audio */}
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-slate-400 uppercase">Master Volume</span>
+              <label htmlFor="settings-volume" className="text-slate-400 uppercase cursor-pointer">Master Volume</label>
               <span className="text-white font-bold">{Math.round(settings.volume * 100)}%</span>
             </div>
             <input
+              id="settings-volume"
               type="range"
               min="0"
               max="1"
               step="0.05"
               value={settings.volume}
               onChange={(e) => update('volume', parseFloat(e.target.value))}
-              className="w-full accent-cyan-400 cursor-pointer"
+              className="w-full accent-cyan-400 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
           </div>
 
           {/* Mobile Assists */}
           <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-3">
             <button
+              type="button"
+              aria-pressed={settings.autoFireMobile}
               onClick={() => update('autoFireMobile', !settings.autoFireMobile)}
-              className={`rounded border p-2 text-left transition cursor-pointer ${
+              className={`rounded border p-2 text-left transition cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 settings.autoFireMobile
                   ? 'border-cyan-500/60 bg-cyan-950/40 text-cyan-300'
                   : 'border-slate-800 bg-slate-900/60 text-slate-400'
@@ -192,8 +217,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
 
             <button
+              type="button"
+              aria-pressed={settings.aimAssistMobile}
               onClick={() => update('aimAssistMobile', !settings.aimAssistMobile)}
-              className={`rounded border p-2 text-left transition cursor-pointer ${
+              className={`rounded border p-2 text-left transition cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 settings.aimAssistMobile
                   ? 'border-cyan-500/60 bg-cyan-950/40 text-cyan-300'
                   : 'border-slate-800 bg-slate-900/60 text-slate-400'
