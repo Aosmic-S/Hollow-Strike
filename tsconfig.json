@@ -23,7 +23,6 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "strict": true,
     "noEmit": true
   },
   "exclude": ["dist"]
