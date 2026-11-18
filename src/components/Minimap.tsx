@@ -15,6 +15,7 @@ interface MinimapProps {
   spikeState: 'not_planted' | 'planted' | 'defused' | 'detonated';
   playerTeam: TeamSide;
   revealedEnemyIds?: Map<string, number>;
+  compact?: boolean;
 }
 
 export const Minimap: React.FC<MinimapProps> = ({
@@ -24,8 +25,10 @@ export const Minimap: React.FC<MinimapProps> = ({
   spikeState,
   playerTeam,
   revealedEnemyIds,
+  compact = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasSize = compact ? 104 : 140;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,7 +37,6 @@ export const Minimap: React.FC<MinimapProps> = ({
     if (!ctx) return;
 
     const mapSize = 92;
-    const canvasSize = 140;
     const scale = canvasSize / mapSize;
     const center = canvasSize / 2;
 
@@ -95,7 +97,7 @@ export const Minimap: React.FC<MinimapProps> = ({
         if (isAlly) {
           ctx.fillStyle = c.isHuman ? '#38bdf8' : '#22c55e';
           ctx.beginPath();
-          ctx.arc(cx, cy, c.isHuman ? 4.5 : 3.5, 0, Math.PI * 2);
+          ctx.arc(cx, cy, c.isHuman ? 4.2 : 3.2, 0, Math.PI * 2);
           ctx.fill();
 
           if (c.isHuman) {
@@ -104,7 +106,7 @@ export const Minimap: React.FC<MinimapProps> = ({
             ctx.lineWidth = 1.75;
             ctx.beginPath();
             ctx.moveTo(cx, cy);
-            ctx.lineTo(cx - Math.sin(c.yaw) * 12, cy - Math.cos(c.yaw) * 12);
+            ctx.lineTo(cx - Math.sin(c.yaw) * (compact ? 9 : 12), cy - Math.cos(c.yaw) * (compact ? 9 : 12));
             ctx.stroke();
           }
         } else {
@@ -113,7 +115,7 @@ export const Minimap: React.FC<MinimapProps> = ({
           if (dist < 28 || isRevealed) {
             ctx.fillStyle = isRevealed ? '#f59e0b' : '#ef4444';
             ctx.beginPath();
-            ctx.arc(cx, cy, isRevealed ? 4.2 : 3.5, 0, Math.PI * 2);
+            ctx.arc(cx, cy, isRevealed ? 4 : 3.2, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -125,7 +127,7 @@ export const Minimap: React.FC<MinimapProps> = ({
         const sy = toCanvasY(spikePosition.z);
         ctx.fillStyle = '#ef4444';
         ctx.beginPath();
-        ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1;
@@ -140,12 +142,12 @@ export const Minimap: React.FC<MinimapProps> = ({
     drawRadar();
     const interval = window.setInterval(drawRadar, 66); // ~15Hz smooth live radar
     return () => window.clearInterval(interval);
-  }, [playerCombatant, allCombatants, spikePosition, spikeState, playerTeam, revealedEnemyIds]);
+  }, [playerCombatant, allCombatants, spikePosition, spikeState, playerTeam, revealedEnemyIds, canvasSize, compact]);
 
   return (
     <div className="relative overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/80 shadow-2xl pointer-events-none">
-      <canvas ref={canvasRef} width={140} height={140} className="block" />
-      <div className="absolute bottom-1 right-1.5 font-mono text-[9px] uppercase tracking-wider text-slate-400">
+      <canvas ref={canvasRef} width={canvasSize} height={canvasSize} className="block" />
+      <div className="absolute bottom-0.5 right-1 font-mono text-[8px] sm:text-[9px] uppercase tracking-wider text-slate-400">
         RADAR
       </div>
     </div>

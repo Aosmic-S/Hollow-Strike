@@ -4,7 +4,7 @@
  * Zero simulated demo data: displays authentic persistent PlayerProfile metrics and custom 5v5 AI squad setup.
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AGENT_REGISTRY,
   AgentDef,
@@ -13,6 +13,7 @@ import {
   MatchMode,
   PlayerProfile,
 } from '../game/types';
+import { formatKeyCode } from '../game/rules';
 import { computeRankProgress } from '../game/profileStore';
 import { PWAInstallButton } from './PWAInstallButton';
 import { SettingsPanel } from './SettingsPanel';
@@ -58,6 +59,16 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   const [queueMode, setQueueMode] = useState<MatchMode>('COMPETITIVE');
   const [activeTab, setActiveTab] = useState<LobbyTab>('PLAY');
   const [botAgentIds, setBotAgentIds] = useState<string[]>(DEFAULT_BOT_AGENTS);
+  const playScrollRef = useRef<HTMLDivElement | null>(null);
+  const startSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToStartMatch = () => {
+    if (startSectionRef.current) {
+      startSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else if (playScrollRef.current) {
+      playScrollRef.current.scrollTo({ top: playScrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  };
 
   const handleStart = async (overrideMode?: MatchMode) => {
     soundEngine.init();
@@ -210,10 +221,29 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
         </div>
       ) : (
-        /* PLAY LOBBY STAGE */
-        <div className="relative z-10 flex flex-1 overflow-hidden px-4 sm:px-6 py-3 gap-4 sm:gap-6">
+        /* PLAY LOBBY STAGE - scrollable vertically on mobile/compact screens so Start Match is always reachable */
+        <div
+          ref={playScrollRef}
+          data-testid="lobby-play-scroll"
+          className="relative z-10 flex flex-1 flex-col md:flex-row overflow-y-auto overscroll-contain px-3 sm:px-6 py-3 gap-4 sm:gap-6"
+        >
+          {/* Mobile / Compact Quick-Scroll Action Banner */}
+          <div className="flex lg:hidden items-center justify-between gap-2 rounded-xl border border-rose-500/40 bg-slate-950/90 px-3 py-2 shrink-0 md:hidden">
+            <span className="font-mono text-[11px] font-bold uppercase text-slate-300 truncate">
+              {queueMode} · {currentAgent.name}
+            </span>
+            <button
+              type="button"
+              data-testid="scroll-to-start-btn"
+              onClick={scrollToStartMatch}
+              className="shrink-0 rounded-lg bg-rose-600 px-3 py-1.5 font-mono text-[11px] font-black uppercase tracking-wider text-white shadow hover:bg-rose-500 active:scale-95 transition cursor-pointer"
+            >
+              ↓ Start Match
+            </button>
+          </div>
+
           {/* LEFT PANEL: Queue & Difficulty */}
-          <div className="flex w-56 sm:w-64 shrink-0 flex-col justify-between border-r border-slate-800/60 pr-4 overflow-y-auto">
+          <div className="flex w-full md:w-56 lg:w-64 shrink-0 flex-col justify-between md:border-r md:border-slate-800/60 md:pr-4">
             <div className="space-y-4">
               <div>
                 <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
@@ -281,8 +311,22 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
 
           {/* CENTER STAGE: 5-Slot Tactical Squad */}
-          <div className="flex flex-1 flex-col items-center justify-between px-2 min-w-0">
-            <div className="my-auto flex items-center justify-center gap-2.5 sm:gap-3.5 w-full max-w-4xl">
+          <div className="flex flex-1 flex-col items-center justify-between gap-3 px-1 sm:px-2 min-w-0 pb-4">
+            <div className="hidden md:flex lg:hidden w-full items-center justify-between rounded-xl border border-rose-500/40 bg-slate-950/90 px-3 py-1.5">
+              <span className="font-mono text-[10px] font-bold uppercase text-slate-300">
+                5V5 TACTICAL SQUAD · SCROLL DOWN FOR MATCH LAUNCH
+              </span>
+              <button
+                type="button"
+                data-testid="scroll-to-start-landscape-btn"
+                onClick={scrollToStartMatch}
+                className="shrink-0 rounded-lg bg-rose-600 px-3 py-1 font-mono text-[11px] font-black uppercase tracking-wider text-white shadow hover:bg-rose-500 active:scale-95 transition cursor-pointer"
+              >
+                ↓ Scroll To Start
+              </button>
+            </div>
+
+            <div className="my-auto flex items-center justify-start md:justify-center gap-2.5 sm:gap-3.5 w-full max-w-4xl overflow-x-auto pb-1">
               {[0, 1, 2, 3, 4].map((idx) => {
                 const member = squadMembers[idx];
 
@@ -297,7 +341,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                           handleCycleBotAgent(member.botIndex);
                         }
                       }}
-                      className="relative flex h-60 sm:h-72 w-32 sm:w-44 flex-col justify-between rounded-2xl border p-3.5 shadow-2xl transition hover:brightness-110 cursor-pointer"
+                      className="relative flex h-56 sm:h-64 lg:h-72 w-32 sm:w-40 lg:w-44 shrink-0 flex-col justify-between rounded-2xl border p-3.5 shadow-2xl transition hover:brightness-110 cursor-pointer"
                       style={{
                         borderColor: `${member.agent.primaryColor}66`,
                         background: `linear-gradient(to bottom, ${member.agent.primaryColor}16, #090d18 82%)`,
@@ -356,7 +400,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   <button
                     key={idx}
                     onClick={handleAddBotSlot}
-                    className="flex h-60 sm:h-72 w-32 sm:w-44 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 transition hover:border-cyan-500/50 hover:bg-slate-900/40 cursor-pointer group"
+                    className="flex h-56 sm:h-64 lg:h-72 w-32 sm:w-40 lg:w-44 shrink-0 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 transition hover:border-cyan-500/50 hover:bg-slate-900/40 cursor-pointer group"
                   >
                     <div className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-800 bg-slate-900 text-slate-500 group-hover:border-cyan-500 group-hover:text-cyan-400 transition">
                       +
@@ -370,7 +414,10 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             </div>
 
             {/* Bottom Action Bar */}
-            <div className="flex items-center gap-3 sm:gap-4 w-full max-w-xl justify-center mb-1">
+            <div
+              ref={startSectionRef}
+              className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 sm:gap-4 w-full max-w-xl justify-center pb-2"
+            >
               <button
                 onClick={() => handleStart('PRACTICE')}
                 className="rounded-xl border border-slate-700 bg-slate-800/80 px-4 sm:px-5 py-3.5 font-mono text-xs font-bold uppercase tracking-wider text-slate-200 hover:bg-slate-700 hover:text-white transition cursor-pointer"
@@ -442,12 +489,38 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   COMBAT CONTROLS
                 </div>
                 <div className="mt-2 space-y-1 text-[11px] text-slate-400">
-                  <div className="flex justify-between"><span>Move / Jump</span><span className="text-slate-200">WASD / Space</span></div>
+                  <div className="flex justify-between">
+                    <span>Move / Jump</span>
+                    <span className="text-slate-200">
+                      {formatKeyCode(settings.keyBindings.moveForward)}
+                      {formatKeyCode(settings.keyBindings.moveLeft)}
+                      {formatKeyCode(settings.keyBindings.moveBackward)}
+                      {formatKeyCode(settings.keyBindings.moveRight)} / {formatKeyCode(settings.keyBindings.jump)}
+                    </span>
+                  </div>
                   <div className="flex justify-between"><span>Fire / ADS</span><span className="text-slate-200">LMB / RMB</span></div>
-                  <div className="flex justify-between"><span>Weapons</span><span className="text-slate-200">1 / 2 · R</span></div>
-                  <div className="flex justify-between"><span>Abilities</span><span className="text-slate-200">Q E C X</span></div>
-                  <div className="flex justify-between"><span>Armory / Map</span><span className="text-slate-200">B / M</span></div>
-                  <div className="flex justify-between"><span>Plant / Defuse</span><span className="text-slate-200">Hold F</span></div>
+                  <div className="flex justify-between">
+                    <span>Weapons</span>
+                    <span className="text-slate-200">
+                      {formatKeyCode(settings.keyBindings.primaryWeapon)} / {formatKeyCode(settings.keyBindings.sidearmWeapon)} · {formatKeyCode(settings.keyBindings.reload)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Abilities</span>
+                    <span className="text-slate-200">
+                      {formatKeyCode(settings.keyBindings.abilityQ)} {formatKeyCode(settings.keyBindings.abilityE)} {formatKeyCode(settings.keyBindings.abilityC)} {formatKeyCode(settings.keyBindings.abilityX)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Armory / Map</span>
+                    <span className="text-slate-200">
+                      {formatKeyCode(settings.keyBindings.buyMenu)} / {formatKeyCode(settings.keyBindings.tacticalMap)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Plant / Defuse</span>
+                    <span className="text-slate-200">Hold {formatKeyCode(settings.keyBindings.plantDefuse)}</span>
+                  </div>
                 </div>
               </div>
             </div>

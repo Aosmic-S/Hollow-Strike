@@ -7,8 +7,13 @@ import {
   checkMatchWin,
   shouldSwapSides,
   calculateSpread,
+  selectNextSpectateTargetId,
+  computeGentleAimAssist,
+  computeBotAimSolution,
+  remapKeyBinding,
+  formatKeyCode,
 } from './rules';
-import { WEAPON_REGISTRY } from './types';
+import { DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY } from './types';
 
 test('calculateDamage handles headshot multiplier and armor absorption correctly', () => {
   const phantom = WEAPON_REGISTRY.PHANTOM_V;
@@ -106,3 +111,112 @@ test('calculateSpread penalizes running and jumping, rewards crouching and ADS',
   assert.ok(crouchSpread < stillSpread, 'Crouching spread should be tighter');
   assert.ok(adsSpread < stillSpread, 'ADS spread should be tighter');
 });
+
+test('selectNextSpectateTargetId cycles alive teammates and wraps cleanly', () => {
+  const candidates = [
+    { id: 'player_0', alive: false, team: 'ATTACKERS' as const, isHuman: true },
+    { id: 'ally_1', alive: true, team: 'ATTACKERS' as const, isHuman: false },
+    { id: 'ally_2', alive: false, team: 'ATTACKERS' as const, isHuman: false },
+    { id: 'ally_3', alive: true, team: 'ATTACKERS' as const, isHuman: false },
+    { id: 'opp_1', alive: true, team: 'DEFENDERS' as const, isHuman: false },
+  ];
+
+  assert.equal(selectNextSpectateTargetId(candidates, 'ATTACKERS', null, 1), 'ally_1');
+  assert.equal(selectNextSpectateTargetId(candidates, 'ATTACKERS', 'ally_1', 1), 'ally_3');
+  assert.equal(selectNextSpectateTargetId(candidates, 'ATTACKERS', 'ally_3', 1), 'ally_1');
+  assert.equal(selectNextSpectateTargetId(candidates, 'ATTACKERS', 'ally_1', -1), 'ally_3');
+
+  const noAllies = candidates.map((c) => (c.team === 'ATTACKERS' ? { ...c, alive: false } : c));
+  assert.equal(selectNextSpectateTargetId(noAllies, 'ATTACKERS', 'ally_1', 1), null);
+});
+
+test('computeGentleAimAssist never fights opposing swipe or vertical headshot adjustments', () => {
+  // Player swiping right (userDeltaX > 0 => userYawIntent < 0) away from target at +yawDiff
+  const away = computeGentleAimAssist({
+    yawDiff: 0.12,
+    pitchDiff: 0.08,
+    userDeltaX: 0.01,
+    userDeltaY: 0,
+    swipeCooldownRemaining: 0,
+    dt: 0.016,
+  });
+  assert.equal(away.yawStep, 0, 'Should not resist player turning away from target');
+
+  // Player fast-flicking
+  const fast = computeGentleAimAssist({
+    yawDiff: 0.12,
+    pitchDiff: 0.08,
+    userDeltaX: -0.04,
+    userDeltaY: 0,
+    swipeCooldownRemaining: 0,
+    dt: 0.016,
+  });
+  assert.equal(fast.yawStep, 0);
+  assert.equal(fast.pitchStep, 0);
+
+  // Cooldown active after fast swipe
+  const cooled = computeGentleAimAssist({
+    yawDiff: 0.12,
+    pitchDiff: 0.08,
+    userDeltaX: 0,
+    userDeltaY: 0,
+    swipeCooldownRemaining: 0.1,
+    dt: 0.016,
+  });
+  assert.equal(cooled.yawStep, 0);
+
+  // Subtle nudge when stationary inside cone, zero vertical pull inside head/chest band
+  const gentle = computeGentleAimAssist({
+    yawDiff: 0.1,
+    pitchDiff: 0.03,
+    userDeltaX: 0,
+    userDeltaY: 0,
+    swipeCooldownRemaining: 0,
+    dt: 0.016,
+  });
+  assert.ok(gentle.yawStep > 0 && gentle.yawStep < 0.01, 'Pull should be subtle and non-jerky');
+  assert.equal(gentle.pitchStep, 0, 'Should leave vertical head/chest aim completely free');
+});
+
+test('computeBotAimSolution aims below head, lowers for crouch, and clamps long-range upward scatter', () => {
+  const standClose = computeBotAimSolution({
+    difficulty: 'MEDIUM',
+    distance: 10,
+    burstShotIndex: 0,
+    targetSpeed: 0,
+    isTargetCrouching: false,
+  });
+  const crouchClose = computeBotAimSolution({
+    difficulty: 'MEDIUM',
+    distance: 10,
+    burstShotIndex: 0,
+    targetSpeed: 0,
+    isTargetCrouching: true,
+  });
+  const standLong = computeBotAimSolution({
+    difficulty: 'HARD',
+    distance: 36,
+    burstShotIndex: 2,
+    targetSpeed: 5.5,
+    isTargetCrouching: false,
+  });
+
+  assert.ok(standClose.targetAimYOffset < 1.25, 'Standing aim should target mid-torso below head');
+  assert.ok(crouchClose.targetAimYOffset < standClose.targetAimYOffset, 'Crouched aim must drop below crouched head height');
+  assert.ok(standLong.spreadYaw > standClose.spreadYaw, 'Long-range moving targets must widen horizontal spread');
+  assert.ok(standLong.spreadPitchUp <= 0.0055, 'Long-range upward pitch jitter must be tightly capped to avoid robotic laser headshots');
+  assert.ok(standLong.maxBurstShots <= 3, 'Long-range engagement should fire controlled bursts');
+});
+
+test('remapKeyBinding swaps conflicting actions cleanly and formatKeyCode formats browser codes', () => {
+  const custom = remapKeyBinding({ ...DEFAULT_KEY_BINDINGS }, 'crouch', 'KeyC');
+  assert.equal(custom.crouch, 'KeyC');
+  assert.equal(custom.abilityC, 'ControlLeft', 'Previous KeyC owner should swap cleanly with Crouch');
+
+  assert.equal(formatKeyCode('KeyW'), 'W');
+  assert.equal(formatKeyCode('ControlLeft'), 'L-CTRL');
+  assert.equal(formatKeyCode('Space'), 'SPACE');
+  assert.equal(formatKeyCode('Digit1'), '1');
+});
+
+

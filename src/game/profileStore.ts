@@ -3,7 +3,7 @@
  * Zero fake/demo data: all metrics start at zero and update strictly from real matches played.
  */
 
-import { GameSettings, MatchRecord, PlayerProfile, WeaponCareerStats } from './types';
+import { DEFAULT_KEY_BINDINGS, GameSettings, MatchRecord, PlayerProfile, WeaponCareerStats } from './types';
 
 const PROFILE_STORAGE_KEY = 'hollow_strike_profile_v1';
 const SETTINGS_STORAGE_KEY = 'hollow_strike_settings_v1';
@@ -178,7 +178,31 @@ export function loadSavedSettings(defaults: GameSettings): GameSettings {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
-    return { ...defaults, ...parsed };
+    const merged: GameSettings = { ...defaults, ...parsed };
+    if (!Number.isFinite(merged.mouseSensitivity) || merged.mouseSensitivity <= 0) {
+      merged.mouseSensitivity = defaults.mouseSensitivity;
+    }
+    if (!Number.isFinite(merged.touchSensitivity) || merged.touchSensitivity <= 0) {
+      merged.touchSensitivity = defaults.touchSensitivity;
+    }
+    if (!Number.isFinite(merged.adsSensitivityMultiplier) || merged.adsSensitivityMultiplier <= 0) {
+      merged.adsSensitivityMultiplier = defaults.adsSensitivityMultiplier;
+    }
+    if (!Number.isFinite(merged.fov) || merged.fov < 60 || merged.fov > 130) {
+      merged.fov = defaults.fov;
+    }
+    if (!Number.isFinite(merged.touchScale) || merged.touchScale < 0.5 || merged.touchScale > 2.0) {
+      merged.touchScale = defaults.touchScale;
+    }
+    if (!Number.isFinite(merged.touchOpacity) || merged.touchOpacity < 0.2 || merged.touchOpacity > 1.0) {
+      merged.touchOpacity = defaults.touchOpacity;
+    }
+    merged.keyBindings = {
+      ...DEFAULT_KEY_BINDINGS,
+      ...(defaults.keyBindings ?? {}),
+      ...(parsed.keyBindings ?? {}),
+    };
+    return merged;
   } catch {
     return defaults;
   }

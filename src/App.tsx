@@ -20,6 +20,7 @@ import {
   AbilitySlotState,
   AGENT_REGISTRY,
   BotDifficulty,
+  DEFAULT_KEY_BINDINGS,
   GameSettings,
   HitFeedback,
   KillEvent,
@@ -27,6 +28,7 @@ import {
   PlayerProfile,
   PlayerStats,
   RoundPhase,
+  SpectateState,
   TeamSide,
   WEAPON_REGISTRY,
   WeaponDef,
@@ -73,6 +75,7 @@ export default function App() {
       touchScale: 1.0,
       touchOpacity: 0.85,
       controlMode: 'AUTO',
+      keyBindings: { ...DEFAULT_KEY_BINDINGS },
     });
   });
 
@@ -111,6 +114,7 @@ export default function App() {
   const [isPointerLocked, setIsPointerLocked] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(60);
   const [matchWinner, setMatchWinner] = useState<TeamSide | null>(null);
+  const [spectateState, setSpectateState] = useState<SpectateState | null>(null);
 
   // Spike States
   const [spikeState, setSpikeState] = useState<'not_planted' | 'planted' | 'defused' | 'detonated'>('not_planted');
@@ -208,6 +212,7 @@ export default function App() {
     setShowSettings(false);
     setIsBlinded(false);
     setDamageFlash(false);
+    setSpectateState(null);
 
     if (canvasMountRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
@@ -268,6 +273,7 @@ export default function App() {
             setIsPointerLocked(locked);
           },
           onFpsUpdate: (currentFps) => setFps(currentFps),
+          onSpectateUpdate: (nextSpectate) => setSpectateState(nextSpectate),
           onMatchOver: (winner, summary) => {
             setMatchWinner(winner);
             setAppState('gameover');
@@ -279,19 +285,20 @@ export default function App() {
     }
   };
 
-  // Keyboard shortcut listener for B (Buy Menu), M (Map), Tab (Scoreboard), Esc/P (Pause)
+  // Keyboard shortcut listener honoring custom KeyBindings
   useEffect(() => {
+    const kb = settings.keyBindings;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (appState !== 'playing') return;
+      if (appState !== 'playing' || document.body.dataset.rebinding === '1') return;
 
-      if (e.code === 'KeyB') {
+      if (e.code === kb.buyMenu) {
         setShowBuyMenu((prev) => !prev);
-      } else if (e.code === 'KeyM') {
+      } else if (e.code === kb.tacticalMap) {
         setShowMapModal((prev) => !prev);
-      } else if (e.code === 'Tab') {
+      } else if (e.code === kb.scoreboard) {
         e.preventDefault();
         setShowScoreboard(true);
-      } else if (e.code === 'Escape' || e.code === 'KeyP') {
+      } else if (e.code === 'Escape' || e.code === kb.pause) {
         if (showBuyMenu) {
           setShowBuyMenu(false);
         } else if (showMapModal) {
@@ -308,7 +315,7 @@ export default function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Tab') {
+      if (e.code === kb.scoreboard) {
         setShowScoreboard(false);
       }
     };
@@ -319,7 +326,19 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings]);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, settings.keyBindings]);
+
+  const handleOpenInGameSettings = () => {
+    setShowSettings(true);
+    engineRef.current?.setPaused(true);
+  };
+
+  const handleCloseSettings = () => {
+    setShowSettings(false);
+    if (appState === 'playing') {
+      engineRef.current?.setPaused(false);
+    }
+  };
 
   const handleResumeGame = () => {
     setAppState('playing');
@@ -342,6 +361,7 @@ export default function App() {
     setShowSettings(false);
     setIsBlinded(false);
     setDamageFlash(false);
+    setSpectateState(null);
   };
 
   const handlePlayAgain = () => {
@@ -352,6 +372,7 @@ export default function App() {
     setCurrentRound(1);
     setKillFeed([]);
     setMatchWinner(null);
+    setSpectateState(null);
     startGame(lastMatchMode);
   };
 
@@ -442,16 +463,21 @@ export default function App() {
             revealedEnemyIds={engineRef.current.abilityMgr.revealedEnemyIds}
             fps={fps}
             showFps={settings.showFps}
+            spectateState={spectateState}
             onTriggerAbility={(slot) => engineRef.current?.input.triggerMobileAbility(slot)}
             onSwitchWeapon={(slot) => engineRef.current?.switchWeaponSlot(slot)}
             onSkipBuyPhase={() => engineRef.current?.skipBuyPhase()}
             onOpenBuyMenu={() => setShowBuyMenu(true)}
             onOpenMap={() => setShowMapModal(true)}
             onOpenScoreboard={() => setShowScoreboard(true)}
+            onOpenSettings={handleOpenInGameSettings}
             onOpenPause={() => {
               setAppState('paused');
               engineRef.current?.setPaused(true);
             }}
+            onSpectatePrev={() => engineRef.current?.cycleSpectateTarget(-1)}
+            onSpectateNext={() => engineRef.current?.cycleSpectateTarget(1)}
+            onToggleSpectateMode={() => engineRef.current?.toggleSpectateMode()}
           />
 
           {/* Mobile Virtual Controls */}
@@ -468,6 +494,13 @@ export default function App() {
               onSkipBuyPhase={() => engineRef.current?.skipBuyPhase()}
               onOpenBuyMenu={() => setShowBuyMenu(true)}
               onOpenMap={() => setShowMapModal(true)}
+              onOpenSettings={handleOpenInGameSettings}
+              onOpenScoreboard={() => setShowScoreboard(true)}
+              onOpenPause={() => {
+                setAppState('paused');
+                engineRef.current?.setPaused(true);
+              }}
+              isSpectating={Boolean(spectateState?.active)}
               canPlantOrDefuse={
                 (engineRef.current.playerCombatant.team === 'ATTACKERS' &&
                   engineRef.current.playerCombatant.hasSpike &&
@@ -534,7 +567,7 @@ export default function App() {
         <SettingsModal
           settings={settings}
           onUpdateSettings={handleUpdateSettings}
-          onClose={() => setShowSettings(false)}
+          onClose={handleCloseSettings}
         />
       )}
 

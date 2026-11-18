@@ -7,6 +7,7 @@
 import React from 'react';
 import {
   AbilitySlotState,
+  AGENT_REGISTRY,
   AgentDef,
   CrosshairColor,
   CrosshairSize,
@@ -14,6 +15,7 @@ import {
   KillEvent,
   PlayerStats,
   RoundPhase,
+  SpectateState,
   WeaponDef,
 } from '../game/types';
 import { Minimap } from './Minimap';
@@ -56,13 +58,18 @@ interface GameHUDProps {
   revealedEnemyIds?: Map<string, number>;
   fps: number;
   showFps: boolean;
+  spectateState?: SpectateState | null;
   onTriggerAbility: (slot: 'Q' | 'E' | 'C' | 'X') => void;
   onSwitchWeapon: (slot: 1 | 2) => void;
   onSkipBuyPhase: () => void;
   onOpenBuyMenu: () => void;
   onOpenMap: () => void;
   onOpenScoreboard: () => void;
+  onOpenSettings: () => void;
   onOpenPause: () => void;
+  onSpectatePrev?: () => void;
+  onSpectateNext?: () => void;
+  onToggleSpectateMode?: () => void;
 }
 
 const CROSSHAIR_HEX: Record<CrosshairColor, string> = {
@@ -109,14 +116,20 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   revealedEnemyIds,
   fps,
   showFps,
+  spectateState = null,
   onTriggerAbility,
   onSwitchWeapon,
   onSkipBuyPhase,
   onOpenBuyMenu,
   onOpenMap,
   onOpenScoreboard,
+  onOpenSettings,
   onOpenPause,
+  onSpectatePrev,
+  onSpectateNext,
+  onToggleSpectateMode,
 }) => {
+  const isSpectating = Boolean(spectateState?.active);
   const aliveAttackers = allCombatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
   const aliveDefenders = allCombatants.filter((c) => c.alive && c.team === 'DEFENDERS').length;
 
@@ -125,7 +138,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const chGap = crosshairSize === 'small' ? 4 : crosshairSize === 'large' ? 7 : 5;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-3 select-none">
+    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-2 sm:p-3 select-none">
       {/* Incoming Damage Crimson Edge Vignette */}
       {damageFlash && (
         <div className="fixed inset-0 z-40 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_45%,rgba(220,38,38,0.52)_100%)] transition-opacity duration-150" />
@@ -137,12 +150,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       )}
 
       {/* Top Bar: Minimap, Score Banner, Kill Feed */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-2">
         {/* Left: Minimap (Clickable to expand) & Team alive counters */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-1 flex-col gap-1 sm:gap-2 items-start">
           <div
             onClick={onOpenMap}
-            className="pointer-events-auto cursor-pointer hover:opacity-90 transition group relative"
+            className="pointer-events-auto cursor-pointer hover:opacity-90 transition group relative self-start"
             title="Click to expand Tactical Map [M]"
           >
             <Minimap
@@ -152,20 +165,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               spikeState={spikeState}
               playerTeam={playerCombatant.team}
               revealedEnemyIds={revealedEnemyIds}
+              compact={isMobile}
             />
-            <div className="absolute top-1 right-1.5 font-mono text-[8px] font-bold uppercase text-cyan-300 bg-slate-900/90 px-1 rounded">
-              TAP MAP [M]
+            <div className="absolute top-1 right-1 font-mono text-[8px] font-bold uppercase text-cyan-300 bg-slate-900/90 px-1 rounded">
+              {isMobile ? 'MAP' : 'TAP MAP [M]'}
             </div>
           </div>
 
-          <div className="flex items-center gap-3 rounded bg-slate-950/80 px-2.5 py-1 text-[11px] font-mono border border-slate-800">
+          <div className="flex items-center gap-2 sm:gap-3 rounded bg-slate-950/80 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-mono border border-slate-800">
             <div className="flex items-center gap-1 text-red-400">
               <span className="font-bold">ATT</span>
               <div className="flex gap-0.5">
                 {[...Array(5)].map((_, i) => (
                   <span
                     key={i}
-                    className={`h-2 w-2 rounded-sm ${i < aliveAttackers ? 'bg-red-500' : 'bg-slate-800'}`}
+                    className={`h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-sm ${i < aliveAttackers ? 'bg-red-500' : 'bg-slate-800'}`}
                   />
                 ))}
               </div>
@@ -178,7 +192,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 {[...Array(5)].map((_, i) => (
                   <span
                     key={i}
-                    className={`h-2 w-2 rounded-sm ${i < aliveDefenders ? 'bg-blue-500' : 'bg-slate-800'}`}
+                    className={`h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-sm ${i < aliveDefenders ? 'bg-blue-500' : 'bg-slate-800'}`}
                   />
                 ))}
               </div>
@@ -189,114 +203,133 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
         {/* Center: Tactical Scoreboard & Round Timer */}
         <div className="flex flex-col items-center">
-          <div className="flex items-center rounded-lg border border-slate-800 bg-slate-950/90 shadow-2xl px-4 py-1.5 gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono font-bold text-red-400 uppercase">ATT</span>
-              <span className="font-mono text-xl font-black text-white tabular-nums">{attackerRoundsWon}</span>
+          <div
+            className={`flex items-center rounded-lg border border-slate-800 bg-slate-950/90 shadow-2xl ${
+              isMobile ? 'px-2.5 py-1 gap-2.5' : 'px-4 py-1.5 gap-4'
+            }`}
+          >
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="text-[10px] sm:text-xs font-mono font-bold text-red-400 uppercase">ATT</span>
+              <span className={`font-mono font-black text-white tabular-nums ${isMobile ? 'text-base' : 'text-xl'}`}>
+                {attackerRoundsWon}
+              </span>
             </div>
 
-            <div className="flex flex-col items-center border-x border-slate-800 px-4">
+            <div className={`flex flex-col items-center border-x border-slate-800 ${isMobile ? 'px-2.5' : 'px-4'}`}>
               {spikeState === 'planted' ? (
-                <div className="flex items-center gap-1.5 text-red-500 font-mono font-black text-lg animate-pulse">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                <div className="flex items-center gap-1 text-red-500 font-mono font-black text-base sm:text-lg animate-pulse">
+                  <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
                   </svg>
                   <span>{Math.max(0, spikeTimer).toFixed(1)}s</span>
                 </div>
               ) : (
-                <div className="font-mono text-xl font-black text-white tabular-nums">
+                <div className={`font-mono font-black text-white tabular-nums ${isMobile ? 'text-base' : 'text-xl'}`}>
                   {Math.floor(roundTimeRemaining / 60)}:
                   {Math.floor(roundTimeRemaining % 60).toString().padStart(2, '0')}
                 </div>
               )}
-              <span className="text-[9px] font-mono uppercase tracking-wider text-slate-400">
+              <span className="text-[8px] sm:text-[9px] font-mono uppercase tracking-wider text-slate-400">
                 {roundPhase === 'BUY_PHASE'
                   ? 'BUY PHASE'
                   : roundPhase === 'SPIKE_PLANTED'
                     ? 'DETONATING'
                     : roundPhase === 'ROUND_END'
                       ? 'ROUND OVER'
-                      : `ROUND ${currentRound}`}
+                      : `RND ${currentRound}`}
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xl font-black text-white tabular-nums">{defenderRoundsWon}</span>
-              <span className="text-xs font-mono font-bold text-blue-400 uppercase">DEF</span>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className={`font-mono font-black text-white tabular-nums ${isMobile ? 'text-base' : 'text-xl'}`}>
+                {defenderRoundsWon}
+              </span>
+              <span className="text-[10px] sm:text-xs font-mono font-bold text-blue-400 uppercase">DEF</span>
             </div>
           </div>
 
           {/* Buy Phase Banner with Skip Button */}
           {roundPhase === 'BUY_PHASE' && (
-            <div className="pointer-events-auto mt-1.5 flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-950/75 px-3 py-1 text-[11px] font-mono text-amber-200 shadow-lg">
-              <span>BUY PHASE · WEAPONS LOCKED BEHIND BARRIER</span>
+            <div className="pointer-events-auto relative z-40 mt-1 flex items-center gap-1.5 sm:gap-2 rounded-lg border border-amber-500/50 bg-amber-950/80 px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] font-mono text-amber-200 shadow-lg">
+              {!isMobile && <span className="hidden md:inline">BUY PHASE · WEAPONS LOCKED BEHIND BARRIER</span>}
+              {isMobile && <span>BUY</span>}
               <button
                 onClick={onOpenBuyMenu}
                 className="rounded border border-amber-400/60 bg-amber-500/20 px-2 py-0.5 font-bold text-amber-200 hover:bg-amber-500/40 cursor-pointer"
               >
-                [B] SHOP
+                {isMobile ? 'SHOP' : '[B] SHOP'}
               </button>
               <button
                 onClick={onSkipBuyPhase}
                 className="rounded bg-emerald-500 px-2 py-0.5 font-black text-slate-950 hover:bg-emerald-400 cursor-pointer"
               >
-                START FIGHT [G]
+                {isMobile ? 'START FIGHT' : 'START FIGHT [G]'}
               </button>
             </div>
           )}
 
           {/* Desktop aim lock hint */}
-          {!isMobile && !isPointerLocked && roundPhase !== 'BUY_PHASE' && (
+          {!isMobile && !isPointerLocked && roundPhase !== 'BUY_PHASE' && !isSpectating && (
             <div className="mt-1.5 rounded border border-cyan-500/40 bg-slate-950/80 px-2.5 py-0.5 font-mono text-[10px] text-cyan-300">
               CLICK GAME VIEW TO LOCK AIM · OR DRAG TO LOOK
             </div>
           )}
         </div>
 
-        {/* Right: Kill Feed & Controls */}
-        <div className="flex flex-col items-end gap-2">
-          <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950/80 p-1">
-            {showFps && (
-              <span className="font-mono text-[10px] text-cyan-400 px-2 font-bold tabular-nums">{fps} FPS</span>
-            )}
-            <button
-              onClick={onOpenBuyMenu}
-              className="rounded px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-amber-300 bg-amber-950/40 border border-amber-500/40 hover:bg-amber-900/60 transition cursor-pointer"
-            >
-              Armory [B]
-            </button>
-            <button
-              onClick={onOpenMap}
-              className="rounded px-2 py-1 text-[10px] font-mono font-bold uppercase text-cyan-300 bg-cyan-950/40 border border-cyan-500/40 hover:bg-cyan-900/60 transition cursor-pointer"
-            >
-              Map [M]
-            </button>
-            <button
-              onClick={onOpenScoreboard}
-              className="rounded px-2 py-1 text-[10px] font-mono uppercase text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
-            >
-              Scores [Tab]
-            </button>
-            <button
-              onClick={onOpenPause}
-              className="rounded px-2 py-1 text-[10px] font-mono uppercase text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
-            >
-              Pause [Esc]
-            </button>
-          </div>
+        {/* Right: Kill Feed & Desktop Controls (Mobile uses MobileControls top-right bar) */}
+        <div className="flex flex-1 flex-col items-end gap-2">
+          {!isMobile && (
+            <div className="pointer-events-auto relative z-40 flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-950/85 p-1">
+              {showFps && (
+                <span className="font-mono text-[10px] text-cyan-400 px-2 font-bold tabular-nums">{fps} FPS</span>
+              )}
+              <button
+                onClick={onOpenBuyMenu}
+                className="rounded px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-amber-300 bg-amber-950/40 border border-amber-500/40 hover:bg-amber-900/60 transition cursor-pointer"
+              >
+                Armory [B]
+              </button>
+              <button
+                onClick={onOpenMap}
+                className="rounded px-2 py-1 text-[10px] font-mono font-bold uppercase text-cyan-300 bg-cyan-950/40 border border-cyan-500/40 hover:bg-cyan-900/60 transition cursor-pointer"
+              >
+                Map [M]
+              </button>
+              <button
+                onClick={onOpenScoreboard}
+                className="rounded px-2 py-1 text-[10px] font-mono uppercase text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
+              >
+                Scores [Tab]
+              </button>
+              <button
+                onClick={onOpenSettings}
+                className="rounded px-2 py-1 text-[10px] font-mono uppercase text-cyan-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
+              >
+                Settings
+              </button>
+              <button
+                onClick={onOpenPause}
+                className="rounded px-2 py-1 text-[10px] font-mono uppercase text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
+              >
+                Pause [Esc]
+              </button>
+            </div>
+          )}
 
-          <div className="flex flex-col gap-1 w-64">
-            {killFeed.slice(-4).map((k) => (
+          <div className={`flex flex-col gap-1 ${isMobile ? 'mt-12 items-end max-w-[52vw]' : 'w-64'}`}>
+            {killFeed.slice(isMobile ? -2 : -4).map((k) => (
               <div
                 key={k.id}
-                className="flex items-center justify-end gap-1.5 rounded bg-slate-950/85 px-2 py-1 text-[11px] font-mono border border-slate-800 shadow"
+                className={`flex items-center justify-end gap-1 rounded bg-slate-950/85 border border-slate-800 shadow font-mono whitespace-nowrap ${
+                  isMobile ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-1 text-[11px] gap-1.5'
+                }`}
               >
                 <span className={k.killerTeam === 'ATTACKERS' ? 'text-red-400 font-bold' : 'text-blue-400 font-bold'}>
                   {k.killerName}
                 </span>
-                <span className="text-slate-400 text-[10px]">[{k.weaponName}]</span>
+                <span className="text-slate-400 text-[9px]">[{k.weaponName}]</span>
                 {k.isHeadshot && (
-                  <span className="text-amber-400 font-bold text-[10px]" title="Headshot">
+                  <span className="text-amber-400 font-bold text-[9px]" title="Headshot">
                     HS
                   </span>
                 )}
@@ -309,7 +342,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Center Screen: Reticle, Crisp X-Hitmarker & Live Damage Popup */}
+      {/* Center Screen: Reticle, Crisp X-Hitmarker & Live Damage Popup (hidden when spectating) */}
+      {!isSpectating && (
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="relative flex items-center justify-center">
           <div
@@ -418,8 +452,119 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         )}
       </div>
+      )}
 
-      {/* Bottom Row: Vitality Cluster (Left), Live Abilities Bar (Center), Weapon/Ammo (Right) */}
+      {/* Bottom Row: Spectator Card (when dead) OR Mobile Centered Strip OR Desktop Vitality/Abilities/Weapon */}
+      {isSpectating && spectateState ? (
+        <div className="pointer-events-auto relative z-40 mx-auto mb-1 sm:mb-2 w-full max-w-lg sm:max-w-xl">
+          <div
+            data-testid="spectator-hud"
+            className="rounded-xl border border-cyan-500/40 bg-slate-950/92 px-3 py-2 sm:px-4 sm:py-3 shadow-2xl font-mono"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-1.5 sm:pb-2">
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-rose-600/90 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
+                  ELIMINATED · SPECTATING
+                </span>
+                {spectateState.practiceRespawnIn > 0 && (
+                  <span className="rounded bg-emerald-600/80 px-2 py-0.5 text-[10px] font-black uppercase text-white tabular-nums">
+                    RESPAWN IN {spectateState.practiceRespawnIn}S
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 uppercase">
+                {spectateState.aliveTeammatesCount > 0
+                  ? `${spectateState.aliveTeammatesCount} ALLY ALIVE`
+                  : 'ROUND ENDING'}
+              </span>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+              <div className="flex items-center gap-2.5 sm:gap-3">
+                <div
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-lg border text-base sm:text-lg font-black"
+                  style={{
+                    borderColor: AGENT_REGISTRY[spectateState.agentId]?.primaryColor || '#06b6d4',
+                    color: AGENT_REGISTRY[spectateState.agentId]?.primaryColor || '#06b6d4',
+                    backgroundColor: '#0f172a',
+                  }}
+                >
+                  {spectateState.targetName[0] || 'A'}
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-black text-white">{spectateState.targetName}</div>
+                  <div className="text-[10px] sm:text-[11px] text-slate-400">
+                    {AGENT_REGISTRY[spectateState.agentId]?.name ?? spectateState.agentId} ·{' '}
+                    <span className="text-emerald-400 font-bold">{spectateState.hp} HP</span> ·{' '}
+                    <span className="text-cyan-400 font-bold">{spectateState.armor} AP</span> ·{' '}
+                    <span className="text-slate-200">{spectateState.weaponName}</span> ({spectateState.ammoInMag}/{spectateState.reserveAmmo})
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onSpectatePrev}
+                  className="min-h-10 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-bold uppercase text-slate-200 hover:border-cyan-400 cursor-pointer"
+                >
+                  ◀ PREV
+                </button>
+                <button
+                  type="button"
+                  onClick={onToggleSpectateMode}
+                  className="min-h-10 rounded-lg border border-cyan-500/60 bg-cyan-950/60 px-3 py-1.5 text-[11px] font-black uppercase text-cyan-300 hover:bg-cyan-900/70 cursor-pointer"
+                >
+                  {spectateState.mode === 'THIRD_PERSON' ? '3P CAM' : '1P CAM'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onSpectateNext}
+                  className="min-h-10 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-bold uppercase text-slate-200 hover:border-cyan-400 cursor-pointer"
+                >
+                  NEXT ▶
+                </button>
+              </div>
+            </div>
+
+            {!isMobile && (
+              <div className="mt-2 text-[10px] text-slate-500 uppercase tracking-wider">
+                Controls: [A / ←] Prev · [D / → / Click] Next · [V / Space] Toggle 3P/1P Camera
+              </div>
+            )}
+          </div>
+        </div>
+      ) : isMobile ? (
+        /* Compact bottom-center strip for mobile so Joystick (left) and Buttons (right) never overlap HUD */
+        <div className="pointer-events-none mx-auto mb-0.5 flex items-center gap-2.5 rounded-xl border border-slate-800/90 bg-slate-950/90 px-3 py-1.5 shadow-2xl font-mono">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] uppercase text-slate-400">HP</span>
+            <span className={`text-lg font-black tabular-nums leading-none ${hp > 30 ? 'text-white' : 'text-red-500'}`}>
+              {hp}
+            </span>
+          </div>
+          <div className="h-4 w-px bg-slate-800" />
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] uppercase text-slate-400">AP</span>
+            <span className="text-sm font-black text-cyan-400 tabular-nums leading-none">{armor}</span>
+          </div>
+          <div className="h-4 w-px bg-slate-800" />
+          <span className="text-xs font-bold text-emerald-400 tabular-nums leading-none">
+            ${credits.toLocaleString()}
+          </span>
+          <div className="h-4 w-px bg-slate-800" />
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] font-bold uppercase text-slate-300 max-w-[74px] truncate">{weapon.name}</span>
+            {isReloading ? (
+              <span className="text-[10px] font-bold text-amber-400 uppercase animate-pulse">RLD</span>
+            ) : (
+              <span className={`text-sm font-black tabular-nums leading-none ${ammoInMag <= 4 ? 'text-red-400' : 'text-white'}`}>
+                {ammoInMag}<span className="text-[10px] font-normal text-slate-400">/{reserveAmmo}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="flex items-end justify-between">
         {/* Vitality & Armor */}
         <div className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/90 p-3 shadow-2xl">
@@ -460,7 +605,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
 
         {/* Center: Live Agent Abilities Bar (Desktop interactive + live charges/CD/Ult) */}
-        <div className="pointer-events-auto hidden md:flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/90 p-2 shadow-2xl">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/90 p-2 shadow-2xl">
           {agent.abilities.map((ab) => {
             const st = abilityStates.find((s) => s.keySlot === ab.keySlot);
             const onCd = (st?.cooldownRemaining ?? 0) > 0.05;
@@ -516,7 +661,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
 
         {/* Right: Weapon & Ammo Readout + Quick Slot Switch */}
-        <div className="pointer-events-auto flex items-center gap-3 sm:gap-4 rounded-lg border border-slate-800 bg-slate-950/90 p-2.5 sm:p-3 shadow-2xl mb-1 sm:mb-0 mr-1 sm:mr-0">
+        <div className="pointer-events-auto flex items-center gap-3 sm:gap-4 rounded-lg border border-slate-800 bg-slate-950/90 p-2.5 sm:p-3 shadow-2xl">
           {hasPrimaryWeapon && (
             <div className="hidden sm:flex flex-col gap-1 border-r border-slate-800 pr-3 font-mono text-[10px]">
               <button
@@ -563,6 +708,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

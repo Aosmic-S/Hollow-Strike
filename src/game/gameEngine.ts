@@ -27,8 +27,19 @@ import {
   ROUND_END_DURATION,
   HALF_TIME_ROUND,
   WeaponDef,
+  SpectateCameraMode,
+  SpectateState,
 } from './types';
-import { calculateDamage, calculateEconomy, checkRoundWin, checkMatchWin, shouldSwapSides, calculateSpread } from './rules';
+import {
+  calculateDamage,
+  calculateEconomy,
+  checkRoundWin,
+  checkMatchWin,
+  shouldSwapSides,
+  calculateSpread,
+  selectNextSpectateTargetId,
+  computeGentleAimAssist,
+} from './rules';
 import { buildTacticalMap, BuiltMap } from './mapBuilder';
 import { BOMB_SITE_A, BOMB_SITE_B, SPAWN_ATTACKERS, SPAWN_DEFENDERS, checkCollision } from './mapData';
 import { createAgentModel } from './agentModels';
@@ -80,6 +91,7 @@ export interface EngineCallbacks {
   onFpsUpdate: (fps: number) => void;
   onMatchOver: (winner: TeamSide, summary: MatchSummaryPayload) => void;
   onPointerLockLost?: () => void;
+  onSpectateUpdate?: (state: SpectateState | null) => void;
 }
 
 export class GameEngine {
@@ -163,7 +175,7 @@ export class GameEngine {
   private lastNotifiedRoundSecond: number = -1;
   private lastNotifiedSpikeKey: string = '';
 
-  // Runtime Tracking
+  // Runtime & Spectator Tracking
   private frameId: number = 0;
   private lastTime: number = 0;
   private lastRenderTime: number = 0;
@@ -172,6 +184,15 @@ export class GameEngine {
   private callbacks: EngineCallbacks;
   private fpsCounter: number = 0;
   private fpsTimer: number = 0;
+
+  private spectateTargetId: string | null = null;
+  private spectateMode: SpectateCameraMode = 'THIRD_PERSON';
+  private spectateOrbitYawOffset: number = 0;
+  private spectateOrbitPitch: number = 0.22;
+  private practiceRespawnTimer: number = 0;
+  private lastSpectateKey: string = '';
+  private deathCamAnchor: THREE.Vector3 = new THREE.Vector3();
+  private aimAssistSwipeCooldown: number = 0;
 
   constructor(
     mountElement: HTMLElement,
@@ -184,7 +205,7 @@ export class GameEngine {
     this.settings = settings;
     this.callbacks = callbacks;
     this.matchMode = matchMode;
-    this.input = new InputManager(settings.controlMode);
+    this.input = new InputManager(settings.controlMode, settings.keyBindings);
 
     // 1. Scene & Atmosphere Setup
     this.scene = new THREE.Scene();
@@ -404,6 +425,25 @@ export class GameEngine {
     }
   }
 
+  public cycleSpectateTarget(direction: 1 | -1): void {
+    if (this.playerCombatant.alive) return;
+    this.spectateTargetId = selectNextSpectateTargetId(
+      this.combatants,
+      this.playerTeam,
+      this.spectateTargetId,
+      direction
+    );
+    this.spectateOrbitYawOffset = 0;
+    this.emitSpectateState(true);
+  }
+
+  public toggleSpectateMode(): void {
+    if (this.playerCombatant.alive) return;
+    this.spectateMode = this.spectateMode === 'THIRD_PERSON' ? 'FIRST_PERSON' : 'THIRD_PERSON';
+    this.spectateOrbitYawOffset = 0;
+    this.emitSpectateState(true);
+  }
+
   public updateSettings(newSettings: GameSettings): void {
     this.settings = newSettings;
     this.camera.fov = newSettings.fov;
@@ -414,6 +454,7 @@ export class GameEngine {
     this.input.touchSensitivity = newSettings.touchSensitivity;
     this.input.adsSensitivityMultiplier = newSettings.adsSensitivityMultiplier ?? 0.7;
     this.input.invertY = newSettings.invertY ?? false;
+    this.input.setKeyBindings(newSettings.keyBindings);
     this.input.detectDevice(newSettings.controlMode);
     this.applyGraphicsPreset(newSettings.graphics);
   }
@@ -824,7 +865,12 @@ export class GameEngine {
     }
 
     this.updateRoundState(dt);
-    this.updatePlayer(dt);
+
+    if (this.playerCombatant.alive) {
+      this.updatePlayer(dt);
+    } else {
+      this.updateSpectator(dt);
+    }
 
     // Bots stay put during BUY_PHASE
     if (this.roundPhase !== 'BUY_PHASE') {
@@ -852,14 +898,19 @@ export class GameEngine {
     );
 
     // Notify HUD if player blind state changed
-    const isBlinded = this.abilityMgr.blindedCombatantIds.has(this.playerCombatant.id);
+    const isBlinded = this.playerCombatant.alive && this.abilityMgr.blindedCombatantIds.has(this.playerCombatant.id);
     if (isBlinded !== this.wasBlinded) {
       this.wasBlinded = isBlinded;
       this.callbacks.onBlindStateChange?.(isBlinded);
     }
 
     this.updateTracersAndSparks(dt);
-    this.updateCameraEffects(dt);
+    if (this.playerCombatant.alive) {
+      this.updateCameraEffects(dt);
+    } else {
+      this.camera.rotation.z = 0;
+      this.cameraShakeTrauma = Math.max(0, this.cameraShakeTrauma - dt * 2.5);
+    }
     this.input.clearFrameDeltas();
   }
 
@@ -1086,7 +1137,8 @@ export class GameEngine {
     const targetEye = this.input.state.crouchHeld ? 1.08 : 1.65;
     this.playerEyeHeight = THREE.MathUtils.damp(this.playerEyeHeight, targetEye, 16, dt);
 
-    // CRITICAL: Keep player's 3rd-person hitbox rig synchronized with live player transform so enemies hit the player
+    // CRITICAL: Keep player's 3rd-person hitbox rig & crouch state synchronized so enemies aim realistically
+    p.isCrouching = this.input.state.crouchHeld;
     p.modelPackage.root.position.copy(p.position);
     p.modelPackage.root.rotation.y = p.yaw;
     p.modelPackage.updateAnimation(
@@ -1180,23 +1232,247 @@ export class GameEngine {
     this.updatePlayerAbilities();
   }
 
+  private updateSpectator(dt: number): void {
+    const p = this.playerCombatant;
+    this.viewmodelRig.visible = false;
+
+    // Practice Mode auto-respawn countdown
+    if (this.matchMode === 'PRACTICE') {
+      this.practiceRespawnTimer = Math.max(0, this.practiceRespawnTimer - dt);
+      if (this.practiceRespawnTimer <= 0) {
+        this.respawnPlayerForPractice();
+        return;
+      }
+    }
+
+    // Input controls while spectating
+    if (this.input.state.spectateNextJustPressed || this.input.state.fireJustPressed) {
+      this.cycleSpectateTarget(1);
+    } else if (this.input.state.spectatePrevJustPressed) {
+      this.cycleSpectateTarget(-1);
+    }
+
+    if (this.input.state.spectateModeJustPressed || this.input.state.jumpJustPressed) {
+      this.toggleSpectateMode();
+    }
+
+    // Free orbit adjustment in 3rd-person spectate
+    if (this.spectateMode === 'THIRD_PERSON') {
+      this.spectateOrbitYawOffset -= this.input.state.lookDeltaX;
+      this.spectateOrbitPitch = THREE.MathUtils.clamp(
+        this.spectateOrbitPitch - this.input.state.lookDeltaY,
+        -0.25,
+        1.1
+      );
+    }
+
+    // Ensure current target is valid and alive; otherwise pick next alive teammate
+    let target = this.spectateTargetId
+      ? this.combatants.find((c) => c.id === this.spectateTargetId && c.alive && c.team === p.team)
+      : undefined;
+
+    if (!target) {
+      this.spectateTargetId = selectNextSpectateTargetId(this.combatants, p.team, null, 1);
+      target = this.spectateTargetId
+        ? this.combatants.find((c) => c.id === this.spectateTargetId)
+        : undefined;
+    }
+
+    if (target) {
+      if (this.spectateMode === 'FIRST_PERSON') {
+        // Place camera slightly ahead of target eye to avoid clipping inside own head mesh
+        const sin = Math.sin(target.yaw);
+        const cos = Math.cos(target.yaw);
+        _vec3_1.set(
+          target.position.x - sin * 0.28,
+          target.position.y + 1.56,
+          target.position.z - cos * 0.28
+        );
+        this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3_1.x, 20, dt);
+        this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _vec3_1.y, 20, dt);
+        this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _vec3_1.z, 20, dt);
+        this.camera.rotation.order = 'YXZ';
+        this.camera.rotation.y = target.yaw;
+        this.camera.rotation.x = target.pitch;
+      } else {
+        // Third-person over-the-shoulder follow with wall pull-in raycast
+        const camYaw = target.yaw + this.spectateOrbitYawOffset;
+        const sin = Math.sin(camYaw);
+        const cos = Math.cos(camYaw);
+        const horizDist = Math.cos(this.spectateOrbitPitch) * 3.6;
+        const vertHeight = Math.sin(this.spectateOrbitPitch) * 3.6;
+
+        // Anchor at teammate upper torso
+        _vec3_1.set(target.position.x, target.position.y + 1.5, target.position.z);
+        // Desired offset behind + slightly right shoulder
+        _vec3_2.set(
+          _vec3_1.x + sin * horizDist + cos * 0.45,
+          Math.max(0.6, _vec3_1.y + vertHeight),
+          _vec3_1.z + cos * horizDist - sin * 0.45
+        );
+
+        _vec3_3.copy(_vec3_2).sub(_vec3_1);
+        const desiredDist = _vec3_3.length();
+        if (desiredDist > 0.01) {
+          _vec3_3.divideScalar(desiredDist);
+          _raycaster.set(_vec3_1, _vec3_3);
+          _raycaster.far = desiredDist;
+          const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+          if (wallHits.length > 0 && wallHits[0].distance < desiredDist) {
+            const safeDist = Math.max(0.55, wallHits[0].distance - 0.3);
+            _vec3_2.copy(_vec3_1).addScaledVector(_vec3_3, safeDist);
+          }
+        }
+
+        this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3_2.x, 14, dt);
+        this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _vec3_2.y, 14, dt);
+        this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _vec3_2.z, 14, dt);
+
+        // Look ahead of the spectated teammate
+        _vec3_4.set(
+          target.position.x - sin * 6,
+          target.position.y + 1.35,
+          target.position.z - cos * 6
+        );
+        this.camera.lookAt(_vec3_4);
+      }
+    } else {
+      // No alive teammates left (round wrap-up) -> elevated overview around death spot
+      _vec3_1.set(this.deathCamAnchor.x, this.deathCamAnchor.y + 1.2, this.deathCamAnchor.z);
+      _vec3_2.set(this.deathCamAnchor.x + 3.2, this.deathCamAnchor.y + 4.8, this.deathCamAnchor.z + 3.8);
+      _vec3_3.copy(_vec3_2).sub(_vec3_1);
+      const dist = _vec3_3.length();
+      if (dist > 0.01) {
+        _vec3_3.divideScalar(dist);
+        _raycaster.set(_vec3_1, _vec3_3);
+        _raycaster.far = dist;
+        const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+        if (wallHits.length > 0 && wallHits[0].distance < dist) {
+          _vec3_2.copy(_vec3_1).addScaledVector(_vec3_3, Math.max(0.8, wallHits[0].distance - 0.35));
+        }
+      }
+      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3_2.x, 6, dt);
+      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _vec3_2.y, 6, dt);
+      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _vec3_2.z, 6, dt);
+      this.camera.lookAt(_vec3_1);
+    }
+
+    this.emitSpectateState(false);
+  }
+
+  private respawnPlayerForPractice(): void {
+    const p = this.playerCombatant;
+    const spawnBase = p.team === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
+    p.alive = true;
+    p.hp = 100;
+    p.armor = 0;
+    p.deathTimer = 0;
+    p.position.set(spawnBase.x, 0, spawnBase.z);
+    p.yaw = p.team === 'ATTACKERS' ? 0 : Math.PI;
+    p.pitch = 0;
+    p.ammoInMag = p.weapon.magazineSize;
+    p.reserveAmmo = p.weapon.reserveAmmo;
+    p.reloadTimer = 0;
+    p.modelPackage.resetPose();
+    p.modelPackage.root.position.copy(p.position);
+    p.modelPackage.root.rotation.y = p.yaw;
+    p.modelPackage.root.updateMatrixWorld(true);
+
+    this.viewmodelRig.visible = true;
+    this.spectateTargetId = null;
+    this.practiceRespawnTimer = 0;
+    this.lastSpectateKey = '';
+
+    const stats = this.playerStats.find((s) => s.id === p.id);
+    if (stats) {
+      stats.alive = true;
+      stats.hp = 100;
+      stats.armor = 0;
+    }
+
+    this.camera.position.set(p.position.x, 1.65, p.position.z);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.rotation.y = p.yaw;
+    this.camera.rotation.x = 0;
+
+    this.callbacks.onSpectateUpdate?.(null);
+    this.callbacks.onPlayerHealthUpdate(100, 0, 100, 50);
+    this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
+    this.callbacks.onStatsUpdate([...this.playerStats]);
+  }
+
+  private emitSpectateState(force: boolean): void {
+    if (this.playerCombatant.alive) {
+      if (this.lastSpectateKey !== '') {
+        this.lastSpectateKey = '';
+        this.callbacks.onSpectateUpdate?.(null);
+      }
+      return;
+    }
+
+    const aliveTeammatesCount = this.combatants.filter(
+      (c) => c.alive && c.team === this.playerTeam && !c.isHuman
+    ).length;
+    const target = this.spectateTargetId
+      ? this.combatants.find((c) => c.id === this.spectateTargetId && c.alive)
+      : undefined;
+    const tStats = target ? this.playerStats.find((s) => s.id === target.id) : undefined;
+    const respawnSec = this.matchMode === 'PRACTICE' ? Math.ceil(this.practiceRespawnTimer) : 0;
+
+    const key = `${target?.id ?? 'none'}_${target?.hp ?? 0}_${target?.armor ?? 0}_${target?.ammoInMag ?? 0}_${this.spectateMode}_${aliveTeammatesCount}_${respawnSec}`;
+    if (!force && key === this.lastSpectateKey) return;
+    this.lastSpectateKey = key;
+
+    this.callbacks.onSpectateUpdate?.({
+      active: true,
+      targetId: target?.id ?? null,
+      targetName: target ? target.name : 'Squad Eliminated',
+      agentId: target?.agentId ?? this.playerCombatant.agentId,
+      team: this.playerTeam,
+      hp: target?.hp ?? 0,
+      armor: target?.armor ?? 0,
+      weaponName: target?.weapon.name ?? '—',
+      ammoInMag: target?.ammoInMag ?? 0,
+      reserveAmmo: target?.reserveAmmo ?? 0,
+      kills: tStats?.kills ?? 0,
+      deaths: tStats?.deaths ?? 0,
+      aliveTeammatesCount,
+      mode: this.spectateMode,
+      practiceRespawnIn: respawnSec,
+    });
+  }
+
   private evaluateMobileAimAndAutoFire(dt: number): boolean {
     const p = this.playerCombatant;
     this.camera.getWorldDirection(_vec3_2);
 
-    // Aim Assist: subtly pull crosshair toward visible enemy upper chest within tight cone
+    if (this.aimAssistSwipeCooldown > 0) {
+      this.aimAssistSwipeCooldown = Math.max(0, this.aimAssistSwipeCooldown - dt);
+    }
+    if (Math.abs(this.input.state.lookDeltaX) > 0.025) {
+      this.aimAssistSwipeCooldown = 0.18;
+    }
+
+    // Gentle, wall-occluded, non-resistive Aim Assist
     if (this.settings.aimAssistMobile) {
       let bestTarget: BotCombatant | null = null;
-      let bestDot = 0.962;
+      let bestDot = 0.985; // ~9.9 deg half-cone
 
       for (const c of this.combatants) {
         if (!c.alive || c.team === p.team) continue;
         _vec3_3.set(c.position.x, c.position.y + 1.32, c.position.z).sub(this.camera.position);
         const dist = _vec3_3.length();
-        if (dist > 45 || dist < 1.0) continue;
+        if (dist > 45 || dist < 1.2) continue;
         _vec3_3.divideScalar(dist);
         const dot = _vec3_2.dot(_vec3_3);
         if (dot > bestDot) {
+          // Verify target is not behind a wall
+          _raycaster.set(this.camera.position, _vec3_3);
+          _raycaster.far = dist;
+          const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+          if (wallHits.length > 0 && wallHits[0].distance < dist - 0.35) {
+            continue;
+          }
           bestDot = dot;
           bestTarget = c;
         }
@@ -1208,8 +1484,18 @@ export class GameEngine {
         const desiredPitch = Math.asin(Math.max(-0.98, Math.min(0.98, _vec3_3.y)));
         let yawDiff = ((desiredYaw - p.yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
         if (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-        p.yaw += yawDiff * Math.min(1, dt * 5.5);
-        p.pitch += (desiredPitch - p.pitch) * Math.min(1, dt * 5.5);
+        const pitchDiff = desiredPitch - p.pitch;
+
+        const { yawStep, pitchStep } = computeGentleAimAssist({
+          yawDiff,
+          pitchDiff,
+          userDeltaX: this.input.state.lookDeltaX,
+          userDeltaY: this.input.state.lookDeltaY,
+          swipeCooldownRemaining: this.aimAssistSwipeCooldown,
+          dt,
+        });
+        p.yaw += yawStep;
+        p.pitch = THREE.MathUtils.clamp(p.pitch + pitchStep, -1.45, 1.45);
       }
     }
 
@@ -1719,6 +2005,11 @@ export class GameEngine {
       this.callbacks.onPlayerHealthUpdate(victim.hp, victim.armor, 100, 50);
     }
 
+    if (!victim.isHuman && victim.alive && !dmg.isDead) {
+      const botCtrl = this.botControllers.find((c) => c.combatant === victim);
+      botCtrl?.notifyDamaged(shooter);
+    }
+
     if (dmg.isDead) {
       this.handleCombatantDeath(shooter, victim, shooter.weapon.name, dmg.isHeadshot);
     }
@@ -1784,6 +2075,36 @@ export class GameEngine {
         this.scene.add(this.spikeMesh);
       }
       this.spikeMesh.position.copy(this.spikePosition);
+    }
+
+    if (victim.isHuman) {
+      this.viewmodelRig.visible = false;
+      this.deathCamAnchor.copy(victim.position);
+      this.spectateOrbitYawOffset = 0;
+      this.spectateOrbitPitch = 0.22;
+      this.input.setMobileFire(false);
+      this.input.setMobileADS(false);
+      this.input.setMobileCrouch(false);
+      this.input.setMobilePlantDefuse(false);
+
+      if (Math.abs(this.camera.fov - this.settings.fov) > 0.1) {
+        this.camera.fov = this.settings.fov;
+        this.camera.updateProjectionMatrix();
+      }
+
+      if (this.matchMode === 'PRACTICE') {
+        this.practiceRespawnTimer = 2.5;
+      }
+
+      this.spectateTargetId = selectNextSpectateTargetId(
+        this.combatants,
+        this.playerTeam,
+        null,
+        1
+      );
+      this.emitSpectateState(true);
+    } else if (this.spectateTargetId === victim.id && !this.playerCombatant.alive) {
+      this.cycleSpectateTarget(1);
     }
   }
 
@@ -2005,6 +2326,11 @@ export class GameEngine {
 
   public startNextRound(): void {
     this.roundNumber++;
+    this.viewmodelRig.visible = true;
+    this.spectateTargetId = null;
+    this.practiceRespawnTimer = 0;
+    this.lastSpectateKey = '';
+    this.callbacks.onSpectateUpdate?.(null);
 
     if (shouldSwapSides(this.roundNumber - 1)) {
       this.playerTeam = this.playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';

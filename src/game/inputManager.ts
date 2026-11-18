@@ -5,7 +5,7 @@
 
 import { isMobileDevice } from './device';
 import { soundEngine } from './audio';
-import { ControlMode } from './types';
+import { ControlMode, DEFAULT_KEY_BINDINGS, KeyBindings } from './types';
 
 export interface InputState {
   moveForward: number; // -1 to 1
@@ -28,6 +28,9 @@ export interface InputState {
   pauseJustPressed: boolean;
   startRoundJustPressed: boolean;
   weaponSlotJustPressed: number | null; // 1, 2, 3, 4
+  spectateNextJustPressed: boolean;
+  spectatePrevJustPressed: boolean;
+  spectateModeJustPressed: boolean;
 }
 
 export class InputManager {
@@ -52,6 +55,9 @@ export class InputManager {
     pauseJustPressed: false,
     startRoundJustPressed: false,
     weaponSlotJustPressed: null,
+    spectateNextJustPressed: false,
+    spectatePrevJustPressed: false,
+    spectateModeJustPressed: false,
   };
 
   public isMobile: boolean = false;
@@ -61,6 +67,7 @@ export class InputManager {
   public adsSensitivityMultiplier: number = 0.7;
   public invertY: boolean = false;
   public uiBlocking: boolean = false;
+  public keyBindings: KeyBindings = { ...DEFAULT_KEY_BINDINGS };
 
   public onPointerLockLost?: () => void;
   public onPointerLockChange?: (locked: boolean) => void;
@@ -73,8 +80,15 @@ export class InputManager {
   private lastMouseY: number = 0;
   private suppressNextLockLost: boolean = false;
 
-  constructor(controlMode: ControlMode = 'AUTO') {
+  constructor(controlMode: ControlMode = 'AUTO', keyBindings?: KeyBindings) {
+    if (keyBindings) {
+      this.keyBindings = { ...DEFAULT_KEY_BINDINGS, ...keyBindings };
+    }
     this.detectDevice(controlMode);
+  }
+
+  public setKeyBindings(bindings: KeyBindings): void {
+    this.keyBindings = { ...DEFAULT_KEY_BINDINGS, ...bindings };
   }
 
   public detectDevice(controlMode: ControlMode = 'AUTO'): void {
@@ -174,69 +188,58 @@ export class InputManager {
     soundEngine.init();
     if (e.repeat) return;
 
-    if (this.uiBlocking) return;
+    if (this.uiBlocking || document.body.dataset.rebinding === '1') return;
 
     this.keysHeld.add(e.code);
+    const kb = this.keyBindings;
 
-    switch (e.code) {
-      case 'Space':
-        this.state.jumpJustPressed = true;
-        break;
-      case 'KeyR':
-        this.state.reloadJustPressed = true;
-        break;
-      case 'KeyQ':
-        this.state.abilityQJustPressed = true;
-        break;
-      case 'KeyE':
-        this.state.abilityEJustPressed = true;
-        break;
-      case 'KeyC':
-        // C Key is ability C only (Crouch is ControlLeft only)
-        this.state.abilityCJustPressed = true;
-        break;
-      case 'KeyX':
-        this.state.abilityXJustPressed = true;
-        break;
-      case 'KeyG':
-        this.state.startRoundJustPressed = true;
-        break;
-      case 'KeyB':
-        this.state.buyMenuJustPressed = true;
-        break;
-      case 'KeyF':
-        this.state.plantDefuseHeld = true;
-        break;
-      case 'Digit1':
-        this.state.weaponSlotJustPressed = 1;
-        break;
-      case 'Digit2':
-        this.state.weaponSlotJustPressed = 2;
-        break;
-      case 'Digit3':
-        this.state.weaponSlotJustPressed = 3;
-        break;
-      case 'Digit4':
-        this.state.weaponSlotJustPressed = 4;
-        break;
-      case 'Tab':
-        e.preventDefault();
-        this.state.scoreboardHeld = true;
-        break;
-      case 'Escape':
-      case 'KeyP':
-        this.state.pauseJustPressed = true;
-        break;
+    if (e.code === kb.jump) {
+      this.state.jumpJustPressed = true;
+    } else if (e.code === kb.reload) {
+      this.state.reloadJustPressed = true;
+    } else if (e.code === kb.abilityQ) {
+      this.state.abilityQJustPressed = true;
+    } else if (e.code === kb.abilityE) {
+      this.state.abilityEJustPressed = true;
+    } else if (e.code === kb.abilityC) {
+      this.state.abilityCJustPressed = true;
+    } else if (e.code === kb.abilityX) {
+      this.state.abilityXJustPressed = true;
+    } else if (e.code === kb.startRound) {
+      this.state.startRoundJustPressed = true;
+    } else if (e.code === kb.buyMenu) {
+      this.state.buyMenuJustPressed = true;
+    } else if (e.code === kb.plantDefuse) {
+      this.state.plantDefuseHeld = true;
+    } else if (e.code === kb.primaryWeapon) {
+      this.state.weaponSlotJustPressed = 1;
+    } else if (e.code === kb.sidearmWeapon) {
+      this.state.weaponSlotJustPressed = 2;
+    } else if (e.code === kb.scoreboard) {
+      e.preventDefault();
+      this.state.scoreboardHeld = true;
+    } else if (e.code === 'Escape' || e.code === kb.pause) {
+      this.state.pauseJustPressed = true;
+    }
+
+    // Spectator camera cycling also listens to arrows + left/right strafe binds
+    if (e.code === 'ArrowRight' || e.code === kb.moveRight) {
+      this.state.spectateNextJustPressed = true;
+    } else if (e.code === 'ArrowLeft' || e.code === kb.moveLeft) {
+      this.state.spectatePrevJustPressed = true;
+    } else if (e.code === 'KeyV') {
+      this.state.spectateModeJustPressed = true;
     }
   };
 
   private handleKeyUp = (e: KeyboardEvent): void => {
     this.keysHeld.delete(e.code);
+    const kb = this.keyBindings;
 
-    if (e.code === 'KeyF') {
+    if (e.code === kb.plantDefuse) {
       this.state.plantDefuseHeld = false;
     }
-    if (e.code === 'Tab') {
+    if (e.code === kb.scoreboard) {
       this.state.scoreboardHeld = false;
     }
   };
@@ -371,14 +374,15 @@ export class InputManager {
       return;
     }
 
+    const kb = this.keyBindings;
     if (!this.isMobile || (this.state.moveForward === 0 && this.state.moveRight === 0)) {
       let fwd = 0;
       let right = 0;
 
-      if (this.keysHeld.has('KeyW') || this.keysHeld.has('ArrowUp')) fwd += 1;
-      if (this.keysHeld.has('KeyS') || this.keysHeld.has('ArrowDown')) fwd -= 1;
-      if (this.keysHeld.has('KeyD') || this.keysHeld.has('ArrowRight')) right += 1;
-      if (this.keysHeld.has('KeyA') || this.keysHeld.has('ArrowLeft')) right -= 1;
+      if (this.keysHeld.has(kb.moveForward) || this.keysHeld.has('ArrowUp')) fwd += 1;
+      if (this.keysHeld.has(kb.moveBackward) || this.keysHeld.has('ArrowDown')) fwd -= 1;
+      if (this.keysHeld.has(kb.moveRight) || this.keysHeld.has('ArrowRight')) right += 1;
+      if (this.keysHeld.has(kb.moveLeft) || this.keysHeld.has('ArrowLeft')) right -= 1;
 
       if (fwd !== 0 && right !== 0) {
         fwd *= 0.7071;
@@ -389,7 +393,7 @@ export class InputManager {
       this.state.moveRight = right;
     }
 
-    this.state.crouchHeld = this.keysHeld.has('ControlLeft') || this.mobileCrouchHeld;
+    this.state.crouchHeld = this.keysHeld.has(kb.crouch) || this.mobileCrouchHeld;
   }
 
   public clearFrameDeltas(): void {
@@ -406,5 +410,8 @@ export class InputManager {
     this.state.pauseJustPressed = false;
     this.state.startRoundJustPressed = false;
     this.state.weaponSlotJustPressed = null;
+    this.state.spectateNextJustPressed = false;
+    this.state.spectatePrevJustPressed = false;
+    this.state.spectateModeJustPressed = false;
   }
 }

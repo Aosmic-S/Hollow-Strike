@@ -212,3 +212,195 @@ export function calculateSpread(
 
   return Math.max(0.0005, spread);
 }
+
+export interface SpectateCandidate {
+  id: string;
+  alive: boolean;
+  team: TeamSide;
+  isHuman: boolean;
+}
+
+/**
+ * Selects the next or previous alive teammate to spectate.
+ */
+export function selectNextSpectateTargetId(
+  candidates: SpectateCandidate[],
+  playerTeam: TeamSide,
+  currentTargetId: string | null,
+  direction: 1 | -1 = 1
+): string | null {
+  const aliveTeammates = candidates.filter(
+    (c) => c.alive && c.team === playerTeam && !c.isHuman
+  );
+  if (aliveTeammates.length === 0) return null;
+
+  const currentIdx = currentTargetId
+    ? aliveTeammates.findIndex((c) => c.id === currentTargetId)
+    : -1;
+
+  if (currentIdx === -1) {
+    return direction >= 0
+      ? aliveTeammates[0].id
+      : aliveTeammates[aliveTeammates.length - 1].id;
+  }
+
+  const nextIdx =
+    (currentIdx + direction + aliveTeammates.length) % aliveTeammates.length;
+  return aliveTeammates[nextIdx].id;
+}
+
+export interface AimAssistParams {
+  yawDiff: number;
+  pitchDiff: number;
+  userDeltaX: number;
+  userDeltaY: number;
+  swipeCooldownRemaining: number;
+  dt: number;
+}
+
+/**
+ * Computes non-resistive mobile aim assist nudges.
+ * Suppresses pull when player swipes away, fast-flicks, or already aims inside head/chest band.
+ */
+export function computeGentleAimAssist(params: AimAssistParams): {
+  yawStep: number;
+  pitchStep: number;
+} {
+  const { yawDiff, pitchDiff, userDeltaX, userDeltaY, swipeCooldownRemaining, dt } = params;
+
+  if (swipeCooldownRemaining > 0 || Math.abs(userDeltaX) > 0.025) {
+    return { yawStep: 0, pitchStep: 0 };
+  }
+
+  // Note: yaw -= userDeltaX, pitch -= userDeltaY
+  const userYawIntent = -userDeltaX;
+  const userPitchIntent = -userDeltaY;
+
+  let yawStep = 0;
+  const opposingYaw =
+    Math.abs(userYawIntent) > 0.0012 && userYawIntent * yawDiff < 0;
+  if (!opposingYaw) {
+    const rawYaw = yawDiff * Math.min(1, dt * 1.65);
+    yawStep = Math.max(-0.018, Math.min(0.018, rawYaw));
+  }
+
+  let pitchStep = 0;
+  const opposingPitch =
+    Math.abs(userPitchIntent) > 0.001 && userPitchIntent * pitchDiff < 0;
+  const insideHeadChestBand = Math.abs(pitchDiff) < 0.055;
+  if (!opposingPitch && !insideHeadChestBand) {
+    const rawPitch = pitchDiff * Math.min(1, dt * 1.25);
+    pitchStep = Math.max(-0.012, Math.min(0.012, rawPitch));
+  }
+
+  return { yawStep, pitchStep };
+}
+
+export interface BotAimParams {
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+  distance: number;
+  burstShotIndex: number;
+  targetSpeed: number;
+  isTargetCrouching: boolean;
+}
+
+export interface BotAimSolution {
+  targetAimYOffset: number;
+  spreadYaw: number;
+  spreadPitchDown: number;
+  spreadPitchUp: number;
+  maxBurstShots: number;
+  burstResetSeconds: number;
+}
+
+/**
+ * Computes human-like bot aim parameters:
+ * - Aims naturally at center-mass/torso (adjusted down when target crouches/plants)
+ * - Scales angular spread with distance, burst count, and moving target speed
+ * - Caps upward vertical scatter beyond close range so bots never laser-headshot across the map
+ */
+export function computeBotAimSolution(params: BotAimParams): BotAimSolution {
+  const { difficulty, distance, burstShotIndex, targetSpeed, isTargetCrouching } = params;
+
+  // Standing torso center is ~1.12m (head is 1.54..1.90m); crouched torso is ~0.78m (head is 1.19..1.55m)
+  const targetAimYOffset = isTargetCrouching ? 0.78 : 1.12;
+
+  const baseSpread = difficulty === 'HARD' ? 0.026 : difficulty === 'MEDIUM' ? 0.048 : 0.082;
+  const distSlope = difficulty === 'HARD' ? 0.0014 : difficulty === 'MEDIUM' ? 0.0022 : 0.0032;
+  const distBeyondClose = Math.max(0, distance - 10);
+  const burstBloom = Math.min(0.05, burstShotIndex * 0.011);
+  const speedPenalty = targetSpeed > 1.5 ? 0.018 : 0;
+
+  const spreadYaw = baseSpread + distBeyondClose * distSlope + burstBloom + speedPenalty;
+  const spreadPitchDown = spreadYaw * 0.65;
+
+  // Beyond 18m, cap upward vertical jitter tightly so shots hit body/legs or miss rather than headshotting at long range
+  const maxUpFactor = distance > 18 ? 0.14 : 0.38;
+  const spreadPitchUp = Math.min(distance > 18 ? 0.0055 : 0.016, spreadYaw * maxUpFactor);
+
+  const maxBurstShots =
+    distance > 22
+      ? difficulty === 'HARD'
+        ? 3
+        : 2
+      : difficulty === 'HARD'
+        ? 5
+        : difficulty === 'MEDIUM'
+          ? 4
+          : 3;
+
+  const burstResetSeconds =
+    difficulty === 'HARD' ? 0.28 : difficulty === 'MEDIUM' ? 0.42 : 0.62;
+
+  return {
+    targetAimYOffset,
+    spreadYaw,
+    spreadPitchDown,
+    spreadPitchUp,
+    maxBurstShots,
+    burstResetSeconds,
+  };
+}
+
+/**
+ * Remaps a single action to `newCode` cleanly, swapping with any conflicting action so keys stay unique.
+ */
+export function remapKeyBinding<T extends { [K in keyof T]: string }>(
+  bindings: T,
+  action: keyof T,
+  newCode: string
+): T {
+  const next = { ...bindings };
+  const prevCode = next[action];
+  for (const key of Object.keys(next) as (keyof T)[]) {
+    if (key !== action && next[key] === newCode) {
+      next[key] = prevCode;
+    }
+  }
+  next[action] = newCode as T[keyof T];
+  return next;
+}
+
+/**
+ * Formats a browser KeyboardEvent.code into a clean short HUD/Settings label.
+ */
+export function formatKeyCode(code: string): string {
+  if (!code) return '?';
+  if (code.startsWith('Key')) return code.slice(3).toUpperCase();
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code === 'Space') return 'SPACE';
+  if (code === 'ControlLeft') return 'L-CTRL';
+  if (code === 'ControlRight') return 'R-CTRL';
+  if (code === 'ShiftLeft') return 'L-SHIFT';
+  if (code === 'ShiftRight') return 'R-SHIFT';
+  if (code === 'AltLeft') return 'L-ALT';
+  if (code === 'AltRight') return 'R-ALT';
+  if (code === 'Tab') return 'TAB';
+  if (code === 'ArrowUp') return '↑';
+  if (code === 'ArrowDown') return '↓';
+  if (code === 'ArrowLeft') return '←';
+  if (code === 'ArrowRight') return '→';
+  return code.toUpperCase();
+}
+
+

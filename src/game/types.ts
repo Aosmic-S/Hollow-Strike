@@ -104,6 +104,26 @@ export interface HitFeedback {
   targetMaxHp: number;
 }
 
+export type SpectateCameraMode = 'THIRD_PERSON' | 'FIRST_PERSON';
+
+export interface SpectateState {
+  active: boolean;
+  targetId: string | null;
+  targetName: string;
+  agentId: string;
+  team: TeamSide;
+  hp: number;
+  armor: number;
+  weaponName: string;
+  ammoInMag: number;
+  reserveAmmo: number;
+  kills: number;
+  deaths: number;
+  aliveTeammatesCount: number;
+  mode: SpectateCameraMode;
+  practiceRespawnIn: number;
+}
+
 export interface PlayerStats {
   id: string;
   name: string;
@@ -127,6 +147,50 @@ export interface PlayerStats {
 export type CrosshairColor = 'cyan' | 'green' | 'amber' | 'white' | 'rose';
 export type CrosshairSize = 'small' | 'medium' | 'large';
 
+export interface KeyBindings {
+  moveForward: string;
+  moveBackward: string;
+  moveLeft: string;
+  moveRight: string;
+  jump: string;
+  crouch: string;
+  reload: string;
+  plantDefuse: string;
+  abilityE: string;
+  abilityQ: string;
+  abilityC: string;
+  abilityX: string;
+  primaryWeapon: string;
+  sidearmWeapon: string;
+  buyMenu: string;
+  tacticalMap: string;
+  scoreboard: string;
+  pause: string;
+  startRound: string;
+}
+
+export const DEFAULT_KEY_BINDINGS: KeyBindings = {
+  moveForward: 'KeyW',
+  moveBackward: 'KeyS',
+  moveLeft: 'KeyA',
+  moveRight: 'KeyD',
+  jump: 'Space',
+  crouch: 'ControlLeft',
+  reload: 'KeyR',
+  plantDefuse: 'KeyF',
+  abilityE: 'KeyE',
+  abilityQ: 'KeyQ',
+  abilityC: 'KeyC',
+  abilityX: 'KeyX',
+  primaryWeapon: 'Digit1',
+  sidearmWeapon: 'Digit2',
+  buyMenu: 'KeyB',
+  tacticalMap: 'KeyM',
+  scoreboard: 'Tab',
+  pause: 'KeyP',
+  startRound: 'KeyG',
+};
+
 export interface GameSettings {
   graphics: GraphicsPreset;
   fpsCap: 30 | 60 | 120 | 0; // 0 = unlimited
@@ -145,6 +209,7 @@ export interface GameSettings {
   touchScale: number; // 0.8 - 1.3
   touchOpacity: number; // 0.3 - 1.0
   controlMode: ControlMode;
+  keyBindings: KeyBindings;
 }
 
 export interface AgentCareerStats {
