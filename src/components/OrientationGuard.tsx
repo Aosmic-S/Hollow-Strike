@@ -5,16 +5,21 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { isTouchDevice } from '../utils/device';
+import { isMobileDevice } from '../game/device';
 
-export const OrientationGuard: React.FC = () => {
+interface OrientationGuardProps {
+  onOrientationChange?: (isPortrait: boolean) => void;
+}
+
+export const OrientationGuard: React.FC<OrientationGuardProps> = ({ onOrientationChange }) => {
   const [isPortrait, setIsPortrait] = useState<boolean>(false);
 
   useEffect(() => {
     const checkOrientation = () => {
-      const isMobile = isTouchDevice();
-      const portrait = isMobile && window.innerHeight > window.innerWidth;
+      const mobile = isMobileDevice();
+      const portrait = mobile && window.innerHeight > window.innerWidth;
       setIsPortrait(portrait);
+      onOrientationChange?.(portrait);
     };
 
     checkOrientation();
@@ -25,16 +30,15 @@ export const OrientationGuard: React.FC = () => {
       window.removeEventListener('resize', checkOrientation);
       window.removeEventListener('orientationchange', checkOrientation);
     };
-  }, []);
+  }, [onOrientationChange]);
 
   if (!isPortrait) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 p-6 text-center select-none">
-      <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-2xl border border-cyan-500/30 bg-slate-900 shadow-2xl">
-        {/* Animated Phone Rotation SVG */}
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#070b14] p-6 text-center select-none font-sans">
+      <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-2xl border border-cyan-500/40 bg-slate-900 shadow-2xl shadow-cyan-500/20">
         <svg
-          className="h-14 w-14 text-cyan-400 animate-bounce"
+          className="h-12 w-12 text-cyan-400 animate-bounce"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -48,15 +52,15 @@ export const OrientationGuard: React.FC = () => {
       </div>
 
       <h2 className="text-xl font-black uppercase tracking-widest text-white">
-        Rotate Device to Landscape
+        ROTATE DEVICE TO LANDSCAPE
       </h2>
-      <p className="mt-2 max-w-xs text-sm text-slate-400">
-        Hollow Strike is optimized for tactical widescreen combat. Please rotate your phone to continue.
+      <p className="mt-2 max-w-xs text-xs text-slate-400 leading-relaxed font-mono">
+        Hollow Strike is optimized for tactical widescreen combat. Please turn your device sideways to resume play.
       </p>
 
-      <div className="mt-6 flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/80 px-4 py-2 text-xs font-mono text-cyan-400">
+      <div className="mt-6 flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/90 px-4 py-2 text-xs font-mono text-cyan-400">
         <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-        AUTO-RESUMES ON ROTATION
+        AUTO-RESUMES ON LANDSCAPE
       </div>
     </div>
   );

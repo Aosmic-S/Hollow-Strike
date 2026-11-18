@@ -1,21 +1,35 @@
 /**
  * Hollow Strike - Main Application Entry
  * Full-viewport tactical Game Shell with Three.js engine lifecycle,
- * mobile landscape lock, and cross-platform controls.
+ * mobile landscape lock, cross-platform controls, and live combat feedback.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine, isSoftwareGl } from './game/gameEngine';
+import { isMobileDevice } from './game/device';
+import { soundEngine } from './game/audio';
 import {
-  GameSettings,
+  loadProfile,
+  loadSavedSettings,
+  recordMatchToProfile,
+  resetProfileData,
+  saveProfile,
+  saveSettingsToStorage,
+} from './game/profileStore';
+import {
+  AbilitySlotState,
+  AGENT_REGISTRY,
   BotDifficulty,
+  GameSettings,
+  HitFeedback,
+  KillEvent,
+  MatchMode,
+  PlayerProfile,
   PlayerStats,
   RoundPhase,
   TeamSide,
-  WeaponDef,
-  KillEvent,
   WEAPON_REGISTRY,
-  AGENT_REGISTRY,
+  WeaponDef,
 } from './game/types';
 import { LobbyScreen } from './components/LobbyScreen';
 import { GameHUD } from './components/GameHUD';
@@ -26,21 +40,51 @@ import { SettingsModal } from './components/SettingsModal';
 import { MatchEndModal } from './components/MatchEndModal';
 import { PauseModal } from './components/PauseModal';
 import { OrientationGuard } from './components/OrientationGuard';
-import { isTouchDevice } from './utils/device';
+import { TacticalMapModal } from './components/TacticalMapModal';
 
 type AppState = 'title' | 'playing' | 'paused' | 'gameover';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const hitmarkerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hitFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const damageFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persistent Player Profile & Settings
+  const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
+  const [settings, setSettings] = useState<GameSettings>(() => {
+    const mobile = isMobileDevice('AUTO');
+    return loadSavedSettings({
+      graphics: mobile || isSoftwareGl ? 'LOW' : 'HIGH',
+      fpsCap: 60,
+      showFps: false,
+      mouseSensitivity: 0.0022,
+      touchSensitivity: 0.0035,
+      adsSensitivityMultiplier: 0.7,
+      invertY: false,
+      fov: 90,
+      crosshairColor: 'cyan',
+      crosshairSize: 'medium',
+      volume: 0.7,
+      soundEnabled: true,
+      autoFireMobile: false,
+      aimAssistMobile: true,
+      touchScale: 1.0,
+      touchOpacity: 0.85,
+      controlMode: 'AUTO',
+    });
+  });
 
   // App Shell State
   const [appState, setAppState] = useState<AppState>('title');
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('ZEPHYR');
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(() => profile.favoriteAgentId || 'ZEPHYR');
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('MEDIUM');
+  const [lastMatchMode, setLastMatchMode] = useState<MatchMode>('COMPETITIVE');
 
   // Modals
   const [showBuyMenu, setShowBuyMenu] = useState<boolean>(false);
+  const [showMapModal, setShowMapModal] = useState<boolean>(false);
   const [showScoreboard, setShowScoreboard] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
 
@@ -51,15 +95,20 @@ export default function App() {
   const [ammoInMag, setAmmoInMag] = useState<number>(12);
   const [reserveAmmo, setReserveAmmo] = useState<number>(36);
   const [isReloading, setIsReloading] = useState<boolean>(false);
+  const [activeSlot, setActiveSlot] = useState<1 | 2>(2);
   const [roundPhase, setRoundPhase] = useState<RoundPhase>('BUY_PHASE');
-  const [roundTimeRemaining, setRoundTimeRemaining] = useState<number>(20);
+  const [roundTimeRemaining, setRoundTimeRemaining] = useState<number>(15);
   const [attackerRoundsWon, setAttackerRoundsWon] = useState<number>(0);
   const [defenderRoundsWon, setDefenderRoundsWon] = useState<number>(0);
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [playerStats, setPlayerStats] = useState<PlayerStats[]>([]);
   const [killFeed, setKillFeed] = useState<KillEvent[]>([]);
   const [hitmarker, setHitmarker] = useState<{ active: boolean; isHeadshot: boolean } | null>(null);
-  const hitmarkerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [hitFeedback, setHitFeedback] = useState<HitFeedback | null>(null);
+  const [damageFlash, setDamageFlash] = useState<boolean>(false);
+  const [abilityStates, setAbilityStates] = useState<AbilitySlotState[]>([]);
+  const [isBlinded, setIsBlinded] = useState<boolean>(false);
+  const [isPointerLocked, setIsPointerLocked] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(60);
   const [matchWinner, setMatchWinner] = useState<TeamSide | null>(null);
 
@@ -69,92 +118,96 @@ export default function App() {
   const [plantProgress, setPlantProgress] = useState<number>(0);
   const [defuseProgress, setDefuseProgress] = useState<number>(0);
 
-  // Device & Settings
-  const [isMobile, setIsMobile] = useState<boolean>(false);
-  const [settings, setSettings] = useState<GameSettings>(() => {
-    const isTouch = isTouchDevice();
-    return {
-      graphics: isTouch || isSoftwareGl ? 'LOW' : 'HIGH',
-      fpsCap: 60,
-      showFps: false,
-      mouseSensitivity: 0.0022,
-      touchSensitivity: 0.0035,
-      fov: 90,
-      volume: 0.7,
-      soundEnabled: true,
-      autoFireMobile: false,
-      aimAssistMobile: true,
-      touchScale: 1.0,
-    };
-  });
+  const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice(settings.controlMode));
 
-  // Mirror app state to document.body.dataset.state for ultra mode
+  // Sync device mode whenever controlMode changes
+  useEffect(() => {
+    setIsMobile(isMobileDevice(settings.controlMode));
+  }, [settings.controlMode]);
+
+  const handleUpdateSettings = (newSettings: GameSettings) => {
+    setSettings(newSettings);
+    saveSettingsToStorage(newSettings);
+    engineRef.current?.updateSettings(newSettings);
+  };
+
+  const handleUpdateProfile = (next: PlayerProfile) => {
+    setProfile(next);
+    saveProfile(next);
+    if (next.favoriteAgentId !== selectedAgentId) {
+      setSelectedAgentId(next.favoriteAgentId);
+    }
+  };
+
+  // Mirror app state to document.body.dataset.state
   useEffect(() => {
     document.body.dataset.state = appState;
   }, [appState]);
 
-  // Clear hitmarker timeout on component unmount
+  // Sync UI modal blocking with InputManager
   useEffect(() => {
-    return () => {
-      if (hitmarkerTimeoutRef.current) {
-        clearTimeout(hitmarkerTimeoutRef.current);
-      }
-    };
-  }, []);
+    const blocked = appState !== 'playing' || showBuyMenu || showMapModal || showScoreboard || showSettings;
+    engineRef.current?.setUiBlocking(blocked);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings]);
 
-  // Auto-pause tracking: whether pause was triggered automatically due to portrait or tab hidden
-  const autoPausedRef = useRef<boolean>(false);
-
-  // Check ?autostart=1 on mount & detect mobile
+  // Check ?autostart=1 on mount
   useEffect(() => {
-    const isTouch = isTouchDevice();
-    setIsMobile(isTouch);
-
     const params = new URLSearchParams(window.location.search);
     if (params.get('autostart') === '1') {
-      startGame();
+      startGame('COMPETITIVE');
     }
+    return () => {
+      if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
+      if (hitFeedbackTimeoutRef.current) clearTimeout(hitFeedbackTimeoutRef.current);
+      if (damageFlashTimeoutRef.current) clearTimeout(damageFlashTimeoutRef.current);
+      engineRef.current?.dispose();
+      engineRef.current = null;
+    };
   }, []);
 
-  // Pause engine when device is in portrait or tab is hidden (visibilitychange), resume on landscape
+  // Pause engine when tab is hidden
   useEffect(() => {
-    const handleVisibilityOrOrientationChange = () => {
-      const isTouch = isTouchDevice();
-      const isPortrait = isTouch && window.innerHeight > window.innerWidth;
-      const isHidden = document.visibilityState === 'hidden';
-
-      if (isPortrait || isHidden) {
-        if (appState === 'playing') {
-          autoPausedRef.current = true;
-          setAppState('paused');
-          engineRef.current?.setPaused(true);
-        }
-      } else {
-        // Returned to landscape and tab is visible
-        if (appState === 'paused' && autoPausedRef.current) {
-          autoPausedRef.current = false;
-          setAppState('playing');
-          engineRef.current?.setPaused(false);
-          if (!isTouch) {
-            engineRef.current?.input.requestPointerLock();
-          }
-        }
+    const handleVisibilityChange = () => {
+      if (document.hidden && appState === 'playing') {
+        setAppState('paused');
+        engineRef.current?.setPaused(true);
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityOrOrientationChange);
-    window.addEventListener('resize', handleVisibilityOrOrientationChange);
-    window.addEventListener('orientationchange', handleVisibilityOrOrientationChange);
-
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityOrOrientationChange);
-      window.removeEventListener('resize', handleVisibilityOrOrientationChange);
-      window.removeEventListener('orientationchange', handleVisibilityOrOrientationChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [appState]);
 
-  const startGame = () => {
+  const triggerHitmarker = (isHeadshot: boolean) => {
+    if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
+    setHitmarker({ active: true, isHeadshot });
+    hitmarkerTimeoutRef.current = setTimeout(() => setHitmarker(null), 160);
+  };
+
+  const triggerHitFeedback = (fb: HitFeedback) => {
+    if (hitFeedbackTimeoutRef.current) clearTimeout(hitFeedbackTimeoutRef.current);
+    setHitFeedback(fb);
+    hitFeedbackTimeoutRef.current = setTimeout(() => setHitFeedback(null), 950);
+  };
+
+  const triggerDamageFlash = () => {
+    if (damageFlashTimeoutRef.current) clearTimeout(damageFlashTimeoutRef.current);
+    setDamageFlash(true);
+    damageFlashTimeoutRef.current = setTimeout(() => setDamageFlash(false), 200);
+  };
+
+  const startGame = (mode: MatchMode = lastMatchMode) => {
+    soundEngine.init();
+    setLastMatchMode(mode);
     setAppState('playing');
+    setShowBuyMenu(false);
+    setShowMapModal(false);
+    setShowScoreboard(false);
+    setShowSettings(false);
+    setIsBlinded(false);
+    setDamageFlash(false);
 
     if (canvasMountRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
@@ -167,9 +220,7 @@ export default function App() {
           onRoundPhaseChange: (phase, time) => {
             setRoundPhase(phase);
             setRoundTimeRemaining(time);
-            if (phase === 'BUY_PHASE') {
-              // Optionally show buy menu reminder
-            } else {
+            if (phase !== 'BUY_PHASE' && mode !== 'PRACTICE') {
               setShowBuyMenu(false);
             }
           },
@@ -185,11 +236,15 @@ export default function App() {
             setHp(currentHp);
             setArmor(currentArmor);
           },
-          onWeaponUpdate: (weaponDef, inMag, reserve, reloading) => {
+          onPlayerDamage: () => {
+            triggerDamageFlash();
+          },
+          onWeaponUpdate: (weaponDef, inMag, reserve, reloading, slot) => {
             setCurrentWeapon(weaponDef);
             setAmmoInMag(inMag);
             setReserveAmmo(reserve);
             setIsReloading(reloading);
+            if (slot) setActiveSlot(slot);
           },
           onSpikeStateUpdate: (state, timer, plantP, defuseP) => {
             setSpikeState(state);
@@ -198,49 +253,49 @@ export default function App() {
             setDefuseProgress(defuseP);
           },
           onHitmarker: (isHeadshot) => {
-            setHitmarker({ active: true, isHeadshot });
-            if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
-            hitmarkerTimeoutRef.current = setTimeout(() => {
-              setHitmarker(null);
-              hitmarkerTimeoutRef.current = null;
-            }, 140);
+            triggerHitmarker(isHeadshot);
+          },
+          onHitFeedback: (fb) => {
+            triggerHitFeedback(fb);
+          },
+          onAbilityStateUpdate: (states) => {
+            setAbilityStates(states);
+          },
+          onBlindStateChange: (blinded) => {
+            setIsBlinded(blinded);
+          },
+          onPointerLockChange: (locked) => {
+            setIsPointerLocked(locked);
           },
           onFpsUpdate: (currentFps) => setFps(currentFps),
-          onMatchOver: (winner) => {
+          onMatchOver: (winner, summary) => {
             setMatchWinner(winner);
             setAppState('gameover');
+            setProfile((prev) => recordMatchToProfile(prev, summary));
           },
-        }
+        },
+        mode
       );
-
-      // Pause the game when pointer lock is lost during play
-      engineRef.current.input.onPointerLockLoss = () => {
-        setAppState((prevState) => {
-          if (prevState === 'playing') {
-            engineRef.current?.setPaused(true);
-            return 'paused';
-          }
-          return prevState;
-        });
-      };
     }
   };
 
-  // Keyboard shortcut listener for B (Buy Menu), Tab (Scoreboard), Esc (Pause)
+  // Keyboard shortcut listener for B (Buy Menu), M (Map), Tab (Scoreboard), Esc/P (Pause)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (appState !== 'playing') return;
 
       if (e.code === 'KeyB') {
-        if (roundPhase === 'BUY_PHASE') {
-          setShowBuyMenu((prev) => !prev);
-        }
+        setShowBuyMenu((prev) => !prev);
+      } else if (e.code === 'KeyM') {
+        setShowMapModal((prev) => !prev);
       } else if (e.code === 'Tab') {
         e.preventDefault();
         setShowScoreboard(true);
       } else if (e.code === 'Escape' || e.code === 'KeyP') {
         if (showBuyMenu) {
           setShowBuyMenu(false);
+        } else if (showMapModal) {
+          setShowMapModal(false);
         } else if (showScoreboard) {
           setShowScoreboard(false);
         } else if (showSettings) {
@@ -264,7 +319,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [appState, roundPhase, showBuyMenu, showScoreboard, showSettings]);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings]);
 
   const handleResumeGame = () => {
     setAppState('playing');
@@ -273,25 +328,23 @@ export default function App() {
   };
 
   const handleReturnToTitle = () => {
-    if (hitmarkerTimeoutRef.current) {
-      clearTimeout(hitmarkerTimeoutRef.current);
-      hitmarkerTimeoutRef.current = null;
-    }
-    setHitmarker(null);
     engineRef.current?.dispose();
     engineRef.current = null;
     setAppState('title');
+    setAttackerRoundsWon(0);
+    setDefenderRoundsWon(0);
+    setCurrentRound(1);
+    setKillFeed([]);
+    setMatchWinner(null);
     setShowBuyMenu(false);
+    setShowMapModal(false);
     setShowScoreboard(false);
     setShowSettings(false);
+    setIsBlinded(false);
+    setDamageFlash(false);
   };
 
   const handlePlayAgain = () => {
-    if (hitmarkerTimeoutRef.current) {
-      clearTimeout(hitmarkerTimeoutRef.current);
-      hitmarkerTimeoutRef.current = null;
-    }
-    setHitmarker(null);
     engineRef.current?.dispose();
     engineRef.current = null;
     setAttackerRoundsWon(0);
@@ -299,7 +352,7 @@ export default function App() {
     setCurrentRound(1);
     setKillFeed([]);
     setMatchWinner(null);
-    startGame();
+    startGame(lastMatchMode);
   };
 
   const handleBuyWeapon = (weaponId: string) => {
@@ -310,22 +363,25 @@ export default function App() {
     engineRef.current?.buyItem(shieldId);
   };
 
+  const handleOrientationChange = (portrait: boolean) => {
+    if (portrait && appState === 'playing') {
+      setAppState('paused');
+      engineRef.current?.setPaused(true);
+    }
+  };
+
   const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.ZEPHYR;
-  const playerCredits = playerStats[0]?.credits || 800;
+  const playerCredits = playerStats[0]?.credits ?? 800;
+  const hasPrimaryWeapon = Boolean(engineRef.current?.playerCombatant?.primaryWeapon);
 
   return (
     <div className="relative h-[100dvh] w-screen overflow-hidden bg-[#070b14] text-white">
-      {/* Mobile Orientation Guard */}
-      <OrientationGuard />
+      <OrientationGuard onOrientationChange={handleOrientationChange} />
 
       {/* 3D WebGL Canvas Mount Container */}
-      <div
-        ref={canvasMountRef}
-        data-testid="three-canvas"
-        className="absolute inset-0 h-full w-full"
-      />
+      <div ref={canvasMountRef} data-testid="three-canvas" className="absolute inset-0 h-full w-full" />
 
-      {/* Screen 1: Tactical Match Lobby */}
+      {/* Screen 1: Hollow Strike Main Lobby */}
       {appState === 'title' && (
         <div className="absolute inset-0 z-30">
           <LobbyScreen
@@ -336,8 +392,12 @@ export default function App() {
               setBotDifficulty(diff);
               engineRef.current?.botControllers.forEach((c) => c.setDifficulty(diff));
             }}
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            profile={profile}
+            onUpdateProfile={handleUpdateProfile}
+            onResetProfile={() => setProfile(resetProfileData())}
             onStartGame={startGame}
-            onOpenSettings={() => setShowSettings(true)}
           />
         </div>
       )}
@@ -350,10 +410,13 @@ export default function App() {
             allCombatants={engineRef.current.combatants}
             allStats={playerStats}
             agent={currentAgent}
+            abilityStates={abilityStates}
             weapon={currentWeapon}
             ammoInMag={ammoInMag}
             reserveAmmo={reserveAmmo}
             isReloading={isReloading}
+            activeSlot={activeSlot}
+            hasPrimaryWeapon={hasPrimaryWeapon}
             hp={hp}
             armor={armor}
             credits={playerCredits}
@@ -369,9 +432,21 @@ export default function App() {
             defuseProgress={defuseProgress}
             killFeed={killFeed}
             hitmarker={hitmarker}
+            hitFeedback={hitFeedback}
+            damageFlash={damageFlash}
+            crosshairColor={settings.crosshairColor}
+            crosshairSize={settings.crosshairSize}
+            isBlinded={isBlinded}
+            isPointerLocked={isPointerLocked}
+            isMobile={isMobile}
+            revealedEnemyIds={engineRef.current.abilityMgr.revealedEnemyIds}
             fps={fps}
             showFps={settings.showFps}
+            onTriggerAbility={(slot) => engineRef.current?.input.triggerMobileAbility(slot)}
+            onSwitchWeapon={(slot) => engineRef.current?.switchWeaponSlot(slot)}
+            onSkipBuyPhase={() => engineRef.current?.skipBuyPhase()}
             onOpenBuyMenu={() => setShowBuyMenu(true)}
+            onOpenMap={() => setShowMapModal(true)}
             onOpenScoreboard={() => setShowScoreboard(true)}
             onOpenPause={() => {
               setAppState('paused');
@@ -384,13 +459,22 @@ export default function App() {
             <MobileControls
               input={engineRef.current.input}
               agent={currentAgent}
+              abilityStates={abilityStates}
+              settings={settings}
+              roundPhase={roundPhase}
+              hasPrimaryWeapon={hasPrimaryWeapon}
+              activeSlot={activeSlot}
+              onSwitchWeapon={(slot) => engineRef.current?.switchWeaponSlot(slot)}
+              onSkipBuyPhase={() => engineRef.current?.skipBuyPhase()}
               onOpenBuyMenu={() => setShowBuyMenu(true)}
+              onOpenMap={() => setShowMapModal(true)}
               canPlantOrDefuse={
-                (engineRef.current.playerCombatant.team === 'ATTACKERS' && engineRef.current.playerCombatant.hasSpike && spikeState === 'not_planted') ||
+                (engineRef.current.playerCombatant.team === 'ATTACKERS' &&
+                  engineRef.current.playerCombatant.hasSpike &&
+                  spikeState === 'not_planted') ||
                 (engineRef.current.playerCombatant.team === 'DEFENDERS' && spikeState === 'planted')
               }
               isPlantingOrDefusing={plantProgress > 0 || defuseProgress > 0}
-              touchScale={settings.touchScale}
             />
           )}
         </>
@@ -403,9 +487,23 @@ export default function App() {
           currentWeaponId={currentWeapon.id}
           currentArmor={armor}
           agent={currentAgent}
+          canBuy={roundPhase === 'BUY_PHASE' || lastMatchMode === 'PRACTICE'}
           onBuyWeapon={handleBuyWeapon}
           onBuyShield={handleBuyShield}
           onClose={() => setShowBuyMenu(false)}
+        />
+      )}
+
+      {/* Tactical Map Modal */}
+      {showMapModal && engineRef.current && (
+        <TacticalMapModal
+          playerCombatant={engineRef.current.playerCombatant}
+          allCombatants={engineRef.current.combatants}
+          spikePosition={engineRef.current.spikePosition}
+          spikeState={spikeState}
+          playerTeam={engineRef.current.playerTeam}
+          revealedEnemyIds={engineRef.current.abilityMgr.revealedEnemyIds}
+          onClose={() => setShowMapModal(false)}
         />
       )}
 
@@ -435,12 +533,7 @@ export default function App() {
       {showSettings && (
         <SettingsModal
           settings={settings}
-          onUpdateSettings={(newSettings) => {
-            setSettings(newSettings);
-            if (engineRef.current) {
-              engineRef.current.applySettings(newSettings);
-            }
-          }}
+          onUpdateSettings={handleUpdateSettings}
           onClose={() => setShowSettings(false)}
         />
       )}

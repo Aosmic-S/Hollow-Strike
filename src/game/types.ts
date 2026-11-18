@@ -4,8 +4,10 @@
 
 export type TeamSide = 'ATTACKERS' | 'DEFENDERS';
 
-export type RoundPhase = 
-  | 'BUY_PHASE'       // 20s buy time, barrier up
+export type MatchMode = 'COMPETITIVE' | 'SKIRMISH' | 'PRACTICE';
+
+export type RoundPhase =
+  | 'BUY_PHASE'       // Buy time, barrier up
   | 'ROUND_LIVE'      // 100s live round
   | 'SPIKE_PLANTED'   // 45s spike detonation countdown
   | 'ROUND_END'       // 5s round wrap-up & score update
@@ -14,6 +16,8 @@ export type RoundPhase =
 export type BotDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 export type GraphicsPreset = 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
+
+export type ControlMode = 'AUTO' | 'TOUCH' | 'DESKTOP';
 
 export interface WeaponDef {
   id: string;
@@ -32,7 +36,7 @@ export interface WeaponDef {
   recoilPerShot: number;
   firstShotAccurate: boolean;
   canADS: boolean;
-  adsZoom: number;       // FOV multiplier (e.g. 0.65 or 0.3 for sniper)
+  adsZoom: number;       // FOV multiplier (e.g. 0.65 or 0.35 for sniper)
   description: string;
 }
 
@@ -57,6 +61,18 @@ export interface AbilityDef {
   iconType: string;
 }
 
+export interface AbilitySlotState {
+  keySlot: 'Q' | 'E' | 'C' | 'X';
+  charges: number;
+  maxCharges: number;
+  cooldownRemaining: number;
+  cooldownTotal: number;
+  isUltimate: boolean;
+  ultPoints: number;
+  ultRequired: number;
+  activeRemaining: number;
+}
+
 export interface AgentDef {
   id: string;
   name: string;
@@ -76,6 +92,16 @@ export interface KillEvent {
   weaponName: string;
   isHeadshot: boolean;
   timestamp: number;
+}
+
+export interface HitFeedback {
+  active: boolean;
+  isHeadshot: boolean;
+  isKill: boolean;
+  damage: number;
+  targetName: string;
+  targetHp: number;
+  targetMaxHp: number;
 }
 
 export interface PlayerStats {
@@ -98,18 +124,75 @@ export interface PlayerStats {
   hasSpike: boolean;
 }
 
+export type CrosshairColor = 'cyan' | 'green' | 'amber' | 'white' | 'rose';
+export type CrosshairSize = 'small' | 'medium' | 'large';
+
 export interface GameSettings {
   graphics: GraphicsPreset;
   fpsCap: 30 | 60 | 120 | 0; // 0 = unlimited
   showFps: boolean;
   mouseSensitivity: number;
   touchSensitivity: number;
+  adsSensitivityMultiplier: number;
+  invertY: boolean;
   fov: number;
+  crosshairColor: CrosshairColor;
+  crosshairSize: CrosshairSize;
   volume: number;
   soundEnabled: boolean;
   autoFireMobile: boolean;
   aimAssistMobile: boolean;
-  touchScale: number; // 0.8 - 1.2
+  touchScale: number; // 0.8 - 1.3
+  touchOpacity: number; // 0.3 - 1.0
+  controlMode: ControlMode;
+}
+
+export interface AgentCareerStats {
+  matches: number;
+  wins: number;
+  kills: number;
+  deaths: number;
+}
+
+export interface WeaponCareerStats {
+  kills: number;
+  headshots: number;
+  shotsFired: number;
+  shotsHit: number;
+  damageDealt: number;
+}
+
+export interface MatchRecord {
+  id: string;
+  timestamp: number;
+  mode: MatchMode;
+  difficulty: BotDifficulty;
+  agentId: string;
+  won: boolean;
+  playerTeam: TeamSide;
+  attackerScore: number;
+  defenderScore: number;
+  kills: number;
+  deaths: number;
+  headshots: number;
+  damageDealt: number;
+}
+
+export interface PlayerProfile {
+  callsign: string;
+  favoriteAgentId: string;
+  totalMatches: number;
+  wins: number;
+  losses: number;
+  kills: number;
+  deaths: number;
+  headshots: number;
+  damageDealt: number;
+  roundsWon: number;
+  roundsLost: number;
+  agentStats: Record<string, AgentCareerStats>;
+  weaponStats: Record<string, WeaponCareerStats>;
+  matchHistory: MatchRecord[];
 }
 
 export const WEAPON_REGISTRY: Record<string, WeaponDef> = {
@@ -121,7 +204,7 @@ export const WEAPON_REGISTRY: Record<string, WeaponDef> = {
     damageHead: 105,
     damageBody: 38,
     damageLeg: 28,
-    fireRate: 4.5,
+    fireRate: 5.0,
     magazineSize: 12,
     reserveAmmo: 36,
     reloadTime: 1.4,
@@ -228,7 +311,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 150,
         maxCharges: 2,
-        cooldownTime: 12,
+        cooldownTime: 10,
         description: 'Deploy an opaque sphere that blocks line of sight for 14 seconds.',
         iconType: 'smoke',
       },
@@ -239,7 +322,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 15,
+        cooldownTime: 14,
         description: 'Launch a chemical canister that creates a slowing, damaging corrosive pool.',
         iconType: 'puddle',
       },
@@ -250,8 +333,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 20,
-        description: 'Place a combat beacon granting +20% fire rate and reduced recoil to allies.',
+        cooldownTime: 18,
+        description: 'Place a combat beacon granting +25% fire rate and faster reloads.',
         iconType: 'beacon',
       },
       {
@@ -262,8 +345,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
-        ultPointsRequired: 7,
-        description: 'Cast a massive blackout field across an entire site, deafening and blinding foes.',
+        ultPointsRequired: 5,
+        description: 'Cast a massive blackout field across an area, blinding and slowing foes.',
         iconType: 'blackout',
       },
     ],
@@ -284,7 +367,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 250,
         maxCharges: 2,
         cooldownTime: 10,
-        description: 'Cast an explosive flare around corners that blinds any combatant looking at it.',
+        description: 'Cast an explosive flare forward that stuns and blinds nearby enemies.',
         iconType: 'flash',
       },
       {
@@ -293,8 +376,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         keySlot: 'Q',
         isUltimate: false,
         cost: 150,
-        maxCharges: 1,
-        cooldownTime: 12,
+        maxCharges: 2,
+        cooldownTime: 9,
         description: 'Instantly burst in your movement direction with rapid speed.',
         iconType: 'dash',
       },
@@ -305,8 +388,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 18,
-        description: 'Throw a shock grenade that concusses and disorients enemies in its radius.',
+        cooldownTime: 15,
+        description: 'Throw a shock charge that damages and slows enemies in its blast radius.',
         iconType: 'mine',
       },
       {
@@ -317,8 +400,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
-        ultPointsRequired: 6,
-        description: 'Ignite kinetic servos for 16s: +30% speed, instant reloads, and full health on kill.',
+        ultPointsRequired: 5,
+        description: 'Ignite kinetic servos for 12s: +35% speed, +30% fire rate, and heal on kill.',
         iconType: 'overdrive',
       },
     ],
@@ -327,7 +410,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
     id: 'BASTION',
     name: 'Bastion',
     role: 'SENTINEL',
-    description: 'Defensive engineer who holds chokepoints with solid energy barriers and trip sensors.',
+    description: 'Defensive engineer who holds chokepoints with solid energy barriers and sentry turrets.',
     primaryColor: '#3b82f6',
     accentColor: '#1d4ed8',
     abilities: [
@@ -338,8 +421,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 350,
         maxCharges: 1,
-        cooldownTime: 30,
-        description: 'Raise a 5-meter solid physical barrier wall blocking passage and bullets.',
+        cooldownTime: 22,
+        description: 'Raise a solid physical barrier wall blocking passage and bullets.',
         iconType: 'wall',
       },
       {
@@ -350,7 +433,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 200,
         maxCharges: 2,
         cooldownTime: 14,
-        description: 'Deploy a covert laser sensor that alerts your team and anchors intruders.',
+        description: 'Deploy a covert laser sensor that reveals and slows intruders.',
         iconType: 'tripwire',
       },
       {
@@ -360,8 +443,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 25,
-        description: 'Deploy an automated sentry turret that fires suppression bursts at spotted foes.',
+        cooldownTime: 22,
+        description: 'Deploy an automated sentry turret that fires bursts at spotted foes.',
         iconType: 'turret',
       },
       {
@@ -372,8 +455,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
-        ultPointsRequired: 7,
-        description: 'Channel an expanding containment field that disarms and slows all enemies caught in it.',
+        ultPointsRequired: 5,
+        description: 'Channel a containment dome that slows and weakens all enemies inside.',
         iconType: 'lockdown',
       },
     ],
@@ -393,8 +476,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 2,
-        cooldownTime: 15,
-        description: 'Channel rejuvenating nanites to heal an ally or self for up to 60 HP over 3s.',
+        cooldownTime: 12,
+        description: 'Channel rejuvenating nanites to heal yourself and nearby allies for +60 HP.',
         iconType: 'heal',
       },
       {
@@ -404,8 +487,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 250,
         maxCharges: 1,
-        cooldownTime: 20,
-        description: 'Fire a sonar dart that pulses twice, revealing enemies on the radar within line of sight.',
+        cooldownTime: 16,
+        description: 'Fire a sonar pulse revealing nearby enemies on the radar.',
         iconType: 'recon',
       },
       {
@@ -415,8 +498,8 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 16,
-        description: 'Launch a vortex that draws enemies inward and restricts their movement velocity.',
+        cooldownTime: 14,
+        description: 'Launch a vortex orb that slows and damages enemies caught inside.',
         iconType: 'gravity',
       },
       {
@@ -427,7 +510,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
-        ultPointsRequired: 8,
+        ultPointsRequired: 6,
         description: 'Channel cellular resurrection to revive a fallen teammate with 100 HP.',
         iconType: 'revive',
       },
@@ -435,7 +518,7 @@ export const AGENT_REGISTRY: Record<string, AgentDef> = {
   },
 };
 
-export const BUY_PHASE_DURATION = 20; // seconds
+export const BUY_PHASE_DURATION = 15; // seconds
 export const ROUND_LIVE_DURATION = 100; // seconds
 export const SPIKE_PLANT_DURATION = 4.0; // seconds to plant
 export const SPIKE_DEFUSE_DURATION = 5.0; // seconds to defuse

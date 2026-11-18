@@ -1,6 +1,6 @@
 /**
  * Hollow Strike - 3D Simulation & Game Engine
- * Decoupled fixed-timestep simulation, Three.js renderer, object pooling, and round orchestrator.
+ * Decoupled fixed-timestep simulation, Three.js renderer, object pooling, viewmodel animations, and round orchestrator.
  */
 
 import * as THREE from 'three';
@@ -13,6 +13,9 @@ import {
   PlayerStats,
   KillEvent,
   GameSettings,
+  MatchMode,
+  AbilitySlotState,
+  HitFeedback,
   WEAPON_REGISTRY,
   AGENT_REGISTRY,
   SHIELD_REGISTRY,
@@ -22,7 +25,6 @@ import {
   SPIKE_DEFUSE_DURATION,
   SPIKE_DETONATION_TIME,
   ROUND_END_DURATION,
-  ROUNDS_TO_WIN,
   HALF_TIME_ROUND,
   WeaponDef,
 } from './types';
@@ -35,6 +37,7 @@ import { soundEngine } from './audio';
 import { AbilityManager } from './abilities';
 import { BotCombatant, BotController } from './botAI';
 import { InputManager } from './inputManager';
+import { MatchSummaryPayload } from './profileStore';
 
 // Software GL detector per Three.js skill
 export const isSoftwareGl = (() => {
@@ -48,17 +51,17 @@ export const isSoftwareGl = (() => {
   return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
 })();
 
-// Reusable scratch objects to guarantee ZERO per-frame GC allocations
+// Reusable scratch objects — zero per-frame allocations
 const _vec3_1 = new THREE.Vector3();
 const _vec3_2 = new THREE.Vector3();
+const _vec3_3 = new THREE.Vector3();
+const _vec3_4 = new THREE.Vector3();
+const _vec3_5 = new THREE.Vector3();
+const _vmTargetPos = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
-const _siteA_pos = new THREE.Vector3(BOMB_SITE_A.x, 0, BOMB_SITE_A.z);
-const _siteB_pos = new THREE.Vector3(BOMB_SITE_B.x, 0, BOMB_SITE_B.z);
-const _aimDir = new THREE.Vector3();
-const _forward = new THREE.Vector3();
-const _origin = new THREE.Vector3();
-const _endPoint = new THREE.Vector3();
-const _botEyeOffset = new THREE.Vector3(0, 1.4, 0);
+// Enable Layer 0 (bots + map) and Layer 1 (player first-person hidden hitboxes)
+_raycaster.layers.enable(0);
+_raycaster.layers.enable(1);
 
 export interface EngineCallbacks {
   onStatsUpdate: (stats: PlayerStats[]) => void;
@@ -66,11 +69,17 @@ export interface EngineCallbacks {
   onRoundScoreChange: (attackerWins: number, defenderWins: number, currentRound: number) => void;
   onKillEvent: (event: KillEvent) => void;
   onPlayerHealthUpdate: (hp: number, armor: number, maxHp: number, maxArmor: number) => void;
-  onWeaponUpdate: (weapon: WeaponDef, ammoInMag: number, reserveAmmo: number, isReloading: boolean) => void;
+  onPlayerDamage?: (amount: number) => void;
+  onWeaponUpdate: (weapon: WeaponDef, ammoInMag: number, reserveAmmo: number, isReloading: boolean, activeSlot?: 1 | 2) => void;
   onSpikeStateUpdate: (state: 'not_planted' | 'planted' | 'defused' | 'detonated', timer: number, plantProgress: number, defuseProgress: number) => void;
   onHitmarker: (isHeadshot: boolean) => void;
+  onHitFeedback?: (feedback: HitFeedback) => void;
+  onAbilityStateUpdate?: (states: AbilitySlotState[]) => void;
+  onBlindStateChange?: (isBlinded: boolean) => void;
+  onPointerLockChange?: (locked: boolean) => void;
   onFpsUpdate: (fps: number) => void;
-  onMatchOver: (winner: TeamSide) => void;
+  onMatchOver: (winner: TeamSide, summary: MatchSummaryPayload) => void;
+  onPointerLockLost?: () => void;
 }
 
 export class GameEngine {
@@ -80,6 +89,7 @@ export class GameEngine {
   public input: InputManager;
   public settings: GameSettings;
   public abilityMgr: AbilityManager;
+  public matchMode: MatchMode;
 
   // Round & Economy State
   public roundPhase: RoundPhase = 'BUY_PHASE';
@@ -106,9 +116,36 @@ export class GameEngine {
   public botControllers: BotController[] = [];
   public playerStats: PlayerStats[] = [];
 
-  // Viewmodel & Hands
+  // Viewmodel & First-Person Animations
   public viewmodelRig: THREE.Group;
   public viewmodelWeapon: THREE.Group | null = null;
+  private viewmodelArms: THREE.Group;
+  private viewmodelFlash: THREE.Mesh;
+  private vmFlashTimer: number = 0;
+  private vmRecoilZ: number = 0;
+  private vmRecoilPitch: number = 0;
+  private vmWalkPhase: number = 0;
+  private vmEquipOffset: number = 0;
+  private vmSwayX: number = 0;
+  private vmSwayY: number = 0;
+  private vmLandOffset: number = 0;
+
+  // Player Jump/Eye Physics & Status
+  private playerVelY: number = 0;
+  private isGrounded: boolean = true;
+  private wasGrounded: boolean = true;
+  private playerEyeHeight: number = 1.65;
+  private playerOverdriveTimer: number = 0;
+  private abilitySlots: Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState> = {} as Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState>;
+  private abilitySyncTimer: number = 0;
+  private wasBlinded: boolean = false;
+
+  // Real Match Combat Telemetry
+  private playerHeadshots: number = 0;
+  private playerDamageDealt: number = 0;
+  private weaponBreakdown: MatchSummaryPayload['weaponBreakdown'] = {};
+  private botDifficulty: BotDifficulty = 'MEDIUM';
+
   public cameraShakeTrauma: number = 0;
   public hitstopTimer: number = 0;
 
@@ -121,9 +158,15 @@ export class GameEngine {
   private tracerLines: { line: THREE.Line; age: number; maxAge: number; inUse: boolean }[] = [];
   private sparks: { mesh: THREE.Mesh; vel: THREE.Vector3; age: number; maxAge: number; inUse: boolean }[] = [];
 
+  // Throttled UI Emissions
+  private lastNotifiedRoundPhase: RoundPhase | null = null;
+  private lastNotifiedRoundSecond: number = -1;
+  private lastNotifiedSpikeKey: string = '';
+
   // Runtime Tracking
   private frameId: number = 0;
   private lastTime: number = 0;
+  private lastRenderTime: number = 0;
   private isDestroyed: boolean = false;
   private isPaused: boolean = false;
   private callbacks: EngineCallbacks;
@@ -135,19 +178,26 @@ export class GameEngine {
     settings: GameSettings,
     playerAgentId: string,
     botDifficulty: BotDifficulty,
-    callbacks: EngineCallbacks
+    callbacks: EngineCallbacks,
+    matchMode: MatchMode = 'COMPETITIVE'
   ) {
     this.settings = settings;
     this.callbacks = callbacks;
-    this.input = new InputManager();
+    this.matchMode = matchMode;
+    this.input = new InputManager(settings.controlMode);
 
     // 1. Scene & Atmosphere Setup
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x090f1d);
-    this.scene.fog = new THREE.FogExp2(0x090f1d, 0.014);
+    this.scene.fog = new THREE.FogExp2(0x090f1d, 0.013);
 
     // 2. Camera Setup (Tactical First-Person FOV)
-    this.camera = new THREE.PerspectiveCamera(settings.fov, mountElement.clientWidth / mountElement.clientHeight, 0.1, 140);
+    this.camera = new THREE.PerspectiveCamera(
+      settings.fov,
+      Math.max(1, mountElement.clientWidth) / Math.max(1, mountElement.clientHeight),
+      0.1,
+      140
+    );
     this.camera.position.set(0, 1.65, 36);
 
     // 3. Renderer with Software GL Guard
@@ -160,7 +210,7 @@ export class GameEngine {
     this.renderer.toneMappingExposure = 1.15;
     this.applyGraphicsPreset(settings.graphics);
 
-    this.renderer.setSize(mountElement.clientWidth, mountElement.clientHeight);
+    this.renderer.setSize(mountElement.clientWidth || window.innerWidth, mountElement.clientHeight || window.innerHeight);
     mountElement.appendChild(this.renderer.domElement);
 
     // 4. Studio Environment Lighting via RoomEnvironment
@@ -169,7 +219,7 @@ export class GameEngine {
     pmremGenerator.dispose();
 
     // Warm Directional Key + Cool Hemisphere Fill
-    this.dirLight = new THREE.DirectionalLight(0xffedd5, 1.4);
+    this.dirLight = new THREE.DirectionalLight(0xffedd5, 1.45);
     this.dirLight.position.set(28, 45, 24);
     this.dirLight.castShadow = !isSoftwareGl && settings.graphics !== 'LOW';
     this.dirLight.shadow.mapSize.width = 1024;
@@ -183,35 +233,158 @@ export class GameEngine {
     this.dirLight.shadow.bias = -0.0005;
     this.scene.add(this.dirLight);
 
-    this.hemiLight = new THREE.HemisphereLight(0x7dd3fc, 0x1e293b, 0.6);
+    this.hemiLight = new THREE.HemisphereLight(0x7dd3fc, 0x1e293b, 0.65);
     this.scene.add(this.hemiLight);
 
     // 5. Abilities & Procedural Map
     this.abilityMgr = new AbilityManager(this.scene);
     this.mapData = buildTacticalMap(this.scene);
 
-    // 6. Viewmodel Rig
+    // 6. Viewmodel Rig, Tactical Hands, and Barrel Muzzle Flash
     this.viewmodelRig = new THREE.Group();
+    this.viewmodelArms = this.createViewmodelHands(playerAgentId);
+    this.viewmodelFlash = this.createViewmodelFlash();
+    this.viewmodelRig.add(this.viewmodelArms);
     this.camera.add(this.viewmodelRig);
     this.scene.add(this.camera);
 
     // 7. Initialize Object Pools (Tracers & Sparks)
     this.initObjectPools();
 
-    // 8. Attach Input
+    // 8. Attach Input & pointer lock handlers
+    this.botDifficulty = botDifficulty;
     this.input.attach(this.renderer.domElement);
     this.input.mouseSensitivity = settings.mouseSensitivity;
     this.input.touchSensitivity = settings.touchSensitivity;
+    this.input.adsSensitivityMultiplier = settings.adsSensitivityMultiplier ?? 0.7;
+    this.input.invertY = settings.invertY ?? false;
+    this.input.onPointerLockLost = () => {
+      if (this.roundPhase !== 'MATCH_OVER' && !this.isPaused) {
+        this.setPaused(true);
+        this.callbacks.onPointerLockLost?.();
+      }
+    };
+    this.input.onPointerLockChange = (locked) => {
+      this.callbacks.onPointerLockChange?.(locked);
+    };
 
-    // 9. Initialize 5v5 Combatants (Player + 4 bot allies vs 5 bot opponents)
+    // 9. Initialize 5v5 Combatants & Mode Setup
     this.initCombatants(playerAgentId, botDifficulty);
+    this.initAbilitySlots(playerAgentId);
+    this.configureInitialPhaseForMode();
 
     // 10. Start simulation loop
     this.lastTime = performance.now();
+    this.lastRenderTime = performance.now();
     this.tick();
 
     // Window Resize listener
     window.addEventListener('resize', this.handleResize);
+  }
+
+  private createViewmodelHands(agentId: string): THREE.Group {
+    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+    const handsGroup = new THREE.Group();
+
+    const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.75, metalness: 0.2 });
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, metalness: 0.35 });
+    const accentMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(agent.primaryColor),
+      emissive: new THREE.Color(agent.primaryColor),
+      emissiveIntensity: 0.5,
+    });
+
+    // Right Forearm + Glove (holding grip)
+    const rForearm = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.068, 0.28), sleeveMat);
+    rForearm.position.set(0.04, -0.09, 0.14);
+    rForearm.rotation.set(0.25, -0.15, 0);
+    const rGlove = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.062, 0.11), gloveMat);
+    rGlove.position.set(0.01, -0.055, 0.01);
+    const rBand = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.018, 0.04), accentMat);
+    rBand.position.set(0.025, -0.07, 0.06);
+
+    // Left Support Forearm + Glove (under forend)
+    const lForearm = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.062, 0.28), sleeveMat);
+    lForearm.position.set(-0.14, -0.11, 0.02);
+    lForearm.rotation.set(0.32, 0.55, 0);
+    const lGlove = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.056, 0.10), gloveMat);
+    lGlove.position.set(-0.04, -0.04, -0.11);
+
+    handsGroup.add(rForearm, rGlove, rBand, lForearm, lGlove);
+    return handsGroup;
+  }
+
+  private createViewmodelFlash(): THREE.Mesh {
+    const flashGeo = new THREE.OctahedronGeometry(0.07, 0);
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xfef08a,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+    });
+    const flash = new THREE.Mesh(flashGeo, flashMat);
+    flash.position.set(0, 0.045, -0.52);
+    flash.visible = false;
+    flash.raycast = () => {};
+    return flash;
+  }
+
+  private configureInitialPhaseForMode(): void {
+    if (this.matchMode === 'PRACTICE') {
+      this.roundPhase = 'ROUND_LIVE';
+      this.roundTimer = 300;
+      this.mapData.barrierAttackers.visible = false;
+      this.mapData.barrierDefenders.visible = false;
+      this.playerStats[0].credits = 9000;
+      // Start bots roaming/engaging immediately in Practice
+      for (const ctrl of this.botControllers) {
+        ctrl.planRound(false, null);
+      }
+      this.callbacks.onStatsUpdate([...this.playerStats]);
+      this.callbacks.onRoundPhaseChange(this.roundPhase, this.roundTimer);
+    } else if (this.matchMode === 'SKIRMISH') {
+      this.roundPhase = 'BUY_PHASE';
+      this.roundTimer = 8;
+      this.playerStats.forEach((s) => {
+        s.credits = 2900;
+      });
+      this.callbacks.onStatsUpdate([...this.playerStats]);
+      this.callbacks.onRoundPhaseChange(this.roundPhase, this.roundTimer);
+    } else {
+      this.roundPhase = 'BUY_PHASE';
+      this.roundTimer = BUY_PHASE_DURATION;
+      this.callbacks.onRoundPhaseChange(this.roundPhase, this.roundTimer);
+    }
+  }
+
+  private initAbilitySlots(agentId: string): void {
+    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+    const slots = {} as Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState>;
+    for (const ab of agent.abilities) {
+      const ultReq = ab.ultPointsRequired ?? 5;
+      slots[ab.keySlot] = {
+        keySlot: ab.keySlot,
+        charges: ab.isUltimate ? 0 : ab.maxCharges,
+        maxCharges: ab.maxCharges,
+        cooldownRemaining: 0,
+        cooldownTotal: ab.cooldownTime,
+        isUltimate: ab.isUltimate,
+        ultPoints: ab.isUltimate && this.matchMode === 'PRACTICE' ? ultReq : 0,
+        ultRequired: ultReq,
+        activeRemaining: 0,
+      };
+    }
+    this.abilitySlots = slots;
+    this.emitAbilityStates();
+  }
+
+  private emitAbilityStates(): void {
+    this.callbacks.onAbilityStateUpdate?.([
+      this.abilitySlots.Q,
+      this.abilitySlots.E,
+      this.abilitySlots.C,
+      this.abilitySlots.X,
+    ]);
   }
 
   public setPaused(paused: boolean): void {
@@ -221,24 +394,28 @@ export class GameEngine {
     }
   }
 
-  public applySettings(newSettings: GameSettings): void {
-    const oldSettings = this.settings;
-    this.settings = newSettings;
+  public setUiBlocking(blocked: boolean): void {
+    this.input.setUiBlocking(blocked);
+  }
 
-    if (oldSettings.graphics !== newSettings.graphics) {
-      this.applyGraphicsPreset(newSettings.graphics);
+  public skipBuyPhase(): void {
+    if (this.roundPhase === 'BUY_PHASE') {
+      this.roundTimer = 0;
     }
+  }
 
-    this.input.mouseSensitivity = newSettings.mouseSensitivity;
-    this.input.touchSensitivity = newSettings.touchSensitivity;
-
-    // Apply Live FOV
+  public updateSettings(newSettings: GameSettings): void {
+    this.settings = newSettings;
     this.camera.fov = newSettings.fov;
     this.camera.updateProjectionMatrix();
-
-    // Apply Live Audio settings
     soundEngine.setVolume(newSettings.volume);
     soundEngine.setMuted(!newSettings.soundEnabled);
+    this.input.mouseSensitivity = newSettings.mouseSensitivity;
+    this.input.touchSensitivity = newSettings.touchSensitivity;
+    this.input.adsSensitivityMultiplier = newSettings.adsSensitivityMultiplier ?? 0.7;
+    this.input.invertY = newSettings.invertY ?? false;
+    this.input.detectDevice(newSettings.controlMode);
+    this.applyGraphicsPreset(newSettings.graphics);
   }
 
   public applyGraphicsPreset(preset: GraphicsPreset): void {
@@ -271,13 +448,12 @@ export class GameEngine {
   }
 
   private initObjectPools(): void {
-    // 25 Bullet Tracers
     const lineMat = new THREE.LineBasicMaterial({
       color: 0xfef08a,
       transparent: true,
       opacity: 0.9,
     });
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 30; i++) {
       const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
       const line = new THREE.Line(geo, lineMat);
       line.visible = false;
@@ -285,8 +461,7 @@ export class GameEngine {
       this.tracerLines.push({ line, age: 0, maxAge: 0.08, inUse: false });
     }
 
-    // 80 Impact Sparks
-    const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
+    const sparkGeo = new THREE.BoxGeometry(0.045, 0.045, 0.045);
     const sparkMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
     for (let i = 0; i < 80; i++) {
       const mesh = new THREE.Mesh(sparkGeo, sparkMat);
@@ -302,14 +477,17 @@ export class GameEngine {
     this.playerStats = [];
 
     const agentKeys = Object.keys(AGENT_REGISTRY);
-
-    // 1. Create Human Player
     const playerAgent = AGENT_REGISTRY[playerAgentId] || AGENT_REGISTRY.ZEPHYR;
     const playerMesh = createAgentModel(playerAgent, this.playerTeam);
-    playerMesh.root.visible = false; // Hide third-person body for first person camera
+    // Keep visible = true so bot raycasts always hit live hitboxMeshes, but isolate to Layer 1 so FP camera (Layer 0) doesn't render self-body
+    playerMesh.root.visible = true;
+    playerMesh.root.traverse((obj) => {
+      obj.layers.set(1);
+    });
     this.scene.add(playerMesh.root);
 
     const initialSpawn = this.playerTeam === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
+    const playerStartYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI; // Three.js -Z is North at yaw=0
 
     this.playerCombatant = {
       id: 'player_0',
@@ -320,14 +498,22 @@ export class GameEngine {
       hp: 100,
       armor: 0,
       alive: true,
+      deathTimer: 0,
       position: new THREE.Vector3(initialSpawn.x, 0, initialSpawn.z),
       velocity: new THREE.Vector3(),
-      yaw: this.playerTeam === 'ATTACKERS' ? Math.PI : 0,
+      yaw: playerStartYaw,
       pitch: 0,
       hasSpike: this.playerTeam === 'ATTACKERS',
       weapon: WEAPON_REGISTRY.APEX_9,
       ammoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
       reserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+      primaryWeapon: null,
+      primaryAmmoInMag: 0,
+      primaryReserveAmmo: 0,
+      sidearmWeapon: WEAPON_REGISTRY.APEX_9,
+      sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
+      sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+      activeSlot: 2,
       reloadTimer: 0,
       shootCooldown: 0,
       isPlanting: false,
@@ -335,8 +521,11 @@ export class GameEngine {
       actionProgress: 0,
       modelPackage: playerMesh,
     };
-    this.combatants.push(this.playerCombatant);
+    playerMesh.root.position.copy(this.playerCombatant.position);
+    playerMesh.root.rotation.y = this.playerCombatant.yaw;
+    playerMesh.root.updateMatrixWorld(true);
 
+    this.combatants.push(this.playerCombatant);
     if (this.playerCombatant.hasSpike) {
       this.spikeCarrierId = this.playerCombatant.id;
     }
@@ -351,7 +540,7 @@ export class GameEngine {
       deaths: 0,
       assists: 0,
       score: 0,
-      credits: 800,
+      credits: this.matchMode === 'PRACTICE' ? 9000 : this.matchMode === 'SKIRMISH' ? 2900 : 800,
       ping: 12,
       alive: true,
       hp: 100,
@@ -361,7 +550,7 @@ export class GameEngine {
       hasSpike: this.playerCombatant.hasSpike,
     });
 
-    // 2. Create 4 Bot Teammates
+    // Create 4 Bot Teammates
     const allySpawn = initialSpawn;
     for (let i = 1; i <= 4; i++) {
       const agentKey = agentKeys[i % agentKeys.length];
@@ -369,7 +558,10 @@ export class GameEngine {
       const mesh = createAgentModel(agent, this.playerTeam);
       this.scene.add(mesh.root);
 
-      const offsetX = (i - 2.5) * 2.8;
+      const offsetX = (i - 2.5) * 3.0;
+      const startYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI;
+      const startWeapon = this.matchMode === 'SKIRMISH' ? WEAPON_REGISTRY.VIPER_9 : WEAPON_REGISTRY.APEX_9;
+
       const bot: BotCombatant = {
         id: `ally_${i}`,
         name: `Ally ${agent.name}`,
@@ -379,14 +571,22 @@ export class GameEngine {
         hp: 100,
         armor: 0,
         alive: true,
+        deathTimer: 0,
         position: new THREE.Vector3(allySpawn.x + offsetX, 0, allySpawn.z),
         velocity: new THREE.Vector3(),
-        yaw: this.playerTeam === 'ATTACKERS' ? Math.PI : 0,
+        yaw: startYaw,
         pitch: 0,
         hasSpike: false,
-        weapon: WEAPON_REGISTRY.APEX_9,
-        ammoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-        reserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+        weapon: startWeapon,
+        ammoInMag: startWeapon.magazineSize,
+        reserveAmmo: startWeapon.reserveAmmo,
+        primaryWeapon: startWeapon.category !== 'SIDEARM' ? startWeapon : null,
+        primaryAmmoInMag: startWeapon.category !== 'SIDEARM' ? startWeapon.magazineSize : 0,
+        primaryReserveAmmo: startWeapon.category !== 'SIDEARM' ? startWeapon.reserveAmmo : 0,
+        sidearmWeapon: WEAPON_REGISTRY.APEX_9,
+        sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
+        sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+        activeSlot: startWeapon.category !== 'SIDEARM' ? 1 : 2,
         reloadTimer: 0,
         shootCooldown: 0,
         isPlanting: false,
@@ -394,10 +594,13 @@ export class GameEngine {
         actionProgress: 0,
         modelPackage: mesh,
       };
+      mesh.setWeapon(startWeapon.id);
+      mesh.root.position.copy(bot.position);
+      mesh.root.rotation.y = bot.yaw;
+      mesh.root.updateMatrixWorld(true);
 
       this.combatants.push(bot);
-      const ctrl = new BotController(bot, difficulty);
-      this.botControllers.push(ctrl);
+      this.botControllers.push(new BotController(bot, difficulty));
 
       this.playerStats.push({
         id: bot.id,
@@ -410,7 +613,7 @@ export class GameEngine {
         assists: 0,
         score: 0,
         credits: 800,
-        ping: 24 + Math.floor(Math.random() * 10),
+        ping: Math.floor(Math.random() * 20 + 15),
         alive: true,
         hp: 100,
         maxHp: 100,
@@ -420,34 +623,44 @@ export class GameEngine {
       });
     }
 
-    // 3. Create 5 Bot Enemies
-    const enemyTeam: TeamSide = this.playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
-    const enemySpawn = enemyTeam === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
-
+    // Create 5 Bot Opponents
+    const oppTeam: TeamSide = this.playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
+    const oppSpawn = oppTeam === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
     for (let i = 1; i <= 5; i++) {
-      const agentKey = agentKeys[(i + 1) % agentKeys.length];
+      const agentKey = agentKeys[(i + 2) % agentKeys.length];
       const agent = AGENT_REGISTRY[agentKey];
-      const mesh = createAgentModel(agent, enemyTeam);
+      const mesh = createAgentModel(agent, oppTeam);
       this.scene.add(mesh.root);
 
-      const offsetX = (i - 3) * 2.8;
+      const offsetX = (i - 3) * 3.0;
+      const startYaw = oppTeam === 'ATTACKERS' ? 0 : Math.PI;
+      const startWeapon = this.matchMode === 'SKIRMISH' ? WEAPON_REGISTRY.VIPER_9 : WEAPON_REGISTRY.APEX_9;
+
       const bot: BotCombatant = {
-        id: `enemy_${i}`,
-        name: `Hostile ${agent.name}`,
-        team: enemyTeam,
+        id: `opp_${i}`,
+        name: `Foe ${agent.name}`,
+        team: oppTeam,
         agentId: agent.id,
         isHuman: false,
         hp: 100,
         armor: 0,
         alive: true,
-        position: new THREE.Vector3(enemySpawn.x + offsetX, 0, enemySpawn.z),
+        deathTimer: 0,
+        position: new THREE.Vector3(oppSpawn.x + offsetX, 0, oppSpawn.z),
         velocity: new THREE.Vector3(),
-        yaw: enemyTeam === 'ATTACKERS' ? Math.PI : 0,
+        yaw: startYaw,
         pitch: 0,
-        hasSpike: enemyTeam === 'ATTACKERS' && i === 1,
-        weapon: WEAPON_REGISTRY.APEX_9,
-        ammoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-        reserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+        hasSpike: oppTeam === 'ATTACKERS' && i === 1,
+        weapon: startWeapon,
+        ammoInMag: startWeapon.magazineSize,
+        reserveAmmo: startWeapon.reserveAmmo,
+        primaryWeapon: startWeapon.category !== 'SIDEARM' ? startWeapon : null,
+        primaryAmmoInMag: startWeapon.category !== 'SIDEARM' ? startWeapon.magazineSize : 0,
+        primaryReserveAmmo: startWeapon.category !== 'SIDEARM' ? startWeapon.reserveAmmo : 0,
+        sidearmWeapon: WEAPON_REGISTRY.APEX_9,
+        sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
+        sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
+        activeSlot: startWeapon.category !== 'SIDEARM' ? 1 : 2,
         reloadTimer: 0,
         shootCooldown: 0,
         isPlanting: false,
@@ -455,14 +668,13 @@ export class GameEngine {
         actionProgress: 0,
         modelPackage: mesh,
       };
-
-      if (bot.hasSpike) {
-        this.spikeCarrierId = bot.id;
-      }
+      mesh.setWeapon(startWeapon.id);
+      mesh.root.position.copy(bot.position);
+      mesh.root.rotation.y = bot.yaw;
+      mesh.root.updateMatrixWorld(true);
 
       this.combatants.push(bot);
-      const ctrl = new BotController(bot, difficulty);
-      this.botControllers.push(ctrl);
+      this.botControllers.push(new BotController(bot, difficulty));
 
       this.playerStats.push({
         id: bot.id,
@@ -475,7 +687,7 @@ export class GameEngine {
         assists: 0,
         score: 0,
         credits: 800,
-        ping: 30 + Math.floor(Math.random() * 12),
+        ping: Math.floor(Math.random() * 25 + 20),
         alive: true,
         hp: 100,
         maxHp: 100,
@@ -485,50 +697,93 @@ export class GameEngine {
       });
     }
 
-    // Set initial viewmodel weapon
-    this.updateViewmodelWeapon(this.playerCombatant.weapon.id);
+    this.updateViewmodelWeapon(WEAPON_REGISTRY.APEX_9.id);
+    this.camera.position.set(this.playerCombatant.position.x, 1.65, this.playerCombatant.position.z);
+    this.camera.rotation.order = 'YXZ';
+    this.camera.rotation.y = this.playerCombatant.yaw;
+    this.camera.rotation.x = 0;
+
+    this.callbacks.onStatsUpdate([...this.playerStats]);
+    this.callbacks.onPlayerHealthUpdate(100, 0, 100, 50);
+    this.callbacks.onWeaponUpdate(this.playerCombatant.weapon, this.playerCombatant.ammoInMag, this.playerCombatant.reserveAmmo, false, 2);
   }
 
-  public updateViewmodelWeapon(weaponId: string): void {
+  private updateViewmodelWeapon(weaponId: string): void {
     if (this.viewmodelWeapon) {
+      this.viewmodelWeapon.remove(this.viewmodelFlash);
       this.viewmodelRig.remove(this.viewmodelWeapon);
     }
 
     switch (weaponId) {
       case 'APEX_9':
         this.viewmodelWeapon = createApex9Model();
-        this.viewmodelWeapon.position.set(0.22, -0.16, -0.38);
+        this.viewmodelFlash.position.set(0, 0.045, -0.22);
         break;
       case 'VIPER_9':
         this.viewmodelWeapon = createViper9Model();
-        this.viewmodelWeapon.position.set(0.24, -0.18, -0.42);
+        this.viewmodelFlash.position.set(0, 0.045, -0.44);
         break;
       case 'PHANTOM_V':
         this.viewmodelWeapon = createPhantomVModel();
-        this.viewmodelWeapon.position.set(0.24, -0.18, -0.45);
+        this.viewmodelFlash.position.set(0, 0.045, -0.66);
         break;
       case 'VOID_LANCE':
         this.viewmodelWeapon = createVoidLanceModel();
-        this.viewmodelWeapon.position.set(0.26, -0.2, -0.5);
+        this.viewmodelFlash.position.set(0, 0.045, -0.98);
         break;
       default:
         this.viewmodelWeapon = createApex9Model();
-        this.viewmodelWeapon.position.set(0.22, -0.16, -0.38);
+        this.viewmodelFlash.position.set(0, 0.045, -0.22);
     }
 
+    this.viewmodelWeapon.position.set(0.28, -0.24, -0.42);
+    this.viewmodelWeapon.add(this.viewmodelFlash);
     this.viewmodelRig.add(this.viewmodelWeapon);
+    this.vmEquipOffset = -0.22; // Trigger raise animation
   }
 
-  // --- Main Tick Loop ---
+  public switchWeaponSlot(slot: 1 | 2): boolean {
+    const p = this.playerCombatant;
+    if (!p.alive) return false;
+    if (slot === 1 && !p.primaryWeapon) return false;
+    if (slot === p.activeSlot) return false;
+
+    // Save current slot's ammo
+    if (p.activeSlot === 1) {
+      p.primaryAmmoInMag = p.ammoInMag;
+      p.primaryReserveAmmo = p.reserveAmmo;
+    } else {
+      p.sidearmAmmoInMag = p.ammoInMag;
+      p.sidearmReserveAmmo = p.reserveAmmo;
+    }
+
+    p.activeSlot = slot;
+    p.reloadTimer = 0;
+
+    if (slot === 1 && p.primaryWeapon) {
+      p.weapon = p.primaryWeapon;
+      p.ammoInMag = p.primaryAmmoInMag;
+      p.reserveAmmo = p.primaryReserveAmmo;
+    } else {
+      p.weapon = p.sidearmWeapon;
+      p.ammoInMag = p.sidearmAmmoInMag;
+      p.reserveAmmo = p.sidearmReserveAmmo;
+    }
+
+    this.input.setMobileADS(false);
+    this.updateViewmodelWeapon(p.weapon.id);
+    soundEngine.playReload();
+    this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
+    return true;
+  }
+
   private tick = (): void => {
     if (this.isDestroyed) return;
 
     const now = performance.now();
-
-    // Check FPS Cap (30 / 60 / 120 or 0 for uncapped)
-    if (this.settings.fpsCap && this.settings.fpsCap > 0) {
-      const minFrameTime = 1000 / this.settings.fpsCap;
-      if (now - this.lastTime < minFrameTime - 1.0) {
+    if (this.settings.fpsCap > 0) {
+      const targetInterval = 1000 / this.settings.fpsCap;
+      if (now - this.lastRenderTime < targetInterval - 1.0) {
         this.frameId = requestAnimationFrame(this.tick);
         return;
       }
@@ -536,13 +791,13 @@ export class GameEngine {
 
     const rawDt = (now - this.lastTime) / 1000;
     this.lastTime = now;
-    const dt = Math.min(rawDt, 0.05); // Clamped simulation step per ultra skill
+    this.lastRenderTime = now;
+    const dt = Math.min(rawDt, 0.05);
 
-    // FPS calculation
     this.fpsCounter++;
     this.fpsTimer += rawDt;
     if (this.fpsTimer >= 0.5) {
-      const currentFps = Math.round((this.fpsCounter / this.fpsTimer));
+      const currentFps = Math.round(this.fpsCounter / this.fpsTimer);
       this.callbacks.onFpsUpdate(currentFps);
       this.fpsCounter = 0;
       this.fpsTimer = 0;
@@ -552,57 +807,91 @@ export class GameEngine {
       this.updateSimulation(dt);
     }
 
-    // Render frame
     this.renderer.render(this.scene, this.camera);
-
     this.frameId = requestAnimationFrame(this.tick);
   };
 
   private updateSimulation(dt: number): void {
     this.input.update();
 
-    // Hitstop freeze timer
+    if (this.input.state.startRoundJustPressed && this.roundPhase === 'BUY_PHASE') {
+      this.skipBuyPhase();
+    }
+
     if (this.hitstopTimer > 0) {
       this.hitstopTimer -= dt;
       return;
     }
 
-    // 1. Round Phase Orchestration
     this.updateRoundState(dt);
-
-    // 2. Player Input, Movement & Gunplay
     this.updatePlayer(dt);
 
-    // 3. Bot AI Updates
-    for (const ctrl of this.botControllers) {
-      ctrl.update(
-        dt,
-        this.combatants,
-        this.spikeState,
-        this.spikePosition,
-        this.plantedSite,
-        this.abilityMgr,
-        (shooter, dir) => this.fireBullet(shooter, dir)
-      );
+    // Bots stay put during BUY_PHASE
+    if (this.roundPhase !== 'BUY_PHASE') {
+      for (const ctrl of this.botControllers) {
+        ctrl.update(
+          dt,
+          this.combatants,
+          this.spikeState,
+          this.spikePosition,
+          this.plantedSite,
+          this.abilityMgr,
+          this.mapData.collidableMeshes,
+          (shooter, dir) => this.fireBullet(shooter, dir),
+          (bot, site) => this.handleBotPlantComplete(bot, site),
+          () => this.handleBotDefuseComplete()
+        );
+      }
     }
 
-    // 4. Ability Effects (Smokes, Walls, Recon Pulses)
-    this.abilityMgr.update(dt);
+    this.abilityMgr.update(
+      dt,
+      this.combatants,
+      (target, dmgAmount, label) => this.applyExternalDamage(target, dmgAmount, label),
+      (origin, dir, team) => this.fireTurretShot(origin, dir, team)
+    );
 
-    // 5. Update Particle Pools
+    // Notify HUD if player blind state changed
+    const isBlinded = this.abilityMgr.blindedCombatantIds.has(this.playerCombatant.id);
+    if (isBlinded !== this.wasBlinded) {
+      this.wasBlinded = isBlinded;
+      this.callbacks.onBlindStateChange?.(isBlinded);
+    }
+
     this.updateTracersAndSparks(dt);
-
-    // 6. Camera Shake & Viewmodel Smoothing
     this.updateCameraEffects(dt);
-
-    // 7. Clear transient per-frame inputs
     this.input.clearFrameDeltas();
+  }
+
+  private handleBotPlantComplete(bot: BotCombatant, site: 'A' | 'B'): void {
+    if (this.spikeState !== 'not_planted') return;
+    this.spikeState = 'planted';
+    this.plantedSite = site;
+    this.spikePosition = bot.position.clone();
+    bot.hasSpike = false;
+
+    if (!this.spikeMesh) {
+      this.spikeMesh = createSpikeModel();
+      this.scene.add(this.spikeMesh);
+    }
+    this.spikeMesh.position.copy(this.spikePosition);
+    soundEngine.playSpikePlant();
+
+    for (const ctrl of this.botControllers) {
+      ctrl.planRound(true, this.plantedSite);
+    }
+  }
+
+  private handleBotDefuseComplete(): void {
+    if (this.spikeState !== 'planted') return;
+    this.spikeState = 'defused';
+    soundEngine.playSpikeDefused();
+    this.endRound('DEFENDERS', 'SPIKE_DEFUSED');
   }
 
   private updateRoundState(dt: number): void {
     this.roundTimer -= dt;
 
-    // Buy Phase logic
     if (this.roundPhase === 'BUY_PHASE') {
       this.mapData.barrierAttackers.visible = true;
       this.mapData.barrierDefenders.visible = true;
@@ -614,26 +903,25 @@ export class GameEngine {
         this.mapData.barrierDefenders.visible = false;
         soundEngine.playRoundStart();
 
-        // Bot paths start
         for (const ctrl of this.botControllers) {
           ctrl.planRound(false, null);
         }
       }
     } else if (this.roundPhase === 'ROUND_LIVE') {
-      // Live 100s combat
       if (this.spikeState === 'planted') {
         this.roundPhase = 'SPIKE_PLANTED';
       } else if (this.roundTimer <= 0) {
-        // Time expired -> Defenders win round
-        this.endRound('DEFENDERS', 'TIME_EXPIRED');
+        if (this.matchMode === 'PRACTICE') {
+          this.roundTimer = 300;
+        } else {
+          this.endRound('DEFENDERS', 'TIME_EXPIRED');
+        }
       }
     } else if (this.roundPhase === 'SPIKE_PLANTED') {
-      // 45s Spike Bomb countdown
       this.spikeTimer -= dt;
       this.spikeBeepTimer -= dt;
 
-      // Beep tempo accelerates as timer reaches 0
-      const urgencyFraction = 1 - (this.spikeTimer / SPIKE_DETONATION_TIME);
+      const urgencyFraction = 1 - this.spikeTimer / SPIKE_DETONATION_TIME;
       const beepInterval = Math.max(0.12, 1.0 - urgencyFraction * 0.88);
 
       if (this.spikeBeepTimer <= 0) {
@@ -653,8 +941,7 @@ export class GameEngine {
       }
     }
 
-    // Check eliminations
-    if (this.roundPhase === 'ROUND_LIVE' || this.roundPhase === 'SPIKE_PLANTED') {
+    if ((this.roundPhase === 'ROUND_LIVE' || this.roundPhase === 'SPIKE_PLANTED') && this.matchMode !== 'PRACTICE') {
       const aliveAtt = this.combatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
       const aliveDef = this.combatants.filter((c) => c.alive && c.team === 'DEFENDERS').length;
 
@@ -662,59 +949,100 @@ export class GameEngine {
       if (check.roundOver && check.winner) {
         this.endRound(check.winner, check.reason!);
       }
+    } else if (this.matchMode === 'PRACTICE' && this.roundPhase === 'ROUND_LIVE') {
+      // Auto-respawn fallen enemies in Practice Range after their collapse finishes
+      for (const c of this.combatants) {
+        if (!c.alive && !c.isHuman && c.deathTimer <= 0) {
+          c.alive = true;
+          c.hp = 100;
+          c.armor = 0;
+          c.modelPackage.resetPose();
+          c.modelPackage.root.visible = true;
+          const spawnBase = c.team === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
+          c.position.set(spawnBase.x + (Math.random() - 0.5) * 14, 0, spawnBase.z * 0.55);
+          c.modelPackage.root.position.copy(c.position);
+          c.modelPackage.root.updateMatrixWorld(true);
+        }
+      }
     }
 
-    // Notify UI
-    this.callbacks.onRoundPhaseChange(this.roundPhase, Math.max(0, this.roundTimer));
+    const sec = Math.max(0, Math.ceil(this.roundTimer));
+    if (this.roundPhase !== this.lastNotifiedRoundPhase || sec !== this.lastNotifiedRoundSecond) {
+      this.lastNotifiedRoundPhase = this.roundPhase;
+      this.lastNotifiedRoundSecond = sec;
+      this.callbacks.onRoundPhaseChange(this.roundPhase, Math.max(0, this.roundTimer));
+    }
   }
 
   private updatePlayer(dt: number): void {
-    if (!this.playerCombatant.alive) return;
-
     const p = this.playerCombatant;
+    if (!p.alive) return;
 
-    // 1. Camera Look Rotation
-    p.yaw -= this.input.state.lookDeltaX;
-    p.pitch -= this.input.state.lookDeltaY;
-    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch)); // Clamp pitch
-
-    // 2. Weapon Slot Change
-    if (this.input.state.weaponSlotJustPressed) {
-      const slot = this.input.state.weaponSlotJustPressed;
-      const weaponDef = slot === 1 ? WEAPON_REGISTRY.PHANTOM_V : slot === 2 ? WEAPON_REGISTRY.APEX_9 : slot === 3 ? WEAPON_REGISTRY.VIPER_9 : WEAPON_REGISTRY.VOID_LANCE;
-      p.weapon = weaponDef;
-      p.ammoInMag = Math.min(p.ammoInMag, weaponDef.magazineSize);
-      this.updateViewmodelWeapon(weaponDef.id);
-      this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false);
+    // 1. Tick ability cooldowns & buffs
+    this.tickPlayerAbilityCooldowns(dt);
+    if (this.playerOverdriveTimer > 0) {
+      this.playerOverdriveTimer = Math.max(0, this.playerOverdriveTimer - dt);
     }
 
-    // 3. Movement
+    // 2. Apply look rotation (mouse or touch) & viewmodel sway feedback
+    const dx = this.input.state.lookDeltaX;
+    const dy = this.input.state.lookDeltaY;
+    p.yaw -= dx;
+    p.pitch -= dy;
+    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch));
+    this.vmSwayX = THREE.MathUtils.clamp(this.vmSwayX + dx * 0.38, -0.045, 0.045);
+    this.vmSwayY = THREE.MathUtils.clamp(this.vmSwayY + dy * 0.38, -0.045, 0.045);
+
+    // 3. Weapon Slot Switching (1 = Primary, 2 = Sidearm)
+    if (this.input.state.weaponSlotJustPressed) {
+      const slot = this.input.state.weaponSlotJustPressed;
+      if (slot === 1 || slot === 2) {
+        this.switchWeaponSlot(slot);
+      } else if (slot === 3 || slot === 4) {
+        this.switchWeaponSlot(p.activeSlot === 1 ? 2 : 1);
+      }
+    }
+
+    // 4. Movement & Status Modifiers
     const fwd = this.input.state.moveForward;
     const right = this.input.state.moveRight;
-    const isMoving = fwd !== 0 || right !== 0;
+    const isMoving = Math.abs(fwd) > 0.05 || Math.abs(right) > 0.05;
 
-    let baseSpeed = 5.4; // m/s
-    if (this.input.state.crouchHeld) baseSpeed *= 0.5;
+    let baseSpeed = 5.6;
+    if (this.input.state.crouchHeld) baseSpeed *= 0.52;
     if (this.input.state.adsHeld && p.weapon.canADS) baseSpeed *= 0.65;
+    if (this.playerOverdriveTimer > 0) baseSpeed *= 1.35;
+    if (this.abilityMgr.slowedCombatantIds.has(p.id)) baseSpeed *= 0.55;
 
-    _vec3_1.set(
-      Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * right,
-      0,
-      Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * right
-    ).normalize();
+    const sin = Math.sin(p.yaw);
+    const cos = Math.cos(p.yaw);
+
+    _vec3_1.set(-sin * fwd + cos * right, 0, -cos * fwd - sin * right);
+    if (isMoving) {
+      _vec3_1.normalize();
+      this.vmWalkPhase += dt * (this.input.state.crouchHeld ? 6.5 : 10.5);
+    }
 
     p.velocity.x = _vec3_1.x * baseSpeed;
     p.velocity.z = _vec3_1.z * baseSpeed;
 
-    // Collision check against map colliders
     const nextX = p.position.x + p.velocity.x * dt;
     const nextZ = p.position.z + p.velocity.z * dt;
 
-    // Respect Buy Phase barrier
     let blockedByBarrier = false;
     if (this.roundPhase === 'BUY_PHASE') {
       if (p.team === 'ATTACKERS' && nextZ < 18.2) blockedByBarrier = true;
       if (p.team === 'DEFENDERS' && nextZ > -25.8) blockedByBarrier = true;
+    }
+
+    // Check Bastion tactical energy barriers
+    if (!blockedByBarrier) {
+      for (const b of this.abilityMgr.barriers) {
+        if (Math.abs(nextX - b.position.x) < b.width * 0.52 && Math.abs(nextZ - b.position.z) < 0.75) {
+          blockedByBarrier = true;
+          break;
+        }
+      }
     }
 
     if (!blockedByBarrier) {
@@ -723,101 +1051,256 @@ export class GameEngine {
         p.position.x = nextX;
         p.position.z = nextZ;
       } else {
-        // Slide along normal
-        p.position.x += col.normalX * 0.08;
-        p.position.z += col.normalZ * 0.08;
+        // Slide along wall normal cleanly
+        const tryX = checkCollision(nextX, p.position.z, 0.45);
+        if (!tryX.collided) p.position.x = nextX;
+        const tryZ = checkCollision(p.position.x, nextZ, 0.45);
+        if (!tryZ.collided) p.position.z = nextZ;
       }
     }
 
-    // Footsteps sound
-    if (isMoving && Math.random() < dt * 2.8) {
+    // 5. Jump & Gravity Physics + Landing Dip
+    if (this.input.state.jumpJustPressed && this.isGrounded) {
+      this.playerVelY = 6.2;
+      this.isGrounded = false;
+    }
+    if (!this.isGrounded || p.position.y > 0) {
+      this.playerVelY -= 19.5 * dt;
+      p.position.y += this.playerVelY * dt;
+      if (p.position.y <= 0) {
+        p.position.y = 0;
+        this.playerVelY = 0;
+        this.isGrounded = true;
+      }
+    }
+    if (!this.wasGrounded && this.isGrounded) {
+      this.vmLandOffset = -0.055;
+      soundEngine.playFootstep();
+    }
+    this.wasGrounded = this.isGrounded;
+
+    if (isMoving && this.isGrounded && Math.random() < dt * 2.8) {
       soundEngine.playFootstep();
     }
 
-    // Camera follow player position
-    const eyeHeight = this.input.state.crouchHeld ? 1.05 : 1.65;
-    this.camera.position.set(p.position.x, eyeHeight, p.position.z);
+    const targetEye = this.input.state.crouchHeld ? 1.08 : 1.65;
+    this.playerEyeHeight = THREE.MathUtils.damp(this.playerEyeHeight, targetEye, 16, dt);
+
+    // CRITICAL: Keep player's 3rd-person hitbox rig synchronized with live player transform so enemies hit the player
+    p.modelPackage.root.position.copy(p.position);
+    p.modelPackage.root.rotation.y = p.yaw;
+    p.modelPackage.updateAnimation(
+      dt,
+      isMoving,
+      baseSpeed,
+      this.input.state.crouchHeld,
+      !p.alive,
+      p.pitch,
+      p.reloadTimer > 0
+    );
+    p.modelPackage.root.updateMatrixWorld(true);
+
+    this.camera.position.set(p.position.x, p.position.y + this.playerEyeHeight, p.position.z);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = p.yaw;
     this.camera.rotation.x = p.pitch;
+    this.camera.updateMatrixWorld(true);
 
-    // 4. Reload Logic
+    // 6. Reload Handling
+    const hasStim = this.abilityMgr.hasActiveStimNear(p.position, p.team);
+    const reloadSpeedMult = hasStim || this.playerOverdriveTimer > 0 ? 1.35 : 1.0;
+
     if (this.input.state.reloadJustPressed && p.ammoInMag < p.weapon.magazineSize && p.reserveAmmo > 0 && p.reloadTimer <= 0) {
-      p.reloadTimer = p.weapon.reloadTime;
+      p.reloadTimer = p.weapon.reloadTime / reloadSpeedMult;
       soundEngine.playReload();
-      this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true);
+      this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true, p.activeSlot);
     }
 
     if (p.reloadTimer > 0) {
       p.reloadTimer -= dt;
       if (p.reloadTimer <= 0) {
+        p.reloadTimer = 0;
         const needed = p.weapon.magazineSize - p.ammoInMag;
         const take = Math.min(needed, p.reserveAmmo);
         p.ammoInMag += take;
         p.reserveAmmo -= take;
-        this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false);
+        this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
       }
     }
 
-    // 5. Fire Weapon
     if (p.shootCooldown > 0) p.shootCooldown -= dt;
 
-    const wantsToFire = this.input.state.fireHeld || this.input.state.fireJustPressed;
-    if (wantsToFire && p.shootCooldown <= 0 && p.reloadTimer <= 0 && this.roundPhase !== 'BUY_PHASE') {
-      if (p.ammoInMag > 0) {
+    // 7. Mobile Aim Assist & Auto-Fire Assistance
+    let autoFireTrigger = false;
+    if (this.input.isMobile && (this.settings.aimAssistMobile || this.settings.autoFireMobile) && this.roundPhase !== 'BUY_PHASE') {
+      autoFireTrigger = this.evaluateMobileAimAndAutoFire(dt);
+    }
+
+    // 8. Firing Logic
+    const wantsToFire = this.input.state.fireHeld || this.input.state.fireJustPressed || autoFireTrigger;
+    if (wantsToFire && p.shootCooldown <= 0 && p.reloadTimer <= 0) {
+      if (this.roundPhase === 'BUY_PHASE') {
+        if (this.input.state.fireJustPressed) {
+          p.shootCooldown = 0.25;
+          soundEngine.playHitmarker(false);
+        }
+      } else if (p.ammoInMag > 0) {
+        const fireRateMult = (hasStim ? 1.25 : 1.0) * (this.playerOverdriveTimer > 0 ? 1.3 : 1.0);
         p.ammoInMag--;
-        p.shootCooldown = 1 / p.weapon.fireRate;
-        this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false);
+        p.shootCooldown = 1 / (p.weapon.fireRate * fireRateMult);
+        this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
 
-        // Calculate recoil & spread
-        const isJumping = false;
-        const spread = calculateSpread(p.weapon, isMoving, isJumping, this.input.state.crouchHeld, this.input.state.adsHeld);
+        const spread = calculateSpread(p.weapon, isMoving, !this.isGrounded, this.input.state.crouchHeld, this.input.state.adsHeld);
 
-        // Camera direction + spread
-        this.camera.getWorldDirection(_aimDir);
-        _aimDir.x += (Math.random() - 0.5) * spread;
-        _aimDir.y += (Math.random() - 0.5) * spread * 0.8;
-        _aimDir.z += (Math.random() - 0.5) * spread;
-        _aimDir.normalize();
+        this.camera.getWorldDirection(_vec3_2);
+        _vec3_2.x += (Math.random() - 0.5) * spread;
+        _vec3_2.y += (Math.random() - 0.5) * spread * 0.8;
+        _vec3_2.z += (Math.random() - 0.5) * spread;
+        _vec3_2.normalize();
 
-        this.fireBullet(p, _aimDir);
+        // Trigger viewmodel kick & muzzle flash
+        this.vmFlashTimer = 0.045;
+        this.vmRecoilZ = 0.085;
+        this.vmRecoilPitch = 0.14;
+        this.viewmodelFlash.visible = true;
+        this.viewmodelFlash.rotation.z = Math.random() * Math.PI;
 
-        // Recoil kick on viewmodel and pitch
-        p.pitch += p.weapon.recoilPerShot * 0.45;
-        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.15);
-      } else {
-        // Empty mag click
-        if (this.input.state.fireJustPressed && p.reserveAmmo > 0) {
-          p.reloadTimer = p.weapon.reloadTime;
-          soundEngine.playReload();
+        this.fireBullet(p, _vec3_2);
+
+        p.pitch = Math.min(1.45, p.pitch + p.weapon.recoilPerShot * 0.42);
+        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.14);
+      } else if ((this.input.state.fireJustPressed || autoFireTrigger) && p.reserveAmmo > 0) {
+        p.reloadTimer = p.weapon.reloadTime / reloadSpeedMult;
+        soundEngine.playReload();
+        this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true, p.activeSlot);
+      }
+    }
+
+    this.updatePlayerSpikeActions(dt);
+    this.updatePlayerAbilities();
+  }
+
+  private evaluateMobileAimAndAutoFire(dt: number): boolean {
+    const p = this.playerCombatant;
+    this.camera.getWorldDirection(_vec3_2);
+
+    // Aim Assist: subtly pull crosshair toward visible enemy upper chest within tight cone
+    if (this.settings.aimAssistMobile) {
+      let bestTarget: BotCombatant | null = null;
+      let bestDot = 0.962;
+
+      for (const c of this.combatants) {
+        if (!c.alive || c.team === p.team) continue;
+        _vec3_3.set(c.position.x, c.position.y + 1.32, c.position.z).sub(this.camera.position);
+        const dist = _vec3_3.length();
+        if (dist > 45 || dist < 1.0) continue;
+        _vec3_3.divideScalar(dist);
+        const dot = _vec3_2.dot(_vec3_3);
+        if (dot > bestDot) {
+          bestDot = dot;
+          bestTarget = c;
+        }
+      }
+
+      if (bestTarget) {
+        _vec3_3.set(bestTarget.position.x, bestTarget.position.y + 1.32, bestTarget.position.z).sub(this.camera.position).normalize();
+        const desiredYaw = Math.atan2(-_vec3_3.x, -_vec3_3.z);
+        const desiredPitch = Math.asin(Math.max(-0.98, Math.min(0.98, _vec3_3.y)));
+        let yawDiff = ((desiredYaw - p.yaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+        if (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+        p.yaw += yawDiff * Math.min(1, dt * 5.5);
+        p.pitch += (desiredPitch - p.pitch) * Math.min(1, dt * 5.5);
+      }
+    }
+
+    // Auto-Fire: raycast directly along crosshair
+    if (this.settings.autoFireMobile) {
+      this.camera.getWorldDirection(_vec3_2);
+      _raycaster.set(this.camera.position, _vec3_2);
+      _raycaster.far = 55;
+
+      let enemyDist = Infinity;
+      for (const c of this.combatants) {
+        if (!c.alive || c.team === p.team) continue;
+        c.modelPackage.root.updateMatrixWorld(true);
+        const hits = _raycaster.intersectObjects(c.modelPackage.hitboxMeshes, false);
+        if (hits.length > 0 && hits[0].distance < enemyDist) {
+          enemyDist = hits[0].distance;
+        }
+      }
+
+      if (enemyDist < Infinity) {
+        const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+        const wallDist = wallHits.length > 0 ? wallHits[0].distance : Infinity;
+        if (enemyDist < wallDist) {
+          return true;
         }
       }
     }
 
-    // 6. Spike Planting & Defusing by Player
-    this.updatePlayerSpikeActions(dt);
+    return false;
+  }
 
-    // 7. Player Abilities (Q, E, C, X)
-    this.updatePlayerAbilities();
+  private tickPlayerAbilityCooldowns(dt: number): void {
+    let changed = false;
+    for (const key of ['Q', 'E', 'C', 'X'] as const) {
+      const st = this.abilitySlots[key];
+      if (!st) continue;
+      if (st.cooldownRemaining > 0) {
+        st.cooldownRemaining = Math.max(0, st.cooldownRemaining - dt);
+        changed = true;
+      }
+      if (key === 'X' && st.activeRemaining > 0) {
+        st.activeRemaining = Math.max(0, st.activeRemaining - dt);
+        changed = true;
+      }
+    }
+
+    this.abilitySyncTimer += dt;
+    if (changed && this.abilitySyncTimer >= 0.1) {
+      this.abilitySyncTimer = 0;
+      this.emitAbilityStates();
+    }
+  }
+
+  private tryConsumeAbility(slotKey: 'Q' | 'E' | 'C' | 'X'): boolean {
+    if (this.roundPhase === 'BUY_PHASE' && this.matchMode !== 'PRACTICE') {
+      // Allow utility/heal/info checks or block offensive casts cleanly
+      return false;
+    }
+
+    const st = this.abilitySlots[slotKey];
+    if (!st) return false;
+
+    if (st.isUltimate) {
+      if (st.ultPoints < st.ultRequired) return false;
+      st.ultPoints = 0;
+      st.charges = 0;
+      this.emitAbilityStates();
+      return true;
+    }
+
+    if (st.charges <= 0 || st.cooldownRemaining > 0) return false;
+    st.charges--;
+    st.cooldownRemaining = st.cooldownTotal;
+    this.emitAbilityStates();
+    return true;
   }
 
   private updatePlayerSpikeActions(dt: number): void {
     const p = this.playerCombatant;
 
-    // Check if in site A or B
-    const distA = p.position.distanceTo(_siteA_pos);
-    const distB = p.position.distanceTo(_siteB_pos);
+    const distA = p.position.distanceTo(_vec3_1.set(BOMB_SITE_A.x, 0, BOMB_SITE_A.z));
+    const distB = p.position.distanceTo(_vec3_2.set(BOMB_SITE_B.x, 0, BOMB_SITE_B.z));
     const inSiteA = distA < BOMB_SITE_A.radius;
     const inSiteB = distB < BOMB_SITE_B.radius;
 
-    // Plant logic (Attacker)
     if (p.team === 'ATTACKERS' && p.hasSpike && this.spikeState === 'not_planted' && (inSiteA || inSiteB)) {
       if (this.input.state.plantDefuseHeld) {
         p.isPlanting = true;
         p.actionProgress += dt / SPIKE_PLANT_DURATION;
 
         if (p.actionProgress >= 1.0) {
-          // Plant successful!
           this.spikeState = 'planted';
           this.plantedSite = inSiteA ? 'A' : 'B';
           this.spikePosition = p.position.clone();
@@ -825,14 +1308,20 @@ export class GameEngine {
           p.isPlanting = false;
           p.actionProgress = 0;
 
-          // Spawn 3D spike mesh
-          this.spikeMesh = createSpikeModel();
+          if (!this.spikeMesh) {
+            this.spikeMesh = createSpikeModel();
+            this.scene.add(this.spikeMesh);
+          }
           this.spikeMesh.position.copy(this.spikePosition);
-          this.scene.add(this.spikeMesh);
-
           soundEngine.playSpikePlant();
 
-          // Alert bots to rotate
+          // Plant grants +1 Ult point
+          const ultSlot = this.abilitySlots.X;
+          if (ultSlot) {
+            ultSlot.ultPoints = Math.min(ultSlot.ultRequired, ultSlot.ultPoints + 1);
+            this.emitAbilityStates();
+          }
+
           for (const ctrl of this.botControllers) {
             ctrl.planRound(true, this.plantedSite);
           }
@@ -843,7 +1332,6 @@ export class GameEngine {
       }
     }
 
-    // Defuse logic (Defender)
     if (p.team === 'DEFENDERS' && this.spikeState === 'planted' && this.spikePosition) {
       const distToSpike = p.position.distanceTo(this.spikePosition);
       if (distToSpike < 2.8 && this.input.state.plantDefuseHeld) {
@@ -863,69 +1351,259 @@ export class GameEngine {
       }
     }
 
-    this.callbacks.onSpikeStateUpdate(
-      this.spikeState,
-      this.spikeTimer,
-      p.isPlanting ? p.actionProgress : 0,
-      p.isDefusing ? p.actionProgress : 0
-    );
+    const plantPct = p.isPlanting ? Math.round(p.actionProgress * 100) : 0;
+    const defusePct = p.isDefusing ? Math.round(p.actionProgress * 100) : 0;
+    const spikeSec = Math.round(this.spikeTimer * 10);
+    const spikeKey = `${this.spikeState}_${spikeSec}_${plantPct}_${defusePct}`;
+    if (spikeKey !== this.lastNotifiedSpikeKey) {
+      this.lastNotifiedSpikeKey = spikeKey;
+      this.callbacks.onSpikeStateUpdate(
+        this.spikeState,
+        this.spikeTimer,
+        p.isPlanting ? p.actionProgress : 0,
+        p.isDefusing ? p.actionProgress : 0
+      );
+    }
+  }
+
+  private findTargetPointAhead(maxRange: number): THREE.Vector3 {
+    this.camera.getWorldDirection(_vec3_4);
+    _raycaster.set(this.camera.position, _vec3_4);
+    _raycaster.far = maxRange;
+    const hits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+    if (hits.length > 0 && hits[0].distance < maxRange) {
+      return _vec3_5.copy(hits[0].point);
+    }
+    return _vec3_5.copy(this.playerCombatant.position).addScaledVector(_vec3_4, maxRange);
   }
 
   private updatePlayerAbilities(): void {
     const p = this.playerCombatant;
-    this.camera.getWorldDirection(_forward);
+    this.camera.getWorldDirection(_vec3_1);
 
-    if (this.input.state.abilityEJustPressed) {
+    // [E] Primary Signature Ability
+    if (this.input.state.abilityEJustPressed && this.tryConsumeAbility('E')) {
       if (p.agentId === 'ZEPHYR') {
-        // Hollow Smoke: deploys 12m forward
-        const targetPos = p.position.clone().add(_forward.clone().multiplyScalar(14));
-        this.abilityMgr.deploySmoke(targetPos.x, 0, targetPos.z);
+        const pt = this.findTargetPointAhead(14);
+        this.abilityMgr.deploySmoke(pt.x, 0, pt.z, 14);
       } else if (p.agentId === 'BLITZ') {
-        // Blind Pulse flash
-        soundEngine.playAbility('FLASH');
-        this.cameraShakeTrauma = 0.4;
+        this.abilityMgr.throwFlashOrb(this.camera.position.x, this.camera.position.y - 0.1, this.camera.position.z, _vec3_1, p.team);
+        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.25);
       } else if (p.agentId === 'BASTION') {
-        // Barrier Wall 4m forward
-        const wallPos = p.position.clone().add(_forward.clone().multiplyScalar(5));
-        this.abilityMgr.deployBarrier(wallPos.x, 0, wallPos.z, p.yaw);
+        const pt = this.findTargetPointAhead(5);
+        this.abilityMgr.deployBarrier(pt.x, 0, pt.z, p.yaw, 20);
       } else if (p.agentId === 'LUMEN') {
-        // Healing burst: heal player up to 100
-        p.hp = Math.min(100, p.hp + 50);
+        for (const ally of this.combatants) {
+          if (!ally.alive || ally.team !== p.team) continue;
+          const healAmt = ally.isHuman ? 60 : 40;
+          if (ally.isHuman || ally.position.distanceTo(p.position) < 15) {
+            ally.hp = Math.min(100, ally.hp + healAmt);
+            const st = this.playerStats.find((s) => s.id === ally.id);
+            if (st) st.hp = ally.hp;
+          }
+        }
         soundEngine.playAbility('HEAL');
         this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
+        this.callbacks.onStatsUpdate([...this.playerStats]);
       }
     }
 
-    if (this.input.state.abilityQJustPressed) {
-      if (p.agentId === 'BLITZ') {
-        // Kinetic dash
-        p.position.add(_forward.clone().multiplyScalar(7));
+    // [Q] Secondary Tactical Ability
+    if (this.input.state.abilityQJustPressed && this.tryConsumeAbility('Q')) {
+      if (p.agentId === 'ZEPHYR') {
+        const pt = this.findTargetPointAhead(12);
+        this.abilityMgr.deployZone('TOXIN', pt.x, pt.z, 4.2, 8.0, p.team);
+      } else if (p.agentId === 'BLITZ') {
+        // Collision-safe stepped kinetic dash (prevents phasing through walls)
+        _vec3_2.set(_vec3_1.x, 0, _vec3_1.z).normalize();
+        for (let step = 0; step < 12; step++) {
+          const nx = p.position.x + _vec3_2.x * 0.65;
+          const nz = p.position.z + _vec3_2.z * 0.65;
+          if (checkCollision(nx, nz, 0.5).collided) break;
+          p.position.x = nx;
+          p.position.z = nz;
+        }
         soundEngine.playAbility('DASH');
+        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.22);
+      } else if (p.agentId === 'BASTION') {
+        const pt = this.findTargetPointAhead(7);
+        this.abilityMgr.deployZone('LOCKDOWN', pt.x, pt.z, 3.8, 14.0, p.team);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants);
       } else if (p.agentId === 'LUMEN') {
-        // Recon pulse
-        this.abilityMgr.triggerReconPulse(p.position.x, 0, p.position.z, p.team);
+        this.abilityMgr.triggerReconPulse(p.position.x, 0, p.position.z, p.team, this.combatants);
       }
     }
 
-    if (this.input.state.abilityXJustPressed) {
-      // Ultimate
-      soundEngine.playAbility('ULT');
-      this.cameraShakeTrauma = 0.8;
+    // [C] Utility / Deployable Ability
+    if (this.input.state.abilityCJustPressed && this.tryConsumeAbility('C')) {
+      if (p.agentId === 'ZEPHYR') {
+        this.abilityMgr.deployZone('STIM', p.position.x, p.position.z, 5.5, 10.0, p.team);
+      } else if (p.agentId === 'BLITZ') {
+        const pt = this.findTargetPointAhead(10);
+        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.8, 4.5, p.team);
+        for (const c of this.combatants) {
+          if (c.alive && c.team !== p.team && c.position.distanceTo(pt) < 5.2) {
+            this.applyExternalDamage(c, 35, 'Concussion Mine');
+            this.abilityMgr.slowedCombatantIds.set(c.id, 3.0);
+          }
+        }
+        soundEngine.playAbility('FLASH');
+      } else if (p.agentId === 'BASTION') {
+        const pt = this.findTargetPointAhead(4);
+        this.abilityMgr.deployTurret(pt.x, pt.z, p.yaw, p.team);
+      } else if (p.agentId === 'LUMEN') {
+        const pt = this.findTargetPointAhead(12);
+        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.5, 6.0, p.team);
+      }
     }
+
+    // [X] Ultimate Ability
+    if (this.input.state.abilityXJustPressed && this.tryConsumeAbility('X')) {
+      if (p.agentId === 'ZEPHYR') {
+        const pt = this.findTargetPointAhead(18);
+        this.abilityMgr.deployZone('BLACKOUT', pt.x, pt.z, 8.5, 9.0, p.team);
+        this.cameraShakeTrauma = 0.7;
+      } else if (p.agentId === 'BLITZ') {
+        this.playerOverdriveTimer = 12.0;
+        this.abilitySlots.X.activeRemaining = 12.0;
+        soundEngine.playAbility('ULT');
+        this.cameraShakeTrauma = 0.65;
+        this.emitAbilityStates();
+      } else if (p.agentId === 'BASTION') {
+        this.abilityMgr.deployZone('LOCKDOWN', p.position.x, p.position.z, 11.0, 10.0, p.team);
+        this.cameraShakeTrauma = 0.7;
+      } else if (p.agentId === 'LUMEN') {
+        // Resurgence: Revive fallen teammate, or supercharge self shield + health if all alive
+        const fallenAlly = this.combatants.find((c) => !c.alive && !c.isHuman && c.team === p.team);
+        if (fallenAlly) {
+          fallenAlly.alive = true;
+          fallenAlly.hp = 100;
+          fallenAlly.armor = 25;
+          fallenAlly.deathTimer = 0;
+          fallenAlly.modelPackage.resetPose();
+          fallenAlly.modelPackage.root.visible = true;
+          fallenAlly.position.set(p.position.x + 1.5, 0, p.position.z + 1.5);
+          fallenAlly.modelPackage.root.position.copy(fallenAlly.position);
+          fallenAlly.modelPackage.root.updateMatrixWorld(true);
+
+          const st = this.playerStats.find((s) => s.id === fallenAlly.id);
+          if (st) {
+            st.alive = true;
+            st.hp = 100;
+            st.armor = 25;
+          }
+          this.callbacks.onStatsUpdate([...this.playerStats]);
+        } else {
+          p.hp = 100;
+          p.armor = Math.min(50, p.armor + 50);
+          this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
+        }
+        soundEngine.playAbility('ULT');
+        this.cameraShakeTrauma = 0.65;
+      }
+    }
+  }
+
+  private fireTurretShot(origin: THREE.Vector3, dir: THREE.Vector3, team: string): void {
+    soundEngine.playGunshot('SMG');
+    _raycaster.set(origin, dir);
+    _raycaster.far = 30;
+
+    let closestTarget: BotCombatant | null = null;
+    let closestDist = Infinity;
+    let closestPoint: THREE.Vector3 | null = null;
+
+    for (const c of this.combatants) {
+      if (!c.alive || c.team === team) continue;
+      c.modelPackage.root.updateMatrixWorld(true);
+      const hits = _raycaster.intersectObjects(c.modelPackage.hitboxMeshes, false);
+      if (hits.length > 0 && hits[0].distance < closestDist) {
+        closestDist = hits[0].distance;
+        closestTarget = c;
+        closestPoint = hits[0].point;
+      }
+    }
+
+    const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+    const worldDist = worldHits.length > 0 ? worldHits[0].distance : Infinity;
+
+    if (closestTarget && closestPoint && closestDist < worldDist) {
+      this.spawnTracer(origin, closestPoint);
+      this.applyExternalDamage(closestTarget, 16, 'Sentinel Turret');
+    } else if (worldHits.length > 0) {
+      this.spawnTracer(origin, worldHits[0].point);
+      this.spawnSparks(worldHits[0].point);
+    } else {
+      _vec3_3.copy(origin).addScaledVector(dir, 28);
+      this.spawnTracer(origin, _vec3_3);
+    }
+  }
+
+  private applyExternalDamage(victim: BotCombatant, rawDamage: number, sourceLabel: string): void {
+    if (!victim.alive) return;
+    const armorAbsorb = Math.min(victim.armor, Math.round(rawDamage * 0.4));
+    victim.armor = Math.max(0, victim.armor - armorAbsorb);
+    victim.hp = Math.max(0, victim.hp - (rawDamage - armorAbsorb));
+    victim.modelPackage.triggerHitFlash();
+
+    const victimStats = this.playerStats.find((s) => s.id === victim.id);
+    if (victimStats) {
+      victimStats.hp = victim.hp;
+      victimStats.armor = victim.armor;
+    }
+
+    if (victim.team !== this.playerTeam) {
+      soundEngine.playHitmarker(false);
+      this.callbacks.onHitmarker(false);
+      this.callbacks.onHitFeedback?.({
+        active: true,
+        isHeadshot: false,
+        isKill: victim.hp <= 0,
+        damage: rawDamage,
+        targetName: victim.name,
+        targetHp: victim.hp,
+        targetMaxHp: 100,
+      });
+    }
+
+    if (victim.isHuman) {
+      soundEngine.playPlayerHurt();
+      this.callbacks.onPlayerDamage?.(rawDamage);
+      this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.25);
+      this.callbacks.onPlayerHealthUpdate(victim.hp, victim.armor, 100, 50);
+    }
+
+    if (victim.hp <= 0) {
+      this.handleCombatantDeath(this.playerCombatant, victim, sourceLabel, false);
+    }
+  }
+
+  private getWeaponEntry(weaponId: string) {
+    if (!this.weaponBreakdown[weaponId]) {
+      this.weaponBreakdown[weaponId] = {
+        kills: 0,
+        headshots: 0,
+        shotsFired: 0,
+        shotsHit: 0,
+        damageDealt: 0,
+      };
+    }
+    return this.weaponBreakdown[weaponId];
   }
 
   public fireBullet(shooter: BotCombatant, dir: THREE.Vector3): void {
     soundEngine.playGunshot(shooter.weapon.category);
 
     if (shooter.isHuman) {
-      _origin.copy(this.camera.position);
-    } else {
-      _origin.copy(shooter.position).add(_botEyeOffset);
+      this.getWeaponEntry(shooter.weapon.id).shotsFired++;
     }
 
-    // Raycast against all alive enemy combatants
-    _raycaster.set(_origin, dir);
-    _raycaster.far = 100;
+    const origin = shooter.isHuman
+      ? _vec3_1.copy(this.camera.position)
+      : _vec3_1.copy(shooter.position).add(_vec3_4.set(0, 1.38, 0));
+
+    _raycaster.set(origin, dir);
+    _raycaster.far = 110;
 
     let closestHit: { combatant: BotCombatant; hitZone: 'head' | 'body' | 'leg'; point: THREE.Vector3 } | null = null;
     let closestDist = Infinity;
@@ -933,13 +1611,9 @@ export class GameEngine {
     for (const target of this.combatants) {
       if (!target.alive || target.team === shooter.team) continue;
 
-      // Check hit against head, torso, legs
-      const hits = _raycaster.intersectObjects([
-        target.modelPackage.headMesh,
-        target.modelPackage.torsoMesh,
-        target.modelPackage.leftLeg,
-        target.modelPackage.rightLeg,
-      ]);
+      // Sync world matrices immediately so animated/moving targets register 100% accurately
+      target.modelPackage.root.updateMatrixWorld(true);
+      const hits = _raycaster.intersectObjects(target.modelPackage.hitboxMeshes, false);
 
       if (hits.length > 0) {
         const hit = hits[0];
@@ -951,8 +1625,21 @@ export class GameEngine {
       }
     }
 
-    // Check hit against static world colliders
-    const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes);
+    // Check Bastion tactical energy barriers too
+    const barrierMeshes = this.abilityMgr.getBarrierMeshes();
+    let barrierDist = Infinity;
+    let barrierPoint: THREE.Vector3 | null = null;
+    let hitBarrierIdx = -1;
+    if (barrierMeshes.length > 0) {
+      const bHits = _raycaster.intersectObjects(barrierMeshes, false);
+      if (bHits.length > 0) {
+        barrierDist = bHits[0].distance;
+        barrierPoint = bHits[0].point;
+        hitBarrierIdx = this.abilityMgr.barriers.findIndex((b) => b.mesh === bHits[0].object);
+      }
+    }
+
+    const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
     let worldDist = Infinity;
     let worldPoint: THREE.Vector3 | null = null;
     if (worldHits.length > 0) {
@@ -960,20 +1647,24 @@ export class GameEngine {
       worldPoint = worldHits[0].point;
     }
 
-    if (closestHit && closestDist < worldDist) {
-      // Hit Enemy!
-      _endPoint.copy(closestHit.point);
+    if (closestHit && closestDist < worldDist && closestDist < barrierDist) {
+      _vec3_3.copy(closestHit.point);
       this.applyDamage(shooter, closestHit.combatant, closestHit.hitZone, closestDist);
+      this.spawnSparks(closestHit.point);
+    } else if (barrierPoint && barrierDist < worldDist) {
+      _vec3_3.copy(barrierPoint);
+      this.spawnSparks(barrierPoint);
+      if (hitBarrierIdx >= 0) {
+        this.abilityMgr.barriers[hitBarrierIdx].hp -= shooter.weapon.damageBody;
+      }
     } else if (worldPoint) {
-      // Hit Wall / Crate
-      _endPoint.copy(worldPoint);
+      _vec3_3.copy(worldPoint);
       this.spawnSparks(worldPoint);
     } else {
-      _endPoint.copy(_origin).addScaledVector(dir, 80);
+      _vec3_3.copy(origin).addScaledVector(dir, 80);
     }
 
-    // Spawn pooled visual tracer line
-    this.spawnTracer(_origin, _endPoint);
+    this.spawnTracer(origin, _vec3_3);
   }
 
   private applyDamage(
@@ -985,64 +1676,114 @@ export class GameEngine {
     const dmg = calculateDamage(shooter.weapon, hitZone, distance, victim.hp, victim.armor);
     victim.hp = dmg.remainingHp;
     victim.armor = dmg.remainingArmor;
+    victim.modelPackage.triggerHitFlash();
+
+    const victimStats = this.playerStats.find((s) => s.id === victim.id);
+    if (victimStats) {
+      victimStats.hp = victim.hp;
+      victimStats.armor = victim.armor;
+    }
+
+    const totalDmg = dmg.healthDamage + dmg.armorDamage;
 
     if (shooter.isHuman) {
+      this.playerDamageDealt += totalDmg;
+      const wEntry = this.getWeaponEntry(shooter.weapon.id);
+      wEntry.shotsHit++;
+      wEntry.damageDealt += totalDmg;
+      if (dmg.isHeadshot) {
+        this.playerHeadshots++;
+        wEntry.headshots++;
+      }
+      if (dmg.isDead) {
+        wEntry.kills++;
+      }
+
       soundEngine.playHitmarker(dmg.isHeadshot);
       this.callbacks.onHitmarker(dmg.isHeadshot);
+      this.callbacks.onHitFeedback?.({
+        active: true,
+        isHeadshot: dmg.isHeadshot,
+        isKill: dmg.isDead,
+        damage: totalDmg,
+        targetName: victim.name,
+        targetHp: dmg.remainingHp,
+        targetMaxHp: 100,
+      });
     }
 
     if (victim.isHuman) {
-      soundEngine.playFootstep(); // hurt grunt
+      soundEngine.playPlayerHurt();
+      this.callbacks.onPlayerDamage?.(totalDmg);
       this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.35);
       this.callbacks.onPlayerHealthUpdate(victim.hp, victim.armor, 100, 50);
     }
 
     if (dmg.isDead) {
-      victim.alive = false;
-      victim.modelPackage.root.visible = false;
+      this.handleCombatantDeath(shooter, victim, shooter.weapon.name, dmg.isHeadshot);
+    }
+  }
 
-      // Update Kill Stats
-      const shooterStats = this.playerStats.find((s) => s.id === shooter.id);
-      const victimStats = this.playerStats.find((s) => s.id === victim.id);
-      if (shooterStats) {
-        shooterStats.kills++;
-        shooterStats.score += dmg.isHeadshot ? 300 : 200;
+  private handleCombatantDeath(
+    killer: BotCombatant,
+    victim: BotCombatant,
+    weaponName: string,
+    isHeadshot: boolean
+  ): void {
+    if (!victim.alive) return;
+    victim.alive = false;
+    victim.deathTimer = 1.4; // Collapses smoothly onto ground over ~0.3s, stays 1.4s
+
+    const shooterStats = this.playerStats.find((s) => s.id === killer.id);
+    const victimStats = this.playerStats.find((s) => s.id === victim.id);
+    if (shooterStats) {
+      shooterStats.kills++;
+      shooterStats.score += isHeadshot ? 300 : 200;
+      shooterStats.credits = Math.min(9000, shooterStats.credits + 200);
+    }
+    if (victimStats) {
+      victimStats.deaths++;
+      victimStats.alive = false;
+      victimStats.hp = 0;
+    }
+
+    if (killer.isHuman) {
+      this.hitstopTimer = 0.035;
+      // Grant +1 Ult charge on kill
+      const ultSlot = this.abilitySlots.X;
+      if (ultSlot && ultSlot.ultPoints < ultSlot.ultRequired) {
+        ultSlot.ultPoints++;
+        this.emitAbilityStates();
       }
-      if (victimStats) {
-        victimStats.deaths++;
-        victimStats.alive = false;
+      // Overdrive Matrix heal on kill
+      if (this.playerOverdriveTimer > 0) {
+        killer.hp = Math.min(100, killer.hp + 35);
+        this.callbacks.onPlayerHealthUpdate(killer.hp, killer.armor, 100, 50);
       }
+    }
 
-      this.callbacks.onStatsUpdate([...this.playerStats]);
+    this.callbacks.onStatsUpdate([...this.playerStats]);
 
-      // Emit Kill Feed Event
-      const killEvent: KillEvent = {
-        id: `kill_${Date.now()}_${Math.random()}`,
-        killerName: shooter.name,
-        killerTeam: shooter.team,
-        victimName: victim.name,
-        victimTeam: victim.team,
-        weaponName: shooter.weapon.name,
-        isHeadshot: dmg.isHeadshot,
-        timestamp: Date.now(),
-      };
-      this.callbacks.onKillEvent(killEvent);
+    const killEvent: KillEvent = {
+      id: `kill_${Date.now()}_${Math.random()}`,
+      killerName: killer.name,
+      killerTeam: killer.team,
+      victimName: victim.name,
+      victimTeam: victim.team,
+      weaponName,
+      isHeadshot,
+      timestamp: Date.now(),
+    };
+    this.callbacks.onKillEvent(killEvent);
 
-      if (shooter.isHuman) {
-        // Hitstop on kill for dramatic impact per ultra mode craft
-        this.hitstopTimer = 0.04;
+    if (victim.hasSpike) {
+      victim.hasSpike = false;
+      this.spikePosition = victim.position.clone();
+      if (!this.spikeMesh) {
+        this.spikeMesh = createSpikeModel();
+        this.scene.add(this.spikeMesh);
       }
-
-      // Check if victim carried spike -> drop on ground
-      if (victim.hasSpike) {
-        victim.hasSpike = false;
-        this.spikePosition = victim.position.clone();
-        if (!this.spikeMesh) {
-          this.spikeMesh = createSpikeModel();
-          this.scene.add(this.spikeMesh);
-        }
-        this.spikeMesh.position.copy(this.spikePosition);
-      }
+      this.spikeMesh.position.copy(this.spikePosition);
     }
   }
 
@@ -1055,7 +1796,7 @@ export class GameEngine {
     tracer.line.visible = true;
 
     const positions = (tracer.line.geometry as THREE.BufferGeometry).attributes.position;
-    positions.setXYZ(0, start.x, start.y - 0.1, start.z);
+    positions.setXYZ(0, start.x, start.y - 0.08, start.z);
     positions.setXYZ(1, end.x, end.y, end.z);
     positions.needsUpdate = true;
   }
@@ -1080,7 +1821,6 @@ export class GameEngine {
   }
 
   private updateTracersAndSparks(dt: number): void {
-    // Tracers
     for (const t of this.tracerLines) {
       if (t.inUse) {
         t.age += dt;
@@ -1091,11 +1831,10 @@ export class GameEngine {
       }
     }
 
-    // Sparks
     for (const s of this.sparks) {
       if (s.inUse) {
         s.age += dt;
-        s.vel.y -= 18 * dt; // gravity
+        s.vel.y -= 18 * dt;
         s.mesh.position.addScaledVector(s.vel, dt);
 
         if (s.age >= s.maxAge) {
@@ -1107,7 +1846,22 @@ export class GameEngine {
   }
 
   private updateCameraEffects(dt: number): void {
-    // 1. Camera Shake decay
+    // Muzzle flash fade
+    if (this.vmFlashTimer > 0) {
+      this.vmFlashTimer -= dt;
+      if (this.vmFlashTimer <= 0) {
+        this.viewmodelFlash.visible = false;
+      }
+    }
+
+    // Smooth viewmodel spring decays (recoil, equip raise, look sway, landing dip)
+    this.vmRecoilZ = THREE.MathUtils.damp(this.vmRecoilZ, 0, 18, dt);
+    this.vmRecoilPitch = THREE.MathUtils.damp(this.vmRecoilPitch, 0, 16, dt);
+    this.vmEquipOffset = THREE.MathUtils.damp(this.vmEquipOffset, 0, 14, dt);
+    this.vmSwayX = THREE.MathUtils.damp(this.vmSwayX, 0, 12, dt);
+    this.vmSwayY = THREE.MathUtils.damp(this.vmSwayY, 0, 12, dt);
+    this.vmLandOffset = THREE.MathUtils.damp(this.vmLandOffset, 0, 14, dt);
+
     if (this.cameraShakeTrauma > 0) {
       const shake = this.cameraShakeTrauma * this.cameraShakeTrauma * 0.08;
       this.camera.rotation.z = (Math.random() - 0.5) * shake;
@@ -1118,34 +1872,104 @@ export class GameEngine {
       this.camera.rotation.z = 0;
     }
 
-    // 2. Viewmodel ADS smoothing & idle breathing
     if (this.viewmodelWeapon) {
       const p = this.playerCombatant;
       const isADS = this.input.state.adsHeld && p.weapon.canADS;
 
-      const targetX = isADS ? 0 : 0.24;
-      const targetY = isADS ? -0.12 : -0.18;
-      const targetZ = isADS ? -0.28 : -0.42;
+      if (isADS) {
+        _vmTargetPos.set(0, -0.145, -0.28);
+      } else {
+        _vmTargetPos.set(0.28, -0.24, -0.42);
+      }
 
-      this.viewmodelWeapon.position.x = THREE.MathUtils.damp(this.viewmodelWeapon.position.x, targetX, 14, dt);
-      this.viewmodelWeapon.position.y = THREE.MathUtils.damp(this.viewmodelWeapon.position.y, targetY, 14, dt);
-      this.viewmodelWeapon.position.z = THREE.MathUtils.damp(this.viewmodelWeapon.position.z, targetZ, 14, dt);
+      // Multi-phase smooth reload dip + cant
+      const isReloading = p.reloadTimer > 0;
+      const reloadProgress = isReloading ? 1 - p.reloadTimer / Math.max(0.2, p.weapon.reloadTime) : 0;
+      const reloadWave = isReloading ? Math.sin(reloadProgress * Math.PI) : 0;
+      const reloadDip = -0.15 * reloadWave;
+      const reloadTilt = 0.56 * reloadWave;
 
-      // FOV zoom on ADS
-      const targetFov = isADS ? this.settings.fov * p.weapon.adsZoom : this.settings.fov;
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 12, dt);
-      this.camera.updateProjectionMatrix();
+      // Movement bob & idle breathing
+      const speed = Math.hypot(p.velocity.x, p.velocity.z);
+      const moveWeight = Math.min(1, speed / 5.4);
+      const adsDamp = isADS ? 0.35 : 1.0;
+      const walkBobX = Math.cos(this.vmWalkPhase * 0.5) * 0.012 * moveWeight * adsDamp;
+      const walkBobY = Math.abs(Math.sin(this.vmWalkPhase)) * 0.014 * moveWeight * adsDamp;
+      const breath = Math.sin(performance.now() * 0.0025) * 0.004 * adsDamp;
+
+      _vmTargetPos.x += walkBobX + this.vmSwayX * adsDamp;
+      _vmTargetPos.y += breath - walkBobY + this.vmEquipOffset + reloadDip + this.vmLandOffset + this.vmSwayY * adsDamp;
+      _vmTargetPos.z += this.vmRecoilZ;
+
+      this.viewmodelWeapon.position.x = THREE.MathUtils.damp(this.viewmodelWeapon.position.x, _vmTargetPos.x, 18, dt);
+      this.viewmodelWeapon.position.y = THREE.MathUtils.damp(this.viewmodelWeapon.position.y, _vmTargetPos.y, 18, dt);
+      this.viewmodelWeapon.position.z = THREE.MathUtils.damp(this.viewmodelWeapon.position.z, _vmTargetPos.z, 18, dt);
+
+      this.viewmodelWeapon.rotation.x = THREE.MathUtils.damp(
+        this.viewmodelWeapon.rotation.x,
+        this.vmRecoilPitch - reloadTilt - this.vmSwayY * 0.65,
+        16,
+        dt
+      );
+      this.viewmodelWeapon.rotation.y = THREE.MathUtils.damp(
+        this.viewmodelWeapon.rotation.y,
+        -this.vmSwayX * 0.85,
+        14,
+        dt
+      );
+      this.viewmodelWeapon.rotation.z = THREE.MathUtils.damp(
+        this.viewmodelWeapon.rotation.z,
+        reloadWave * 0.34 - this.vmSwayX * 0.55,
+        14,
+        dt
+      );
+
+      // Sync arms smoothly with weapon offsets
+      this.viewmodelArms.position.x = THREE.MathUtils.damp(
+        this.viewmodelArms.position.x,
+        (isADS ? -0.22 : 0) + this.vmSwayX * 0.6,
+        16,
+        dt
+      );
+      this.viewmodelArms.position.y = THREE.MathUtils.damp(
+        this.viewmodelArms.position.y,
+        this.vmEquipOffset * 0.6 + reloadDip * 0.5 + this.vmLandOffset * 0.7,
+        16,
+        dt
+      );
+      this.viewmodelArms.position.z = THREE.MathUtils.damp(this.viewmodelArms.position.z, this.vmRecoilZ * 0.6, 18, dt);
+
+      const targetFOV = isADS ? this.settings.fov * p.weapon.adsZoom : this.settings.fov;
+      if (Math.abs(this.camera.fov - targetFOV) > 0.05) {
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFOV, 14, dt);
+        this.camera.updateProjectionMatrix();
+      }
     }
   }
 
-  public endRound(winner: TeamSide, reason: string): void {
+  public getMatchSummary(won: boolean): MatchSummaryPayload {
+    const pStats = this.playerStats[0];
+    return {
+      mode: this.matchMode,
+      difficulty: this.botDifficulty,
+      agentId: this.playerCombatant.agentId,
+      won,
+      playerTeam: this.playerTeam,
+      attackerScore: this.attackerRoundsWon,
+      defenderScore: this.defenderRoundsWon,
+      kills: pStats?.kills ?? 0,
+      deaths: pStats?.deaths ?? 0,
+      headshots: this.playerHeadshots,
+      damageDealt: this.playerDamageDealt,
+      weaponBreakdown: this.weaponBreakdown,
+    };
+  }
+
+  private endRound(winner: TeamSide, reason: string): void {
     if (this.roundPhase === 'ROUND_END' || this.roundPhase === 'MATCH_OVER') return;
 
     this.roundPhase = 'ROUND_END';
     this.roundTimer = ROUND_END_DURATION;
-
-    const playerWon = winner === this.playerTeam;
-    soundEngine.playRoundEnd(playerWon);
 
     if (winner === 'ATTACKERS') {
       this.attackerRoundsWon++;
@@ -1153,43 +1977,47 @@ export class GameEngine {
       this.defenderRoundsWon++;
     }
 
+    const isPlayerTeamWinner = winner === this.playerTeam;
+    soundEngine.playRoundEnd(isPlayerTeamWinner);
     this.callbacks.onRoundScoreChange(this.attackerRoundsWon, this.defenderRoundsWon, this.roundNumber);
 
-    // Economy payouts
-    const playerEcon = calculateEconomy(
-      this.playerStats[0].credits,
-      playerWon,
-      this.playerLossStreak,
-      this.spikeState === 'planted',
-      0
-    );
-    this.playerStats[0].credits = playerEcon.newCredits;
-    this.playerLossStreak = playerEcon.nextLossStreak;
+    const isPlantBonus = reason === 'SPIKE_PLANTED' || reason === 'SPIKE_DETONATED';
 
-    // Check Match Win (First to 13 rounds)
-    const matchWinner = checkMatchWin(this.attackerRoundsWon, this.defenderRoundsWon);
-    if (matchWinner) {
+    const playerEcon = calculateEconomy(0, isPlayerTeamWinner, this.playerLossStreak, isPlantBonus, 0);
+    const botEcon = calculateEconomy(0, !isPlayerTeamWinner, this.botLossStreak, false, 0);
+
+    this.playerLossStreak = playerEcon.nextLossStreak;
+    this.botLossStreak = botEcon.nextLossStreak;
+
+    this.playerStats.forEach((s) => {
+      const award = s.team === this.playerTeam ? playerEcon.creditsGained : botEcon.creditsGained;
+      s.credits = Math.min(9000, s.credits + award);
+    });
+
+    this.callbacks.onStatsUpdate([...this.playerStats]);
+
+    const winnerTeam = checkMatchWin(this.attackerRoundsWon, this.defenderRoundsWon);
+    if (winnerTeam) {
       this.roundPhase = 'MATCH_OVER';
-      this.callbacks.onMatchOver(matchWinner);
+      this.callbacks.onMatchOver(winnerTeam, this.getMatchSummary(winnerTeam === this.playerTeam));
     }
   }
 
   public startNextRound(): void {
     this.roundNumber++;
 
-    // Halftime side swap check (after round 12)
     if (shouldSwapSides(this.roundNumber - 1)) {
       this.playerTeam = this.playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
-      this.playerCombatant.team = this.playerTeam;
-
       for (const c of this.combatants) {
         c.team = c.team === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
       }
+      this.playerStats.forEach((s) => {
+        s.team = s.team === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
+      });
     }
 
-    // Reset round states
     this.roundPhase = 'BUY_PHASE';
-    this.roundTimer = BUY_PHASE_DURATION;
+    this.roundTimer = this.matchMode === 'SKIRMISH' ? 8 : BUY_PHASE_DURATION;
     this.spikeState = 'not_planted';
     this.spikeTimer = SPIKE_DETONATION_TIME;
     this.spikePosition = null;
@@ -1202,31 +2030,85 @@ export class GameEngine {
 
     this.abilityMgr.clearAll();
 
-    // Respawn all combatants at their spawn points
+    // Refresh non-ult ability charges between rounds & grant +1 ult orb per round played
+    const agent = AGENT_REGISTRY[this.playerCombatant.agentId] || AGENT_REGISTRY.ZEPHYR;
+    for (const ab of agent.abilities) {
+      const st = this.abilitySlots[ab.keySlot];
+      if (!st) continue;
+      if (ab.isUltimate) {
+        st.ultPoints = Math.min(st.ultRequired, st.ultPoints + 1);
+        st.activeRemaining = 0;
+      } else {
+        st.charges = ab.maxCharges;
+        st.cooldownRemaining = 0;
+      }
+    }
+    this.playerOverdriveTimer = 0;
+    this.emitAbilityStates();
+
     const attSpawn = SPAWN_ATTACKERS;
     const defSpawn = SPAWN_DEFENDERS;
 
     this.combatants.forEach((c, idx) => {
       c.alive = true;
+      c.deathTimer = 0;
       c.hp = 100;
-      c.armor = 0;
       c.isPlanting = false;
       c.isDefusing = false;
       c.actionProgress = 0;
-      c.modelPackage.root.visible = !c.isHuman;
+      c.modelPackage.resetPose();
+      c.modelPackage.root.visible = true;
+      c.modelPackage.root.traverse((obj) => {
+        obj.layers.set(c.isHuman ? 1 : 0);
+      });
 
       const isAttacker = c.team === 'ATTACKERS';
       const spawnBase = isAttacker ? attSpawn : defSpawn;
-      const offsetX = (idx % 5 - 2) * 2.8;
+      const offsetX = ((idx % 5) - 2) * 3.0;
+      const spawnYaw = isAttacker ? 0 : Math.PI;
 
       c.position.set(spawnBase.x + offsetX, 0, spawnBase.z);
-      c.yaw = isAttacker ? Math.PI : 0;
+      c.yaw = spawnYaw;
+      c.pitch = 0;
+
+      // Bots upgrade to SMG/Rifle when rounds progress and credits allow
+      if (!c.isHuman) {
+        c.armor = this.roundNumber >= 2 ? 25 : 0;
+        const botStats = this.playerStats.find((s) => s.id === c.id);
+        if (botStats && botStats.credits >= 2900) {
+          botStats.credits -= 2900;
+          c.primaryWeapon = WEAPON_REGISTRY.PHANTOM_V;
+          c.primaryAmmoInMag = WEAPON_REGISTRY.PHANTOM_V.magazineSize;
+          c.primaryReserveAmmo = WEAPON_REGISTRY.PHANTOM_V.reserveAmmo;
+          c.weapon = c.primaryWeapon;
+          c.activeSlot = 1;
+        } else if (botStats && botStats.credits >= 1600 && !c.primaryWeapon) {
+          botStats.credits -= 1600;
+          c.primaryWeapon = WEAPON_REGISTRY.VIPER_9;
+          c.primaryAmmoInMag = WEAPON_REGISTRY.VIPER_9.magazineSize;
+          c.primaryReserveAmmo = WEAPON_REGISTRY.VIPER_9.reserveAmmo;
+          c.weapon = c.primaryWeapon;
+          c.activeSlot = 1;
+        }
+        c.modelPackage.setWeapon(c.weapon.id);
+      }
+
+      // Reset mag & reserve for round
+      if (c.primaryWeapon) {
+        c.primaryAmmoInMag = c.primaryWeapon.magazineSize;
+        c.primaryReserveAmmo = c.primaryWeapon.reserveAmmo;
+      }
+      c.sidearmAmmoInMag = c.sidearmWeapon.magazineSize;
+      c.sidearmReserveAmmo = c.sidearmWeapon.reserveAmmo;
       c.ammoInMag = c.weapon.magazineSize;
       c.reserveAmmo = c.weapon.reserveAmmo;
       c.reloadTimer = 0;
       c.shootCooldown = 0;
 
-      // Assign spike to attacker #1
+      c.modelPackage.root.position.copy(c.position);
+      c.modelPackage.root.rotation.y = c.yaw;
+      c.modelPackage.root.updateMatrixWorld(true);
+
       c.hasSpike = isAttacker && (idx === 0 || (idx === 5 && !this.playerCombatant.hasSpike));
       if (c.hasSpike) this.spikeCarrierId = c.id;
 
@@ -1234,49 +2116,69 @@ export class GameEngine {
       if (stats) {
         stats.alive = true;
         stats.hp = 100;
-        stats.armor = 0;
+        stats.armor = c.armor;
         stats.hasSpike = c.hasSpike;
       }
     });
 
+    this.updateViewmodelWeapon(this.playerCombatant.weapon.id);
     this.callbacks.onStatsUpdate([...this.playerStats]);
-    this.callbacks.onPlayerHealthUpdate(100, 0, 100, 50);
-    this.callbacks.onWeaponUpdate(this.playerCombatant.weapon, this.playerCombatant.ammoInMag, this.playerCombatant.reserveAmmo, false);
+    this.callbacks.onPlayerHealthUpdate(100, this.playerCombatant.armor, 100, 50);
+    this.callbacks.onWeaponUpdate(
+      this.playerCombatant.weapon,
+      this.playerCombatant.ammoInMag,
+      this.playerCombatant.reserveAmmo,
+      false,
+      this.playerCombatant.activeSlot
+    );
     this.callbacks.onSpikeStateUpdate('not_planted', SPIKE_DETONATION_TIME, 0, 0);
 
-    // Camera reset to player spawn
     this.camera.position.set(this.playerCombatant.position.x, 1.65, this.playerCombatant.position.z);
+    this.camera.rotation.y = this.playerCombatant.yaw;
+    this.camera.rotation.x = 0;
+    this.camera.updateMatrixWorld(true);
   }
 
-  // Buy Menu Purchases
   public buyItem(itemId: string): boolean {
-    if (this.roundPhase !== 'BUY_PHASE') return false;
+    if (this.roundPhase !== 'BUY_PHASE' && this.matchMode !== 'PRACTICE') return false;
 
     const stats = this.playerStats[0];
     const p = this.playerCombatant;
 
-    // Weapon
     if (WEAPON_REGISTRY[itemId]) {
       const w = WEAPON_REGISTRY[itemId];
       if (stats.credits >= w.cost) {
         stats.credits -= w.cost;
+        if (w.category === 'SIDEARM') {
+          p.sidearmWeapon = w;
+          p.sidearmAmmoInMag = w.magazineSize;
+          p.sidearmReserveAmmo = w.reserveAmmo;
+          p.activeSlot = 2;
+        } else {
+          p.primaryWeapon = w;
+          p.primaryAmmoInMag = w.magazineSize;
+          p.primaryReserveAmmo = w.reserveAmmo;
+          p.activeSlot = 1;
+        }
         p.weapon = w;
         p.ammoInMag = w.magazineSize;
         p.reserveAmmo = w.reserveAmmo;
+        p.reloadTimer = 0;
         this.updateViewmodelWeapon(w.id);
-        this.callbacks.onWeaponUpdate(w, p.ammoInMag, p.reserveAmmo, false);
+        soundEngine.playReload();
+        this.callbacks.onWeaponUpdate(w, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
         this.callbacks.onStatsUpdate([...this.playerStats]);
         return true;
       }
     }
 
-    // Shield
     if (SHIELD_REGISTRY[itemId]) {
       const s = SHIELD_REGISTRY[itemId];
-      if (stats.credits >= s.cost) {
+      if (stats.credits >= s.cost && p.armor < s.armorPoints) {
         stats.credits -= s.cost;
         p.armor = s.armorPoints;
         stats.armor = s.armorPoints;
+        soundEngine.playAbility('WALL');
         this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
         this.callbacks.onStatsUpdate([...this.playerStats]);
         return true;
@@ -1293,7 +2195,7 @@ export class GameEngine {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-    this.input.detectDevice();
+    this.input.detectDevice(this.settings.controlMode);
   };
 
   public dispose(): void {

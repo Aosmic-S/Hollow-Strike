@@ -11,6 +11,7 @@ interface BuyMenuProps {
   currentWeaponId: string;
   currentArmor: number;
   agent: AgentDef;
+  canBuy?: boolean;
   onBuyWeapon: (weaponId: string) => void;
   onBuyShield: (shieldId: 'LIGHT_SHIELD' | 'HEAVY_SHIELD') => void;
   onClose: () => void;
@@ -21,6 +22,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
   currentWeaponId,
   currentArmor,
   agent,
+  canBuy = true,
   onBuyWeapon,
   onBuyShield,
   onClose,
@@ -32,10 +34,16 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-cyan-400" />
-              <h2 className="text-xl font-black uppercase tracking-widest text-white">ARMORY · BUY PHASE</h2>
+              <span className={`h-2 w-2 rounded-full ${canBuy ? 'bg-cyan-400' : 'bg-amber-400'}`} />
+              <h2 className="text-xl font-black uppercase tracking-widest text-white">
+                {canBuy ? 'ARMORY · BUY PHASE' : 'ARMORY · ROUND ACTIVE'}
+              </h2>
             </div>
-            <p className="text-xs text-slate-400">Select weaponry and tactical armor for the round</p>
+            <p className="text-xs text-slate-400">
+              {canBuy
+                ? 'Select weaponry and tactical armor for the round'
+                : 'Purchases are only allowed during Buy Phase or Practice Range'}
+            </p>
           </div>
 
           <div className="flex items-center gap-6">
@@ -105,17 +113,17 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                   </div>
 
                   <button
-                    disabled={isEquipped || !canAfford}
+                    disabled={isEquipped || !canAfford || !canBuy}
                     onClick={() => onBuyWeapon(w.id)}
                     className={`mt-4 w-full rounded py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
                       isEquipped
                         ? 'border border-cyan-500/40 bg-cyan-500/20 text-cyan-300 cursor-default'
-                        : canAfford
+                        : canBuy && canAfford
                         ? 'bg-cyan-600 text-white hover:bg-cyan-500'
                         : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     }`}
                   >
-                    {isEquipped ? 'EQUIPPED' : canAfford ? 'PURCHASE' : 'LOCKED'}
+                    {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'PURCHASE' : 'LOCKED'}
                   </button>
                 </div>
               );
@@ -153,17 +161,17 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                     </div>
 
                     <button
-                      disabled={isEquipped || !canAfford}
+                      disabled={isEquipped || !canAfford || !canBuy}
                       onClick={() => onBuyShield(s.id)}
                       className={`mt-3 w-full rounded py-1.5 text-xs font-bold uppercase transition cursor-pointer ${
                         isEquipped
                           ? 'border border-blue-500/40 bg-blue-500/20 text-blue-300 cursor-default'
-                          : canAfford
+                          : canBuy && canAfford
                           ? 'bg-blue-600 text-white hover:bg-blue-500'
                           : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                       }`}
                     >
-                      {isEquipped ? 'EQUIPPED' : canAfford ? 'BUY' : 'LOCKED'}
+                      {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'BUY' : 'LOCKED'}
                     </button>
                   </div>
                 );
