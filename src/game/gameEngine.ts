@@ -489,7 +489,7 @@ export class GameEngine {
         break;
     }
 
-    this.renderer.setPixelRatio(isSoftwareGl ? 1.0 : dpr);
+    this.renderer.setPixelRatio(isSoftwareGl ? 0.75 : dpr);
     this.renderer.shadowMap.enabled = shadowEnabled;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   }
@@ -840,7 +840,15 @@ export class GameEngine {
     }
 
     this.renderer.render(this.scene, this.camera);
-    this.frameId = requestAnimationFrame(this.tick);
+    if (isSoftwareGl) {
+      window.setTimeout(() => {
+        if (!this.isDestroyed) {
+          this.frameId = requestAnimationFrame(this.tick);
+        }
+      }, 45);
+    } else {
+      this.frameId = requestAnimationFrame(this.tick);
+    }
   };
 
   private updateSimulation(dt: number): void {

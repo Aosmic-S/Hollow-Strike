@@ -26,10 +26,14 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
     const isAttacker = team === 'ATTACKERS';
     return (
       <div className="flex flex-col">
-        <div className={`flex items-center justify-between border-b pb-2 ${isAttacker ? 'border-red-500/40 text-red-400' : 'border-blue-500/40 text-blue-400'}`}>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-black uppercase tracking-wider">{team}</span>
-            <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-mono font-bold text-white">
+        <div
+          className={`flex items-center justify-between border-b pb-2 ${
+            isAttacker ? 'border-[#FF4655]/50 text-[#FF4655]' : 'border-[#17E5B8]/50 text-[#17E5B8]'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="font-display text-lg font-extrabold uppercase tracking-widest">{team}</span>
+            <span className="bg-[#0F1923] px-2.5 py-0.5 text-xs font-mono font-bold text-[#ECE8E1] border border-[#ECE8E1]/15">
               {score} ROUNDS
             </span>
           </div>
@@ -37,7 +41,7 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
 
         <table className="w-full text-left font-mono text-xs mt-2">
           <thead>
-            <tr className="text-slate-400 border-b border-slate-800 text-[10px]">
+            <tr className="text-[#8B978F] border-b border-[#ECE8E1]/15 text-[10px]">
               <th className="py-1">OPERATIVE</th>
               <th className="text-right py-1">K</th>
               <th className="text-right py-1">D</th>
@@ -47,20 +51,20 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
               <th className="text-right py-1">PING</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60">
+          <tbody className="divide-y divide-[#ECE8E1]/10">
             {teamStats.map((p) => (
-              <tr key={p.id} className={`${p.isHuman ? 'bg-cyan-950/20 text-cyan-300' : 'text-slate-200'}`}>
+              <tr key={p.id} className={p.isHuman ? 'bg-[#17E5B8]/10 text-[#17E5B8]' : 'text-[#ECE8E1]'}>
                 <td className="py-2 flex items-center gap-2 font-bold">
-                  <span className={`h-2 w-2 rounded-full ${p.alive ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                  <span className={`h-2 w-2 rotate-45 ${p.alive ? 'bg-[#17E5B8]' : 'bg-[#8B978F]/40'}`} />
                   <span>{p.name}</span>
-                  {p.hasSpike && <span className="text-amber-400 font-bold" title="Carrying Spike">⚡</span>}
+                  {p.hasSpike && <span className="text-[#FF4655] font-bold" title="Carrying Spike">⚡</span>}
                 </td>
                 <td className="text-right tabular-nums">{p.kills}</td>
-                <td className="text-right tabular-nums text-slate-400">{p.deaths}</td>
-                <td className="text-right tabular-nums text-slate-400">{p.assists}</td>
-                <td className="text-right tabular-nums font-bold text-white">{p.score}</td>
-                <td className="text-right tabular-nums text-emerald-400">${p.credits}</td>
-                <td className="text-right tabular-nums text-slate-500">{p.ping}ms</td>
+                <td className="text-right tabular-nums text-[#8B978F]">{p.deaths}</td>
+                <td className="text-right tabular-nums text-[#8B978F]">{p.assists}</td>
+                <td className="text-right tabular-nums font-bold text-[#ECE8E1]">{p.score}</td>
+                <td className="text-right tabular-nums text-[#17E5B8]">${p.credits}</td>
+                <td className="text-right tabular-nums text-[#8B978F]">{p.ping}ms</td>
               </tr>
             ))}
           </tbody>
@@ -70,16 +74,20 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 select-none">
-      <div className="relative w-full max-w-4xl rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/85 backdrop-blur-sm p-4 select-none">
+      <div className="relative w-full max-w-4xl border border-[#ECE8E1]/20 bg-[#18232E] p-6 shadow-2xl clip-val-panel">
+        <div className="flex items-center justify-between border-b border-[#ECE8E1]/15 pb-3 mb-4">
           <div>
-            <h2 className="text-lg font-black uppercase tracking-widest text-white">MATCH TELEMETRY</h2>
-            <p className="text-xs text-slate-400">First to 13 round wins · Tactical Plant / Defuse</p>
+            <h2 className="font-display text-2xl font-extrabold uppercase tracking-[0.16em] text-[#ECE8E1]">
+              MATCH SCOREBOARD
+            </h2>
+            <p className="font-mono text-xs text-[#8B978F]">
+              First to 13 round wins · Tactical Plant / Defuse
+            </p>
           </div>
           <button
             onClick={onClose}
-            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+            className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
           >
             Close [Tab / Esc]
           </button>

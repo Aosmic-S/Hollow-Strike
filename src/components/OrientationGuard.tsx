@@ -35,10 +35,10 @@ export const OrientationGuard: React.FC<OrientationGuardProps> = ({ onOrientatio
   if (!isPortrait) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#070b14] p-6 text-center select-none font-sans">
-      <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-2xl border border-cyan-500/40 bg-slate-900 shadow-2xl shadow-cyan-500/20">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0F1923] p-6 text-center select-none">
+      <div className="relative mb-6 flex h-24 w-24 items-center justify-center border border-[#FF4655]/50 bg-[#18232E] shadow-2xl clip-val-card">
         <svg
-          className="h-12 w-12 text-cyan-400 animate-bounce"
+          className="h-12 w-12 text-[#17E5B8]"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -51,15 +51,14 @@ export const OrientationGuard: React.FC<OrientationGuardProps> = ({ onOrientatio
         </svg>
       </div>
 
-      <h2 className="text-xl font-black uppercase tracking-widest text-white">
+      <h2 className="font-display text-2xl font-extrabold uppercase tracking-widest text-[#ECE8E1]">
         ROTATE DEVICE TO LANDSCAPE
       </h2>
-      <p className="mt-2 max-w-xs text-xs text-slate-400 leading-relaxed font-mono">
-        Hollow Strike is optimized for tactical widescreen combat. Please turn your device sideways to resume play.
+      <p className="mt-2 max-w-xs text-xs text-[#8B978F] leading-relaxed font-mono">
+        Hollow Strike is optimized for tactical widescreen combat. Turn your device sideways to resume play.
       </p>
 
-      <div className="mt-6 flex items-center gap-2 rounded-full border border-slate-800 bg-slate-900/90 px-4 py-2 text-xs font-mono text-cyan-400">
-        <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+      <div className="mt-6 border border-[#17E5B8]/40 bg-[#18232E] px-4 py-2 text-xs font-mono font-bold text-[#17E5B8] clip-val-card">
         AUTO-RESUMES ON LANDSCAPE
       </div>
     </div>

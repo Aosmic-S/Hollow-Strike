@@ -32,71 +32,71 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
     <div className="relative z-10 flex flex-1 flex-col overflow-y-auto px-4 sm:px-6 py-4 gap-5">
       {/* Top KPI Summary Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">Rank Standing</div>
-          <div className="mt-1 text-lg font-black text-cyan-300">{rank.tier}</div>
-          <div className="text-[11px] text-slate-400 tabular-nums">LVL {rank.level} · {rank.xp} XP</div>
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">Rank Standing</div>
+          <div className="mt-1 font-display text-xl font-extrabold text-[#17E5B8] uppercase">{rank.tier}</div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums">LVL {rank.level} · {rank.xp} XP</div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">Matches Played</div>
-          <div className="mt-1 text-2xl font-black text-white tabular-nums">{profile.totalMatches}</div>
-          <div className="text-[11px] text-slate-400 tabular-nums">
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">Matches Played</div>
+          <div className="mt-1 text-2xl font-bold text-[#ECE8E1] tabular-nums">{profile.totalMatches}</div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums">
             {profile.wins}W – {profile.losses}L
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">Win Rate</div>
-          <div className="mt-1 text-2xl font-black text-emerald-400 tabular-nums">{winRate}%</div>
-          <div className="text-[11px] text-slate-400 tabular-nums">
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">Win Rate</div>
+          <div className="mt-1 text-2xl font-bold text-[#17E5B8] tabular-nums">{winRate}%</div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums">
             {profile.roundsWon}R Won
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">K / D Ratio</div>
-          <div className="mt-1 text-2xl font-black text-white tabular-nums">{kd}</div>
-          <div className="text-[11px] text-slate-400 tabular-nums">
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">K / D Ratio</div>
+          <div className="mt-1 text-2xl font-bold text-[#ECE8E1] tabular-nums">{kd}</div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums">
             {profile.kills}K / {profile.deaths}D
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">Headshot %</div>
-          <div className="mt-1 text-2xl font-black text-amber-300 tabular-nums">{hsRate}%</div>
-          <div className="text-[11px] text-slate-400 tabular-nums">{profile.headshots} Headshots</div>
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">Headshot %</div>
+          <div className="mt-1 text-2xl font-bold text-[#fbbf24] tabular-nums">{hsRate}%</div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums">{profile.headshots} Headshots</div>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-          <div className="text-[10px] uppercase text-slate-400">Damage Dealt</div>
-          <div className="mt-1 text-2xl font-black text-rose-400 tabular-nums">
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
+          <div className="text-[10px] uppercase text-[#8B978F]">Damage Dealt</div>
+          <div className="mt-1 text-2xl font-bold text-[#FF4655] tabular-nums">
             {profile.damageDealt.toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400">Lifetime Total</div>
+          <div className="text-[11px] text-[#8B978F]">Lifetime Total</div>
         </div>
       </div>
 
       {profile.totalMatches === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/60 p-8 text-center">
-          <h3 className="font-mono text-lg font-black uppercase text-white">
+        <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-[#ECE8E1]/20 bg-[#18232E]/60 p-8 text-center clip-val-panel">
+          <h3 className="font-display text-2xl font-extrabold uppercase tracking-wider text-[#ECE8E1]">
             No Combat Records Yet
           </h3>
-          <p className="mt-2 max-w-md text-xs text-slate-400 leading-relaxed">
+          <p className="mt-2 max-w-md text-xs text-[#8B978F] leading-relaxed">
             Career telemetry records automatically upon completing matches. Play a Competitive or Skirmish match to log eliminations, accuracy, agent win rates, and match history.
           </p>
           <button
             onClick={onStartQuickMatch}
-            className="mt-5 rounded-xl bg-rose-600 px-6 py-2.5 font-mono text-xs font-black uppercase tracking-wider text-white hover:bg-rose-500 transition cursor-pointer"
+            className="mt-5 bg-[#FF4655] px-7 py-2.5 font-display text-sm font-extrabold uppercase tracking-widest text-[#ECE8E1] hover:bg-[#ff5e6b] transition cursor-pointer clip-val-btn"
           >
             Play First Match
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1">
-          {/* Match History (2 columns) */}
-          <div className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/80 p-5 flex flex-col">
-            <h3 className="font-mono text-xs font-black uppercase tracking-widest text-slate-300 mb-3">
+          {/* Match History */}
+          <div className="lg:col-span-2 border border-[#ECE8E1]/15 bg-[#18232E]/90 p-5 flex flex-col clip-val-panel">
+            <h3 className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B978F] mb-3">
               Recent Matches ({profile.matchHistory.length})
             </h3>
             <div className="space-y-2 overflow-y-auto max-h-[380px] pr-1 font-mono text-xs">
@@ -105,25 +105,25 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
                 return (
                   <div
                     key={m.id}
-                    className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
+                    className={`flex flex-wrap items-center justify-between gap-3 border-l-2 border px-4 py-3 clip-val-card ${
                       m.won
-                        ? 'border-emerald-500/30 bg-emerald-950/15'
-                        : 'border-rose-500/30 bg-rose-950/15'
+                        ? 'border-l-[#17E5B8] border-[#17E5B8]/30 bg-[#17E5B8]/10'
+                        : 'border-l-[#FF4655] border-[#FF4655]/30 bg-[#FF4655]/10'
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-black uppercase ${
-                          m.won ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                        className={`px-2 py-0.5 text-[10px] font-black uppercase ${
+                          m.won ? 'bg-[#17E5B8]/20 text-[#17E5B8]' : 'bg-[#FF4655]/20 text-[#FF4655]'
                         }`}
                       >
                         {m.won ? 'VICTORY' : 'DEFEAT'}
                       </span>
                       <div>
-                        <div className="font-bold text-white">
-                          {ag.name} · <span className="text-slate-400">{m.mode}</span>
+                        <div className="font-bold text-[#ECE8E1]">
+                          {ag.name} · <span className="text-[#8B978F]">{m.mode}</span>
                         </div>
-                        <div className="text-[10px] text-slate-500">
+                        <div className="text-[10px] text-[#8B978F]">
                           {new Date(m.timestamp).toLocaleDateString()} · {m.difficulty} BOTS
                         </div>
                       </div>
@@ -131,20 +131,20 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
 
                     <div className="flex items-center gap-5 tabular-nums">
                       <div className="text-right">
-                        <div className="text-[10px] text-slate-400">SCORE</div>
-                        <div className="font-black text-white">
+                        <div className="text-[10px] text-[#8B978F]">SCORE</div>
+                        <div className="font-black text-[#ECE8E1]">
                           {m.attackerScore} – {m.defenderScore}
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[10px] text-slate-400">K / D</div>
-                        <div className="font-bold text-cyan-300">
+                        <div className="text-[10px] text-[#8B978F]">K / D</div>
+                        <div className="font-bold text-[#17E5B8]">
                           {m.kills} / {m.deaths}
                         </div>
                       </div>
                       <div className="text-right hidden sm:block">
-                        <div className="text-[10px] text-slate-400">DAMAGE</div>
-                        <div className="font-bold text-slate-200">{m.damageDealt}</div>
+                        <div className="text-[10px] text-[#8B978F]">DAMAGE</div>
+                        <div className="font-bold text-[#ECE8E1]">{m.damageDealt}</div>
                       </div>
                     </div>
                   </div>
@@ -155,22 +155,22 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
 
           {/* Agent & Weapon Telemetry */}
           <div className="space-y-4 font-mono">
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 mb-3">
+            <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-5 clip-val-card">
+              <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[#8B978F] mb-3">
                 Operative Breakdown
               </h3>
               <div className="space-y-2.5 text-xs">
                 {playedAgents.map(({ agent, stats }) => (
-                  <div key={agent.id} className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <div key={agent.id} className="flex items-center justify-between border-b border-[#ECE8E1]/10 pb-2">
                     <div>
-                      <span className="font-bold text-white">{agent.name}</span>
-                      <span className="ml-2 text-[10px] text-slate-400">{stats.matches}M</span>
+                      <span className="font-bold text-[#ECE8E1]">{agent.name}</span>
+                      <span className="ml-2 text-[10px] text-[#8B978F]">{stats.matches}M</span>
                     </div>
                     <div className="tabular-nums text-right">
-                      <span className="text-emerald-400 font-bold">
+                      <span className="text-[#17E5B8] font-bold">
                         {Math.round((stats.wins / stats.matches) * 100)}% W
                       </span>
-                      <span className="ml-3 text-slate-300">
+                      <span className="ml-3 text-[#ECE8E1]">
                         {stats.kills}K/{stats.deaths}D
                       </span>
                     </div>
@@ -180,22 +180,22 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
             </div>
 
             {usedWeapons.length > 0 && (
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 mb-3">
+              <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-5 clip-val-card">
+                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[#8B978F] mb-3">
                   Weapon Telemetry
                 </h3>
                 <div className="space-y-2.5 text-xs">
                   {usedWeapons.map(({ weapon, stats }) => {
                     const acc = Math.round((stats.shotsHit / Math.max(1, stats.shotsFired)) * 100);
                     return (
-                      <div key={weapon.id} className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <div key={weapon.id} className="flex items-center justify-between border-b border-[#ECE8E1]/10 pb-2">
                         <div>
-                          <div className="font-bold text-white">{weapon.name}</div>
-                          <div className="text-[10px] text-slate-400">{acc}% Accuracy</div>
+                          <div className="font-bold text-[#ECE8E1]">{weapon.name}</div>
+                          <div className="text-[10px] text-[#8B978F]">{acc}% Accuracy</div>
                         </div>
                         <div className="tabular-nums text-right">
-                          <div className="font-bold text-amber-300">{stats.kills} Kills</div>
-                          <div className="text-[10px] text-slate-400">{Math.round(stats.damageDealt)} DMG</div>
+                          <div className="font-bold text-[#fbbf24]">{stats.kills} Kills</div>
+                          <div className="text-[10px] text-[#8B978F]">{Math.round(stats.damageDealt)} DMG</div>
                         </div>
                       </div>
                     );

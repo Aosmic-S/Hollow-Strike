@@ -63,11 +63,11 @@ const CROSSHAIR_STYLES: { id: CrosshairStyle; label: string }[] = [
 ];
 
 const CROSSHAIR_SWATCHES = [
+  { hex: '#17e5b8', name: 'Teal' },
   { hex: '#22d3ee', name: 'Cyan' },
-  { hex: '#34d399', name: 'Emerald' },
+  { hex: '#ff4655', name: 'Crimson' },
+  { hex: '#ece8e1', name: 'Parchment' },
   { hex: '#fbbf24', name: 'Amber' },
-  { hex: '#f8fafc', name: 'White' },
-  { hex: '#fb7185', name: 'Rose' },
   { hex: '#a855f7', name: 'Violet' },
 ];
 
@@ -151,23 +151,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       )}
 
       <div
-        className={`grid gap-6 font-mono text-xs text-slate-300 ${
+        className={`grid gap-6 font-mono text-xs text-[#ECE8E1]/90 ${
           compact ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'
         }`}
       >
         {/* SECTION 1: AIM & SENSITIVITY */}
-        <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-4">
-          <div className="border-b border-slate-800/80 pb-2">
-            <h3 className="text-sm font-black uppercase tracking-wider text-white">
-              Controls & Sensitivity
-            </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Calibrate input device mode, look speed, ADS scaling, and Y-axis orientation.
-            </p>
+        <section className="clip-val-panel border border-[#ECE8E1]/15 bg-[#18232E]/95 p-4 sm:p-5 space-y-4">
+          <div className="border-b border-[#ECE8E1]/10 pb-2.5 flex items-center justify-between">
+            <div>
+              <h3 className="font-display text-lg font-bold uppercase tracking-wider text-[#ECE8E1]">
+                Controls & Sensitivity
+              </h3>
+              <p className="text-[11px] text-[#8B978F] mt-0.5">
+                Calibrate input device mode, look speed, ADS scaling, and Y-axis orientation.
+              </p>
+            </div>
+            <span className="h-2 w-2 bg-[#FF4655]" />
           </div>
 
           <div>
-            <label className="block text-slate-400 uppercase tracking-wider mb-2 font-bold">
+            <label className="block text-[#8B978F] uppercase tracking-wider mb-2 font-bold">
               Input Control Mode
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -179,10 +182,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <button
                   key={m.id}
                   onClick={() => update('controlMode', m.id)}
-                  className={`rounded-lg border py-2 font-bold uppercase transition cursor-pointer ${
+                  className={`border py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
                     settings.controlMode === m.id
-                      ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                      : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-600'
+                      ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                      : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F] hover:border-[#ECE8E1]/35 hover:text-[#ECE8E1]'
                   }`}
                 >
                   {m.label}
@@ -194,8 +197,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="space-y-3">
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Mouse Look Sensitivity (PC)</span>
-                <span className="text-white font-bold tabular-nums" data-testid="mouse-sens-value">
+                <span className="text-[#8B978F] uppercase">Mouse Look Sensitivity (PC)</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums" data-testid="mouse-sens-value">
                   {(settings.mouseSensitivity * 1000).toFixed(2)}
                 </span>
               </div>
@@ -209,7 +212,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.max(0.0004, settings.mouseSensitivity - 0.0002).toFixed(4))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   -
                 </button>
@@ -221,7 +224,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   step="0.0002"
                   value={settings.mouseSensitivity}
                   onChange={(e) => update('mouseSensitivity', parseFloat(e.target.value))}
-                  className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                  className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
                 />
                 <button
                   type="button"
@@ -232,7 +235,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.min(0.01, settings.mouseSensitivity + 0.0002).toFixed(4))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   +
                 </button>
@@ -241,8 +244,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Touch Look Sensitivity (Mobile)</span>
-                <span className="text-white font-bold tabular-nums" data-testid="touch-sens-value">
+                <span className="text-[#8B978F] uppercase">Touch Look Sensitivity (Mobile)</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums" data-testid="touch-sens-value">
                   {(settings.touchSensitivity * 1000).toFixed(2)}
                 </span>
               </div>
@@ -256,7 +259,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.max(0.0008, settings.touchSensitivity - 0.0002).toFixed(4))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   -
                 </button>
@@ -268,7 +271,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   step="0.0002"
                   value={settings.touchSensitivity}
                   onChange={(e) => update('touchSensitivity', parseFloat(e.target.value))}
-                  className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                  className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
                 />
                 <button
                   type="button"
@@ -279,7 +282,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.min(0.015, settings.touchSensitivity + 0.0002).toFixed(4))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   +
                 </button>
@@ -288,8 +291,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">ADS / Scope Sensitivity Multiplier</span>
-                <span className="text-white font-bold tabular-nums" data-testid="ads-sens-value">
+                <span className="text-[#8B978F] uppercase">ADS / Scope Sensitivity Multiplier</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums" data-testid="ads-sens-value">
                   {Math.round((settings.adsSensitivityMultiplier ?? 0.7) * 100)}%
                 </span>
               </div>
@@ -303,7 +306,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.max(0.3, (settings.adsSensitivityMultiplier ?? 0.7) - 0.05).toFixed(2))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   -
                 </button>
@@ -315,7 +318,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   step="0.05"
                   value={settings.adsSensitivityMultiplier ?? 0.7}
                   onChange={(e) => update('adsSensitivityMultiplier', parseFloat(e.target.value))}
-                  className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                  className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
                 />
                 <button
                   type="button"
@@ -326,7 +329,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       Number(Math.min(1.2, (settings.adsSensitivityMultiplier ?? 0.7) + 0.05).toFixed(2))
                     )
                   }
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-sm font-black text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#ECE8E1]/20 bg-[#0F1923] text-sm font-black text-[#ECE8E1] hover:border-[#FF4655] cursor-pointer"
                 >
                   +
                 </button>
@@ -334,17 +337,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-slate-800/80 pt-3">
+          <div className="flex items-center justify-between border-t border-[#ECE8E1]/10 pt-3">
             <div>
-              <div className="font-bold uppercase text-slate-200">Invert Y-Axis</div>
-              <div className="text-[10px] text-slate-500">Flip vertical aim direction</div>
+              <div className="font-bold uppercase text-[#ECE8E1]">Invert Y-Axis</div>
+              <div className="text-[10px] text-[#8B978F]">Flip vertical aim direction</div>
             </div>
             <button
               onClick={() => update('invertY', !settings.invertY)}
-              className={`rounded-lg border px-4 py-1.5 font-bold uppercase transition cursor-pointer ${
+              className={`border px-4 py-1.5 font-bold uppercase tracking-wider transition cursor-pointer ${
                 settings.invertY
-                  ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                  : 'border-slate-800 bg-slate-900/60 text-slate-400'
+                  ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                  : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
               }`}
             >
               {settings.invertY ? 'INVERTED' : 'STANDARD'}
@@ -353,38 +356,38 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* SECTION 2: CUSTOMIZABLE CROSSHAIR & VIEWPORT */}
-        <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-3.5">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+        <section className="clip-val-panel border border-[#ECE8E1]/15 bg-[#18232E]/95 p-4 sm:p-5 space-y-3.5">
+          <div className="flex items-center justify-between border-b border-[#ECE8E1]/10 pb-2.5">
             <div>
-              <h3 className="text-sm font-black uppercase tracking-wider text-white">
+              <h3 className="font-display text-lg font-bold uppercase tracking-wider text-[#ECE8E1]">
                 Crosshair Customizer & FOV
               </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-[11px] text-[#8B978F] mt-0.5">
                 Pick reticle style, hex color, thickness, gap, center dot & dynamic spread bloom.
               </p>
             </div>
             <button
               type="button"
               onClick={() => onUpdateSettings({ ...settings, crosshairConfig: { ...DEFAULT_CROSSHAIR_CONFIG } })}
-              className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-bold uppercase text-amber-300 hover:border-amber-400 cursor-pointer"
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#fbbf24] hover:border-[#fbbf24] cursor-pointer"
             >
               Reset Reticle
             </button>
           </div>
 
           {/* Live Preview + Style / Presets */}
-          <div className="flex flex-col sm:flex-row gap-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+          <div className="flex flex-col sm:flex-row gap-3 border border-[#ECE8E1]/10 bg-[#0F1923]/80 p-3">
             <div className="flex flex-col items-center gap-1.5 shrink-0">
-              <div className="relative flex h-24 w-24 items-center justify-center rounded-lg border border-slate-700 overflow-hidden bg-gradient-to-br from-[#0b1220] via-[#1d283a] to-[#64748b]">
+              <div className="relative flex h-24 w-24 items-center justify-center border border-[#ECE8E1]/20 overflow-hidden bg-gradient-to-br from-[#0F1923] via-[#1f2d3b] to-[#52606d]">
                 <CrosshairReticle config={chConfig} bloomPx={previewBloomTest ? 5 : 0} />
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewBloomTest((v) => !v)}
-                className={`rounded border px-2 py-0.5 text-[9px] font-bold uppercase cursor-pointer ${
+                className={`border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider cursor-pointer ${
                   previewBloomTest
-                    ? 'border-cyan-400 bg-cyan-950/70 text-cyan-300'
-                    : 'border-slate-700 bg-slate-900 text-slate-400'
+                    ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                    : 'border-[#ECE8E1]/15 bg-[#18232E] text-[#8B978F]'
                 }`}
               >
                 {previewBloomTest ? 'Testing Bloom' : 'Test Move Bloom'}
@@ -393,7 +396,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <div className="flex-1 space-y-2.5">
               <div>
-                <span className="block text-[10px] text-slate-400 uppercase mb-1 font-bold">
+                <span className="block text-[10px] text-[#8B978F] uppercase mb-1 font-bold">
                   Presets
                 </span>
                 <div className="flex flex-wrap gap-1">
@@ -403,7 +406,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       type="button"
                       data-testid={`crosshair-preset-${preset.id}`}
                       onClick={() => updateCrosshair(preset.config)}
-                      className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-bold uppercase text-slate-200 hover:border-cyan-400 hover:text-cyan-300 cursor-pointer"
+                      className="border border-[#ECE8E1]/15 bg-[#18232E] px-2 py-1 text-[10px] font-bold uppercase text-[#ECE8E1] hover:border-[#17E5B8] hover:text-[#17E5B8] transition cursor-pointer"
                     >
                       {preset.label}
                     </button>
@@ -412,7 +415,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
 
               <div>
-                <span className="block text-[10px] text-slate-400 uppercase mb-1 font-bold">
+                <span className="block text-[10px] text-[#8B978F] uppercase mb-1 font-bold">
                   Reticle Shape
                 </span>
                 <div className="grid grid-cols-3 gap-1">
@@ -422,10 +425,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       type="button"
                       data-testid={`crosshair-style-${st.id}`}
                       onClick={() => updateCrosshair({ style: st.id })}
-                      className={`rounded border py-1 text-[10px] font-bold uppercase transition cursor-pointer ${
+                      className={`border py-1 text-[10px] font-bold uppercase transition cursor-pointer ${
                         chConfig.style === st.id
-                          ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-600'
+                          ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                          : 'border-[#ECE8E1]/15 bg-[#18232E] text-[#8B978F] hover:border-[#ECE8E1]/35'
                       }`}
                     >
                       {st.label}
@@ -438,7 +441,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           {/* Color Swatches + Custom Color Picker */}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[10px] text-slate-400 uppercase font-bold">Reticle Color</span>
+            <span className="text-[10px] text-[#8B978F] uppercase font-bold">Reticle Color</span>
             <div className="flex items-center gap-1.5">
               {CROSSHAIR_SWATCHES.map((sw) => (
                 <button
@@ -446,15 +449,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="button"
                   onClick={() => updateCrosshair({ color: sw.hex })}
                   title={sw.name}
-                  className={`h-6 w-6 rounded-md border-2 transition cursor-pointer ${
+                  className={`h-6 w-6 border-2 transition cursor-pointer ${
                     chConfig.color.toLowerCase() === sw.hex
-                      ? 'border-white scale-110'
-                      : 'border-slate-700 opacity-75 hover:opacity-100'
+                      ? 'border-[#ECE8E1] scale-110'
+                      : 'border-[#ECE8E1]/20 opacity-75 hover:opacity-100'
                   }`}
                   style={{ backgroundColor: sw.hex }}
                 />
               ))}
-              <label className="flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-1 border border-[#ECE8E1]/20 bg-[#0F1923] px-1.5 py-0.5 text-[10px] text-[#ECE8E1] cursor-pointer">
                 <span>HEX</span>
                 <input
                   type="color"
@@ -471,8 +474,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="grid grid-cols-2 gap-x-3 gap-y-2">
             <div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400 uppercase">Length</span>
-                <span className="text-white font-bold tabular-nums">{chConfig.length}px</span>
+                <span className="text-[#8B978F] uppercase">Length</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">{chConfig.length}px</span>
               </div>
               <input
                 type="range"
@@ -482,14 +485,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="1"
                 value={chConfig.length}
                 onChange={(e) => updateCrosshair({ length: parseInt(e.target.value, 10) })}
-                className="w-full h-2.5 accent-cyan-400 cursor-pointer"
+                className="w-full h-2.5 accent-[#FF4655] cursor-pointer"
               />
             </div>
 
             <div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400 uppercase">Thickness</span>
-                <span className="text-white font-bold tabular-nums">{chConfig.thickness}px</span>
+                <span className="text-[#8B978F] uppercase">Thickness</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">{chConfig.thickness}px</span>
               </div>
               <input
                 type="range"
@@ -499,14 +502,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="1"
                 value={chConfig.thickness}
                 onChange={(e) => updateCrosshair({ thickness: parseInt(e.target.value, 10) })}
-                className="w-full h-2.5 accent-cyan-400 cursor-pointer"
+                className="w-full h-2.5 accent-[#FF4655] cursor-pointer"
               />
             </div>
 
             <div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400 uppercase">Center Gap</span>
-                <span className="text-white font-bold tabular-nums">{chConfig.gap}px</span>
+                <span className="text-[#8B978F] uppercase">Center Gap</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">{chConfig.gap}px</span>
               </div>
               <input
                 type="range"
@@ -516,14 +519,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="1"
                 value={chConfig.gap}
                 onChange={(e) => updateCrosshair({ gap: parseInt(e.target.value, 10) })}
-                className="w-full h-2.5 accent-cyan-400 cursor-pointer"
+                className="w-full h-2.5 accent-[#FF4655] cursor-pointer"
               />
             </div>
 
             <div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400 uppercase">Opacity</span>
-                <span className="text-white font-bold tabular-nums">{Math.round(chConfig.opacity * 100)}%</span>
+                <span className="text-[#8B978F] uppercase">Opacity</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">{Math.round(chConfig.opacity * 100)}%</span>
               </div>
               <input
                 type="range"
@@ -533,7 +536,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="0.05"
                 value={chConfig.opacity}
                 onChange={(e) => updateCrosshair({ opacity: parseFloat(e.target.value) })}
-                className="w-full h-2.5 accent-cyan-400 cursor-pointer"
+                className="w-full h-2.5 accent-[#FF4655] cursor-pointer"
               />
             </div>
           </div>
@@ -543,10 +546,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <button
               type="button"
               onClick={() => updateCrosshair({ showDot: !chConfig.showDot })}
-              className={`rounded border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
+              className={`border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
                 chConfig.showDot
-                  ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-500'
+                  ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                  : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
               }`}
             >
               Dot: {chConfig.showDot ? `ON (${chConfig.dotSize}px)` : 'OFF'}
@@ -554,10 +557,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <button
               type="button"
               onClick={() => updateCrosshair({ outline: !chConfig.outline })}
-              className={`rounded border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
+              className={`border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
                 chConfig.outline
-                  ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-500'
+                  ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                  : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
               }`}
             >
               Outline: {chConfig.outline ? 'ON' : 'OFF'}
@@ -565,10 +568,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <button
               type="button"
               onClick={() => updateCrosshair({ dynamic: !chConfig.dynamic })}
-              className={`rounded border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
+              className={`border py-1.5 text-[10px] font-bold uppercase cursor-pointer ${
                 chConfig.dynamic
-                  ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                  : 'border-slate-800 bg-slate-900 text-slate-500'
+                  ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                  : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
               }`}
             >
               Dynamic: {chConfig.dynamic ? 'ON' : 'STATIC'}
@@ -578,8 +581,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           {chConfig.showDot && (
             <div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-slate-400 uppercase">Center Dot Size</span>
-                <span className="text-white font-bold tabular-nums">{chConfig.dotSize}px</span>
+                <span className="text-[#8B978F] uppercase">Center Dot Size</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">{chConfig.dotSize}px</span>
               </div>
               <input
                 type="range"
@@ -589,15 +592,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="1"
                 value={chConfig.dotSize}
                 onChange={(e) => updateCrosshair({ dotSize: parseInt(e.target.value, 10) })}
-                className="w-full h-2.5 accent-cyan-400 cursor-pointer"
+                className="w-full h-2.5 accent-[#FF4655] cursor-pointer"
               />
             </div>
           )}
 
-          <div className="border-t border-slate-800/80 pt-2.5">
+          <div className="border-t border-[#ECE8E1]/10 pt-2.5">
             <div className="flex justify-between mb-1">
-              <span className="text-slate-400 uppercase">Field of View (FOV)</span>
-              <span className="text-white font-bold tabular-nums">{settings.fov}°</span>
+              <span className="text-[#8B978F] uppercase">Field of View (FOV)</span>
+              <span className="text-[#ECE8E1] font-bold tabular-nums">{settings.fov}°</span>
             </div>
             <input
               type="range"
@@ -607,24 +610,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               step="1"
               value={settings.fov}
               onChange={(e) => update('fov', parseInt(e.target.value, 10))}
-              className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+              className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
             />
           </div>
         </section>
 
         {/* SECTION 3: GRAPHICS & FRAME PACING */}
-        <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-4">
-          <div className="border-b border-slate-800/80 pb-2">
-            <h3 className="text-sm font-black uppercase tracking-wider text-white">
+        <section className="clip-val-panel border border-[#ECE8E1]/15 bg-[#18232E]/95 p-4 sm:p-5 space-y-4">
+          <div className="border-b border-[#ECE8E1]/10 pb-2.5">
+            <h3 className="font-display text-lg font-bold uppercase tracking-wider text-[#ECE8E1]">
               Graphics & Performance
             </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-[11px] text-[#8B978F] mt-0.5">
               Balance WebGL resolution scaling, shadows, and frame-rate cap.
             </p>
           </div>
 
           <div>
-            <label className="block text-slate-400 uppercase tracking-wider mb-2 font-bold">
+            <label className="block text-[#8B978F] uppercase tracking-wider mb-2 font-bold">
               Quality Preset
             </label>
             <div className="grid grid-cols-4 gap-2">
@@ -632,17 +635,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <button
                   key={preset}
                   onClick={() => update('graphics', preset)}
-                  className={`rounded-lg border py-2 font-bold uppercase transition cursor-pointer ${
+                  className={`border py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
                     settings.graphics === preset
-                      ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                      : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-600'
+                      ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                      : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F] hover:border-[#ECE8E1]/35'
                   }`}
                 >
                   {preset}
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-[10px] text-slate-500">
+            <p className="mt-1.5 text-[10px] text-[#8B978F]">
               {settings.graphics === 'LOW' && '65% render scale, dynamic shadows off (fastest on mobile).'}
               {settings.graphics === 'MEDIUM' && '85% resolution scale with standard lighting and shadows.'}
               {settings.graphics === 'HIGH' && 'Native sharpness up to 1.5x DPR with soft directional shadows.'}
@@ -652,7 +655,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-400 uppercase tracking-wider mb-2 font-bold">
+              <label className="block text-[#8B978F] uppercase tracking-wider mb-2 font-bold">
                 FPS Cap
               </label>
               <div className="grid grid-cols-4 gap-1.5">
@@ -660,10 +663,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <button
                     key={cap}
                     onClick={() => update('fpsCap', cap)}
-                    className={`rounded-lg border py-1.5 font-bold transition cursor-pointer ${
+                    className={`border py-1.5 font-bold transition cursor-pointer ${
                       settings.fpsCap === cap
-                        ? 'border-cyan-400 bg-cyan-950/60 text-cyan-300'
-                        : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-600'
+                        ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                        : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F] hover:border-[#ECE8E1]/35'
                     }`}
                   >
                     {cap === 0 ? 'MAX' : cap}
@@ -673,15 +676,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
 
             <div>
-              <label className="block text-slate-400 uppercase tracking-wider mb-2 font-bold">
+              <label className="block text-[#8B978F] uppercase tracking-wider mb-2 font-bold">
                 FPS Counter
               </label>
               <button
                 onClick={() => update('showFps', !settings.showFps)}
-                className={`w-full rounded-lg border py-1.5 font-bold uppercase transition cursor-pointer ${
+                className={`w-full border py-1.5 font-bold uppercase tracking-wider transition cursor-pointer ${
                   settings.showFps
-                    ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
-                    : 'border-slate-800 bg-slate-900/60 text-slate-500'
+                    ? 'border-[#17E5B8]/60 bg-[#17E5B8]/15 text-[#17E5B8]'
+                    : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
                 }`}
               >
                 {settings.showFps ? 'VISIBLE ON HUD' : 'HIDDEN'}
@@ -691,27 +694,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </section>
 
         {/* SECTION 4: ON-SCREEN CONTROLS MAPPING, MOBILE ASSIST & AUDIO */}
-        <section className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-4">
-          <div className="border-b border-slate-800/80 pb-2">
-            <h3 className="text-sm font-black uppercase tracking-wider text-white">
+        <section className="clip-val-panel border border-[#ECE8E1]/15 bg-[#18232E]/95 p-4 sm:p-5 space-y-4">
+          <div className="border-b border-[#ECE8E1]/10 pb-2.5">
+            <h3 className="font-display text-lg font-bold uppercase tracking-wider text-[#ECE8E1]">
               On-Screen Touch Mapping & Audio
             </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-[11px] text-[#8B978F] mt-0.5">
               Customize button positions, scale, claw presets, touch assists, and Web Audio volume.
             </p>
           </div>
 
-          <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/15 p-3 space-y-2.5">
+          <div className="border border-[#FF4655]/30 bg-[#0F1923]/80 p-3 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-xs font-black uppercase text-cyan-300">On-Screen Controls Layout</div>
-                <div className="text-[10px] text-slate-400">Reposition joystick, fire, ADS, jump, reload & abilities</div>
+                <div className="text-xs font-black uppercase tracking-wider text-[#ECE8E1]">
+                  On-Screen Controls Layout
+                </div>
+                <div className="text-[10px] text-[#8B978F]">
+                  Reposition joystick, fire, ADS, jump, reload & abilities
+                </div>
               </div>
               <button
                 type="button"
                 data-testid="open-touch-editor-btn"
                 onClick={() => setShowTouchEditor(true)}
-                className="rounded-lg bg-cyan-600 px-3 py-2 text-[11px] font-black uppercase text-white shadow hover:bg-cyan-500 cursor-pointer"
+                className="clip-val-btn bg-[#FF4655] px-4 py-2 font-display text-sm font-bold uppercase tracking-widest text-[#ECE8E1] shadow hover:bg-[#d93644] transition cursor-pointer"
               >
                 Open HUD Layout Editor
               </button>
@@ -723,7 +730,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   key={pid}
                   type="button"
                   onClick={() => update('touchLayout', applyTouchLayoutPreset(pid))}
-                  className="rounded border border-slate-700 bg-slate-900/80 py-1.5 text-[10px] font-bold uppercase text-slate-300 hover:border-cyan-400 hover:text-cyan-300 cursor-pointer"
+                  className="border border-[#ECE8E1]/15 bg-[#18232E] py-1.5 text-[10px] font-bold uppercase text-[#ECE8E1] hover:border-[#17E5B8] hover:text-[#17E5B8] transition cursor-pointer"
                 >
                   {TOUCH_LAYOUT_PRESETS[pid].label}
                 </button>
@@ -733,15 +740,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-400 uppercase tracking-wider mb-1.5 font-bold">
+              <label className="block text-[#8B978F] uppercase tracking-wider mb-1.5 font-bold">
                 Touch Aim Assist
               </label>
               <button
                 onClick={() => update('aimAssistMobile', !settings.aimAssistMobile)}
-                className={`w-full rounded-lg border py-2 font-bold uppercase transition cursor-pointer ${
+                className={`w-full border py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
                   settings.aimAssistMobile
-                    ? 'border-cyan-400 bg-cyan-950/50 text-cyan-300'
-                    : 'border-slate-800 bg-slate-900/60 text-slate-500'
+                    ? 'border-[#17E5B8] bg-[#17E5B8]/15 text-[#17E5B8]'
+                    : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
                 }`}
               >
                 {settings.aimAssistMobile ? 'ENABLED' : 'DISABLED'}
@@ -749,15 +756,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
 
             <div>
-              <label className="block text-slate-400 uppercase tracking-wider mb-1.5 font-bold">
+              <label className="block text-[#8B978F] uppercase tracking-wider mb-1.5 font-bold">
                 Touch Auto-Fire
               </label>
               <button
                 onClick={() => update('autoFireMobile', !settings.autoFireMobile)}
-                className={`w-full rounded-lg border py-2 font-bold uppercase transition cursor-pointer ${
+                className={`w-full border py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
                   settings.autoFireMobile
-                    ? 'border-amber-400 bg-amber-950/50 text-amber-300'
-                    : 'border-slate-800 bg-slate-900/60 text-slate-500'
+                    ? 'border-[#fbbf24] bg-[#fbbf24]/15 text-[#fbbf24]'
+                    : 'border-[#ECE8E1]/15 bg-[#0F1923] text-[#8B978F]'
                 }`}
               >
                 {settings.autoFireMobile ? 'ENABLED' : 'DISABLED'}
@@ -768,8 +775,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Touch Scale</span>
-                <span className="text-white font-bold tabular-nums">
+                <span className="text-[#8B978F] uppercase">Touch Scale</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">
                   {Math.round((settings.touchScale ?? 1.0) * 100)}%
                 </span>
               </div>
@@ -781,14 +788,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="0.05"
                 value={settings.touchScale ?? 1.0}
                 onChange={(e) => update('touchScale', parseFloat(e.target.value))}
-                className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
               />
             </div>
 
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Touch Opacity</span>
-                <span className="text-white font-bold tabular-nums">
+                <span className="text-[#8B978F] uppercase">Touch Opacity</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">
                   {Math.round((settings.touchOpacity ?? 0.85) * 100)}%
                 </span>
               </div>
@@ -800,16 +807,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="0.05"
                 value={settings.touchOpacity ?? 0.85}
                 onChange={(e) => update('touchOpacity', parseFloat(e.target.value))}
-                className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-4 border-t border-slate-800/80 pt-3">
+          <div className="flex items-center justify-between gap-4 border-t border-[#ECE8E1]/10 pt-3">
             <div className="flex-1">
               <div className="flex justify-between mb-1">
-                <span className="text-slate-400 uppercase">Master Volume</span>
-                <span className="text-white font-bold tabular-nums">
+                <span className="text-[#8B978F] uppercase">Master Volume</span>
+                <span className="text-[#ECE8E1] font-bold tabular-nums">
                   {Math.round(settings.volume * 100)}%
                 </span>
               </div>
@@ -821,15 +828,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 step="0.05"
                 value={settings.volume}
                 onChange={(e) => update('volume', parseFloat(e.target.value))}
-                className="w-full h-3 accent-cyan-400 cursor-pointer touch-pan-x select-auto"
+                className="w-full h-3 accent-[#FF4655] cursor-pointer touch-pan-x select-auto"
               />
             </div>
             <button
               onClick={() => update('soundEnabled', !settings.soundEnabled)}
-              className={`rounded-lg border px-4 py-2 font-bold uppercase transition cursor-pointer ${
+              className={`border px-4 py-2 font-bold uppercase tracking-wider transition cursor-pointer ${
                 settings.soundEnabled
-                  ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
-                  : 'border-red-500/60 bg-red-950/40 text-red-300'
+                  ? 'border-[#17E5B8]/60 bg-[#17E5B8]/15 text-[#17E5B8]'
+                  : 'border-[#FF4655]/60 bg-[#FF4655]/15 text-[#FF4655]'
               }`}
             >
               {settings.soundEnabled ? 'AUDIO ON' : 'MUTED'}
@@ -839,16 +846,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         {/* SECTION 5: MAPPABLE PC KEYBINDINGS */}
         <section
-          className={`rounded-xl border border-slate-800 bg-slate-950/70 p-4 sm:p-5 space-y-4 ${
+          className={`clip-val-panel border border-[#ECE8E1]/15 bg-[#18232E]/95 p-4 sm:p-5 space-y-4 ${
             compact ? '' : 'lg:col-span-2'
           }`}
         >
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ECE8E1]/10 pb-2.5">
             <div>
-              <h3 className="text-sm font-black uppercase tracking-wider text-white">
+              <h3 className="font-display text-lg font-bold uppercase tracking-wider text-[#ECE8E1]">
                 Mappable Keyboard Controls
               </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-[11px] text-[#8B978F] mt-0.5">
                 Tap any binding and press a new key. Conflicting keys swap automatically; Esc cancels capture.
               </p>
             </div>
@@ -858,7 +865,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 setListeningAction(null);
                 update('keyBindings', { ...DEFAULT_KEY_BINDINGS });
               }}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-bold uppercase text-amber-300 hover:border-amber-400 transition cursor-pointer"
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#fbbf24] hover:border-[#fbbf24] transition cursor-pointer"
             >
               Reset Defaults
             </button>
@@ -871,9 +878,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               return (
                 <div
                   key={field.action}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-800/90 bg-slate-900/60 px-2.5 py-2"
+                  className="flex items-center justify-between gap-2 border border-[#ECE8E1]/10 bg-[#0F1923]/80 px-2.5 py-2"
                 >
-                  <span className="text-[11px] font-bold uppercase text-slate-300 truncate">
+                  <span className="text-[11px] font-bold uppercase text-[#ECE8E1]/85 truncate">
                     {field.label}
                   </span>
                   <button
@@ -881,10 +888,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     data-testid={`keybind-${field.action}`}
                     aria-label={`Rebind ${field.label}`}
                     onClick={() => setListeningAction(isListening ? null : field.action)}
-                    className={`min-w-[64px] shrink-0 rounded border px-2 py-1 text-[10px] font-black uppercase tracking-wider transition cursor-pointer ${
+                    className={`min-w-[64px] shrink-0 border px-2 py-1 text-[10px] font-black uppercase tracking-wider transition cursor-pointer ${
                       isListening
-                        ? 'border-amber-400 bg-amber-500/20 text-amber-200 animate-pulse'
-                        : 'border-cyan-500/40 bg-slate-950 text-cyan-300 hover:border-cyan-400'
+                        ? 'border-[#FF4655] bg-[#FF4655]/20 text-[#FF4655]'
+                        : 'border-[#17E5B8]/40 bg-[#18232E] text-[#17E5B8] hover:border-[#17E5B8]'
                     }`}
                   >
                     {isListening ? 'PRESS KEY...' : formatKeyCode(code)}

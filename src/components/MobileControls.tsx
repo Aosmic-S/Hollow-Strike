@@ -220,17 +220,17 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   onPointerMove={handleJoystickPointerMove}
                   onPointerUp={handleJoystickPointerUp}
                   onPointerCancel={handleJoystickPointerUp}
-                  className="relative flex h-32 w-32 items-center justify-center rounded-full border-2 border-slate-700/80 bg-slate-950/80 touch-none shadow-2xl"
+                  className="relative flex h-32 w-32 items-center justify-center rounded-full border-2 border-[#ECE8E1]/25 bg-[#0F1923]/80 touch-none shadow-2xl"
                 >
-                  <div className="absolute h-full w-full rounded-full border border-cyan-500/30" />
-                  <div className="absolute top-2 h-2.5 w-0.5 bg-cyan-400" />
-                  <div className="absolute bottom-2 h-2.5 w-0.5 bg-cyan-400" />
-                  <div className="absolute left-2 h-0.5 w-2.5 bg-cyan-400" />
-                  <div className="absolute right-2 h-0.5 w-2.5 bg-cyan-400" />
+                  <div className="absolute h-full w-full rounded-full border border-[#17E5B8]/30" />
+                  <div className="absolute top-2 h-2.5 w-0.5 bg-[#17E5B8]" />
+                  <div className="absolute bottom-2 h-2.5 w-0.5 bg-[#17E5B8]" />
+                  <div className="absolute left-2 h-0.5 w-2.5 bg-[#17E5B8]" />
+                  <div className="absolute right-2 h-0.5 w-2.5 bg-[#17E5B8]" />
 
                   <div
-                    className={`h-13 w-13 rounded-full border border-cyan-300 shadow-lg transition-transform duration-75 ${
-                      isJoystickActive ? 'scale-110 bg-cyan-400' : 'scale-100 bg-cyan-500/85'
+                    className={`h-13 w-13 rounded-full border border-[#17E5B8] shadow-lg transition-transform duration-75 ${
+                      isJoystickActive ? 'scale-110 bg-[#17E5B8]' : 'scale-100 bg-[#17E5B8]/80'
                     }`}
                     style={{
                       transform: `translate3d(${joystickPos.x}px, ${joystickPos.y}px, 0)`,
@@ -250,10 +250,10 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                 onPointerUp={handleFirePointerUp}
                 onPointerCancel={handleFirePointerUp}
                 style={getSlotStyle('fire')}
-                className={`pointer-events-auto absolute z-40 flex h-19 w-19 items-center justify-center rounded-full border-2 text-xs font-mono font-black uppercase tracking-widest text-white shadow-2xl transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-19 w-19 items-center justify-center rounded-full border-2 text-xs font-mono font-black uppercase tracking-widest text-[#ECE8E1] shadow-2xl transition cursor-pointer touch-none ${
                   fireActive
-                    ? 'border-amber-300 bg-rose-500 scale-95 shadow-rose-500/50'
-                    : 'border-rose-500 bg-rose-600/95 shadow-rose-600/35'
+                    ? 'border-[#ECE8E1] bg-[#FF4655] scale-95 shadow-[#FF4655]/50'
+                    : 'border-[#FF4655] bg-[#FF4655]/90 shadow-[#FF4655]/35'
                 }`}
               >
                 FIRE
@@ -270,7 +270,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.triggerMobileJump();
                 }}
                 style={getSlotStyle('jump')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/90 text-[11px] font-mono font-bold uppercase text-slate-200 shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/92 text-[11px] font-mono font-bold uppercase text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
               >
                 JUMP
               </button>
@@ -286,7 +286,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.triggerMobileReload();
                 }}
                 style={getSlotStyle('reload')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/90 text-[10px] font-mono font-bold uppercase text-slate-200 shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/92 text-[10px] font-mono font-bold uppercase text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
               >
                 RELOAD
               </button>
@@ -304,10 +304,10 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobileADS(next);
                 }}
                 style={getSlotStyle('ads')}
-                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center rounded-2xl border text-[11px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border text-[11px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
                   adsActive
-                    ? 'border-cyan-400 bg-cyan-500 text-slate-950 font-black'
-                    : 'border-slate-700 bg-slate-900/90 text-slate-200'
+                    ? 'border-[#17E5B8] bg-[#17E5B8] text-[#0F1923] font-black'
+                    : 'border-[#ECE8E1]/25 bg-[#18232E]/92 text-[#ECE8E1]'
                 }`}
               >
                 ADS
@@ -326,10 +326,10 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobileCrouch(next);
                 }}
                 style={getSlotStyle('crouch')}
-                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center rounded-2xl border text-[10px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border text-[10px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
                   crouchActive
-                    ? 'border-cyan-400 bg-cyan-500 text-slate-950 font-black'
-                    : 'border-slate-700 bg-slate-900/90 text-slate-200'
+                    ? 'border-[#17E5B8] bg-[#17E5B8] text-[#0F1923] font-black'
+                    : 'border-[#ECE8E1]/25 bg-[#18232E]/92 text-[#ECE8E1]'
                 }`}
               >
                 CROUCH
@@ -346,7 +346,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   onSwitchWeapon(activeSlot === 1 ? 2 : 1);
                 }}
                 style={getSlotStyle('weaponSwap')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-15 items-center justify-center rounded-2xl border border-cyan-500/60 bg-slate-900/90 text-[10px] font-mono font-black uppercase text-cyan-300 shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className="pointer-events-auto absolute z-40 flex h-13.5 w-15 items-center justify-center clip-val-card border border-[#17E5B8]/60 bg-[#18232E]/92 text-[10px] font-mono font-black uppercase text-[#17E5B8] shadow-xl active:scale-95 transition cursor-pointer touch-none"
               >
                 {activeSlot === 1 ? 'SIDEARM' : 'PRIMARY'}
               </button>
@@ -370,10 +370,10 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobilePlantDefuse(false);
                 }}
                 style={getSlotStyle('plantDefuse')}
-                className={`pointer-events-auto absolute z-40 h-15 w-18 rounded-2xl border-2 text-[10px] font-mono font-black uppercase tracking-wider shadow-2xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 h-15 w-18 clip-val-card border-2 text-[10px] font-mono font-black uppercase tracking-wider shadow-2xl active:scale-95 transition cursor-pointer touch-none ${
                   isPlantingOrDefusing
-                    ? 'border-red-400 bg-red-600 text-white animate-pulse'
-                    : 'border-amber-400 bg-amber-600 text-white'
+                    ? 'border-[#ECE8E1] bg-[#FF4655] text-[#ECE8E1]'
+                    : 'border-[#fbbf24] bg-[#fbbf24] text-[#0F1923]'
                 }`}
               >
                 PLANT / DEFUSE
@@ -406,23 +406,23 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                       ? { borderColor: agent.primaryColor, color: agent.primaryColor }
                       : {}),
                   }}
-                  className={`pointer-events-auto absolute z-40 flex h-13 w-13 flex-col items-center justify-center rounded-2xl border font-mono text-xs font-black shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                  className={`pointer-events-auto absolute z-40 flex h-13 w-13 flex-col items-center justify-center clip-val-card border font-mono text-xs font-black shadow-xl active:scale-95 transition cursor-pointer touch-none ${
                     !hasCharge || onCd
-                      ? 'border-slate-800 bg-slate-950/75 text-slate-500'
+                      ? 'border-[#ECE8E1]/10 bg-[#0F1923]/80 text-[#8B978F]'
                       : ab.isUltimate
-                        ? 'border-amber-400 bg-amber-600/90 text-white shadow-amber-500/30'
-                        : 'bg-slate-900/90 text-white'
+                        ? 'border-[#FF4655] bg-[#FF4655] text-[#ECE8E1] shadow-[#FF4655]/30'
+                        : 'bg-[#18232E]/92 text-[#ECE8E1]'
                   }`}
                 >
                   <span>{ab.keySlot}</span>
                   {onCd ? (
-                    <span className="text-[9px] text-amber-300">{Math.ceil(st!.cooldownRemaining)}s</span>
+                    <span className="text-[9px] text-[#fbbf24]">{Math.ceil(st!.cooldownRemaining)}s</span>
                   ) : ab.isUltimate ? (
                     <span className="text-[8px] font-bold">
                       {isUltReady ? 'READY' : `${st?.ultPoints ?? 0}/${st?.ultRequired ?? 5}`}
                     </span>
                   ) : (
-                    <span className="text-[9px] text-slate-300">×{st?.charges ?? ab.maxCharges}</span>
+                    <span className="text-[9px] text-[#ECE8E1]/75">×{st?.charges ?? ab.maxCharges}</span>
                   )}
                 </button>
               );
@@ -445,7 +445,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
               e.stopPropagation();
               onOpenSettings();
             }}
-            className="flex min-h-11 items-center gap-1 rounded-lg border border-cyan-400/70 bg-slate-900/95 px-2 py-1.5 font-mono text-[10px] font-black uppercase text-cyan-300 shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="flex min-h-11 items-center gap-1 border border-[#17E5B8]/60 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-black uppercase text-[#17E5B8] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
             <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path
@@ -465,7 +465,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                 e.stopPropagation();
                 onOpenBuyMenu();
               }}
-              className="min-h-11 rounded-lg border border-amber-500/60 bg-slate-900/95 px-2 py-1.5 font-mono text-[10px] font-bold uppercase text-amber-300 shadow-lg active:scale-95 transition cursor-pointer touch-none"
+              className="min-h-11 border border-[#fbbf24]/60 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#fbbf24] shadow-lg active:scale-95 transition cursor-pointer touch-none"
             >
               SHOP
             </button>
@@ -477,7 +477,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
               e.stopPropagation();
               onOpenMap();
             }}
-            className="min-h-11 rounded-lg border border-slate-700 bg-slate-900/95 px-2 py-1.5 font-mono text-[10px] font-bold uppercase text-slate-200 shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="min-h-11 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
             MAP
           </button>
@@ -488,7 +488,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
               e.stopPropagation();
               onOpenScoreboard();
             }}
-            className="min-h-11 rounded-lg border border-slate-700 bg-slate-900/95 px-2 py-1.5 font-mono text-[10px] font-bold uppercase text-slate-200 shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="min-h-11 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
             TAB
           </button>
@@ -499,7 +499,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
               e.stopPropagation();
               onOpenPause();
             }}
-            className="min-h-11 rounded-lg border border-slate-700 bg-slate-900/95 px-2 py-1.5 font-mono text-[10px] font-bold uppercase text-slate-200 shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="min-h-11 border border-[#FF4655]/50 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#FF4655] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
             PAUSE
           </button>

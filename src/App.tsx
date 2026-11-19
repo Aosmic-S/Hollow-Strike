@@ -43,6 +43,7 @@ import { MatchEndModal } from './components/MatchEndModal';
 import { PauseModal } from './components/PauseModal';
 import { OrientationGuard } from './components/OrientationGuard';
 import { TacticalMapModal } from './components/TacticalMapModal';
+import { LoadingSplash } from './components/LoadingSplash';
 
 type AppState = 'title' | 'playing' | 'paused' | 'gameover';
 
@@ -80,6 +81,10 @@ export default function App() {
   });
 
   // App Shell State
+  const [isBootLoading, setIsBootLoading] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('autostart') !== '1';
+  });
   const [appState, setAppState] = useState<AppState>('title');
   const [selectedAgentId, setSelectedAgentId] = useState<string>(() => profile.favoriteAgentId || 'ZEPHYR');
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('MEDIUM');
@@ -398,8 +403,11 @@ export default function App() {
   const hasPrimaryWeapon = Boolean(engineRef.current?.playerCombatant?.primaryWeapon);
 
   return (
-    <div className="relative h-[100dvh] w-screen overflow-hidden bg-[#070b14] text-white">
+    <div className="relative h-[100dvh] w-screen overflow-hidden bg-[#0F1923] text-[#ECE8E1]">
       <OrientationGuard onOrientationChange={handleOrientationChange} />
+
+      {/* Valorant-Inspired Fullscreen Preload Splash */}
+      {isBootLoading && <LoadingSplash onComplete={() => setIsBootLoading(false)} />}
 
       {/* 3D WebGL Canvas Mount Container */}
       <div ref={canvasMountRef} data-testid="three-canvas" className="absolute inset-0 h-full w-full" />

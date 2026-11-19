@@ -28,35 +28,35 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
   onClose,
 }) => {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/75 p-4 select-none">
-      <div className="relative flex max-h-[92vh] w-full max-w-4xl flex-col rounded-xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl overflow-y-auto">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0F1923]/80 backdrop-blur-sm p-4 select-none">
+      <div className="relative flex max-h-[92vh] w-full max-w-4xl flex-col border border-[#ECE8E1]/20 bg-[#18232E] p-6 shadow-2xl overflow-y-auto clip-val-panel">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="flex items-center justify-between border-b border-[#ECE8E1]/15 pb-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${canBuy ? 'bg-cyan-400' : 'bg-amber-400'}`} />
-              <h2 className="text-xl font-black uppercase tracking-widest text-white">
+              <span className={`h-2.5 w-2.5 rotate-45 ${canBuy ? 'bg-[#17E5B8]' : 'bg-[#FF4655]'}`} />
+              <h2 className="font-display text-2xl font-extrabold uppercase tracking-[0.16em] text-[#ECE8E1]">
                 {canBuy ? 'ARMORY · BUY PHASE' : 'ARMORY · ROUND ACTIVE'}
               </h2>
             </div>
-            <p className="text-xs text-slate-400">
+            <p className="font-mono text-xs text-[#8B978F]">
               {canBuy
                 ? 'Select weaponry and tactical armor for the round'
-                : 'Purchases are only allowed during Buy Phase or Practice Range'}
+                : 'Purchases are allowed during Buy Phase or Practice Range'}
             </p>
           </div>
 
           <div className="flex items-center gap-6">
             <div className="text-right">
-              <span className="text-[10px] uppercase tracking-wider text-slate-400">Available Credits</span>
-              <div className="font-mono text-2xl font-black text-emerald-400 tabular-nums">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-[#8B978F]">Available Credits</span>
+              <div className="font-mono text-2xl font-black text-[#17E5B8] tabular-nums">
                 ${credits.toLocaleString()}
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-200 hover:bg-slate-700 hover:text-white transition cursor-pointer"
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
             >
               Close [B]
             </button>
@@ -65,7 +65,9 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
 
         {/* Weapons Grid */}
         <div className="mt-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2.5">Firearms</h3>
+          <h3 className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#FF4655] mb-2.5">
+            Firearms
+          </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
             {Object.values(WEAPON_REGISTRY).map((w: WeaponDef) => {
               const isEquipped = currentWeaponId === w.id;
@@ -75,53 +77,55 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                 <div
                   key={w.id}
                   data-testid={`buy-weapon-${w.id}`}
-                  className={`flex flex-col justify-between rounded-lg border p-3 transition ${
+                  className={`flex flex-col justify-between border p-3 transition clip-val-card ${
                     isEquipped
-                      ? 'border-cyan-500 bg-cyan-950/30'
+                      ? 'border-[#17E5B8] bg-[#17E5B8]/10'
                       : canAfford
-                      ? 'border-slate-800 bg-slate-900/60 hover:border-slate-600'
-                      : 'border-slate-900 bg-slate-950 opacity-60'
+                      ? 'border-[#ECE8E1]/15 bg-[#0F1923]/85 hover:border-[#ECE8E1]/40'
+                      : 'border-[#ECE8E1]/10 bg-[#0F1923]/45 opacity-60'
                   }`}
                 >
                   <div>
                     <div className="flex items-start justify-between">
                       <div>
-                        <span className="text-[10px] font-mono uppercase text-slate-400">{w.category}</span>
-                        <h4 className="text-sm font-black text-white">{w.name}</h4>
+                        <span className="text-[10px] font-mono uppercase text-[#8B978F]">{w.category}</span>
+                        <h4 className="font-display text-base font-extrabold uppercase tracking-wide text-[#ECE8E1]">
+                          {w.name}
+                        </h4>
                       </div>
-                      <span className="font-mono text-xs font-bold text-emerald-400">
+                      <span className="font-mono text-xs font-bold text-[#17E5B8]">
                         {w.cost === 0 ? 'FREE' : `$${w.cost}`}
                       </span>
                     </div>
 
-                    <p className="mt-1.5 text-[10px] text-slate-400 leading-tight">{w.description}</p>
+                    <p className="mt-1 text-[10px] text-[#8B978F] leading-tight">{w.description}</p>
 
-                    {/* Stats */}
-                    <div className="mt-2.5 space-y-1 border-t border-slate-800 pt-2 text-[10px] font-mono text-slate-300">
+                    <div className="mt-2.5 space-y-1 border-t border-[#ECE8E1]/10 pt-2 text-[10px] font-mono text-[#ECE8E1]">
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Head / Body / Leg:</span>
-                        <span className="text-white font-bold">{w.damageHead} / {w.damageBody} / {w.damageLeg}</span>
+                        <span className="text-[#8B978F]">Head / Body / Leg:</span>
+                        <span className="font-bold">{w.damageHead} / {w.damageBody} / {w.damageLeg}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Fire Rate:</span>
-                        <span className="text-white">{w.fireRate} rps</span>
+                        <span className="text-[#8B978F]">Fire Rate:</span>
+                        <span>{w.fireRate} rps</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Magazine:</span>
-                        <span className="text-white">{w.magazineSize} / {w.reserveAmmo}</span>
+                        <span className="text-[#8B978F]">Magazine:</span>
+                        <span>{w.magazineSize} / {w.reserveAmmo}</span>
                       </div>
                     </div>
                   </div>
 
                   <button
+                    data-testid={`buy-weapon-${w.id}`}
                     disabled={isEquipped || !canAfford || !canBuy}
                     onClick={() => onBuyWeapon(w.id)}
-                    className={`mt-3 w-full rounded py-1.5 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                    className={`mt-3 w-full py-1.5 font-display text-xs font-extrabold uppercase tracking-widest transition cursor-pointer clip-val-card ${
                       isEquipped
-                        ? 'border border-cyan-500/40 bg-cyan-500/20 text-cyan-300 cursor-default'
+                        ? 'border border-[#17E5B8]/50 bg-[#17E5B8]/20 text-[#17E5B8] cursor-default'
                         : canBuy && canAfford
-                        ? 'bg-cyan-600 text-white hover:bg-cyan-500'
-                        : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        ? 'bg-[#FF4655] text-[#ECE8E1] hover:bg-[#ff5e6b]'
+                        : 'bg-[#18232E] text-[#8B978F] cursor-not-allowed'
                     }`}
                   >
                     {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'PURCHASE' : 'LOCKED'}
@@ -134,9 +138,10 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
 
         {/* Armor & Abilities Section */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Shields */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-3">Tactical Shields</h3>
+            <h3 className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#FF4655] mb-3">
+              Tactical Shields
+            </h3>
             <div className="grid grid-cols-2 gap-3">
               {Object.values(SHIELD_REGISTRY).map((s: ShieldDef) => {
                 const isEquipped = currentArmor >= s.armorPoints;
@@ -145,31 +150,31 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                 return (
                   <div
                     key={s.id}
-                    className={`flex flex-col justify-between rounded-lg border p-4 ${
+                    className={`flex flex-col justify-between border p-4 clip-val-card ${
                       isEquipped
-                        ? 'border-blue-500 bg-blue-950/30'
+                        ? 'border-[#17E5B8] bg-[#17E5B8]/10'
                         : canAfford
-                        ? 'border-slate-800 bg-slate-900/60'
-                        : 'border-slate-900 bg-slate-950 opacity-60'
+                        ? 'border-[#ECE8E1]/15 bg-[#0F1923]/85'
+                        : 'border-[#ECE8E1]/10 bg-[#0F1923]/45 opacity-60'
                     }`}
                   >
                     <div>
                       <div className="flex items-start justify-between">
-                        <h4 className="text-sm font-bold text-white">{s.name}</h4>
-                        <span className="font-mono text-xs font-bold text-emerald-400">${s.cost}</span>
+                        <h4 className="font-display text-base font-extrabold uppercase text-[#ECE8E1]">{s.name}</h4>
+                        <span className="font-mono text-xs font-bold text-[#17E5B8]">${s.cost}</span>
                       </div>
-                      <p className="mt-1 text-[11px] text-slate-400">{s.description}</p>
+                      <p className="mt-1 text-[11px] text-[#8B978F]">{s.description}</p>
                     </div>
 
                     <button
                       disabled={isEquipped || !canAfford || !canBuy}
                       onClick={() => onBuyShield(s.id)}
-                      className={`mt-3 w-full rounded py-1.5 text-xs font-bold uppercase transition cursor-pointer ${
+                      className={`mt-3 w-full py-1.5 font-display text-xs font-extrabold uppercase tracking-wider transition cursor-pointer clip-val-card ${
                         isEquipped
-                          ? 'border border-blue-500/40 bg-blue-500/20 text-blue-300 cursor-default'
+                          ? 'border border-[#17E5B8]/50 bg-[#17E5B8]/20 text-[#17E5B8] cursor-default'
                           : canBuy && canAfford
-                          ? 'bg-blue-600 text-white hover:bg-blue-500'
-                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          ? 'bg-[#17E5B8] text-[#0F1923] hover:opacity-90'
+                          : 'bg-[#18232E] text-[#8B978F] cursor-not-allowed'
                       }`}
                     >
                       {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'BUY' : 'LOCKED'}
@@ -180,18 +185,21 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
             </div>
           </div>
 
-          {/* Abilities Overview */}
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-3">Agent Abilities ({agent.name})</h3>
+            <h3 className="font-mono text-xs font-bold uppercase tracking-[0.18em] text-[#FF4655] mb-3">
+              Agent Abilities ({agent.name})
+            </h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {agent.abilities.map((ab) => (
-                <div key={ab.id} className="rounded-lg border border-slate-800 bg-slate-900/40 p-2.5">
+                <div key={ab.id} className="border border-[#ECE8E1]/15 bg-[#0F1923]/75 p-2.5 clip-val-card">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-cyan-400">[{ab.keySlot}]</span>
-                    <span className="text-[10px] text-slate-400">{ab.isUltimate ? 'ULTIMATE' : 'SIGNATURE'}</span>
+                    <span className="font-mono font-bold text-[#17E5B8]">[{ab.keySlot}]</span>
+                    <span className="text-[10px] font-mono text-[#8B978F]">
+                      {ab.isUltimate ? 'ULTIMATE' : 'SIGNATURE'}
+                    </span>
                   </div>
-                  <div className="mt-1 font-bold text-slate-200">{ab.name}</div>
-                  <div className="mt-0.5 text-[10px] text-slate-400 leading-tight">{ab.description}</div>
+                  <div className="mt-1 font-display text-sm font-bold uppercase text-[#ECE8E1]">{ab.name}</div>
+                  <div className="mt-0.5 text-[10px] text-[#8B978F] leading-tight">{ab.description}</div>
                 </div>
               ))}
             </div>

@@ -27,47 +27,31 @@ export const BOMB_SITE_B = { x: 22, y: 0, z: -18, radius: 5.5, name: 'Site B' };
 export const SPAWN_ATTACKERS = { x: 0, y: 0, z: 36 };
 export const SPAWN_DEFENDERS = { x: 0, y: 0, z: -38 };
 
-// Static Collision Boxes (AABBs) for player/bot physical obstruction
+// Static Collision Boxes (AABBs) for player/bot physical obstruction.
+// Outer perimeter walls bound the arena; every interior collider is rendered visibly as tactical cover.
 export const MAP_COLLIDERS: MapAABB[] = [
-  // Outer perimeter boundary walls
-  { minX: -42, maxX: 42, minY: 0, maxY: 12, minZ: 44, maxZ: 46 }, // South outer
-  { minX: -42, maxX: 42, minY: 0, maxY: 12, minZ: -46, maxZ: -44 }, // North outer
-  { minX: -44, maxX: -42, minY: 0, maxY: 12, minZ: -46, maxZ: 46 }, // West outer
-  { minX: 42, maxX: 44, minY: 0, maxY: 12, minZ: -46, maxZ: 46 }, // East outer
+  // Outer perimeter boundary walls (visible dark architectural perimeter walls)
+  { minX: -42, maxX: 42, minY: 0, maxY: 5.5, minZ: 44, maxZ: 46 }, // South outer
+  { minX: -42, maxX: 42, minY: 0, maxY: 5.5, minZ: -46, maxZ: -44 }, // North outer
+  { minX: -44, maxX: -42, minY: 0, maxY: 5.5, minZ: -46, maxZ: 46 }, // West outer
+  { minX: 42, maxX: 44, minY: 0, maxY: 5.5, minZ: -46, maxZ: 46 }, // East outer
 
-  // Lane partition blocks (separating A Long from Mid)
-  { minX: -16, maxX: -12, minY: 0, maxY: 8, minZ: 6, maxZ: 32 },
-  { minX: -16, maxX: -12, minY: 0, maxY: 8, minZ: -12, maxZ: -2 },
+  // Mid courtyard flanking tactical cover crates (open center sightline preserved!)
+  { minX: -12, maxX: -9, minY: 0, maxY: 1.5, minZ: 10, maxZ: 13 },
+  { minX: 9, maxX: 12, minY: 0, maxY: 1.5, minZ: 10, maxZ: 13 },
+  { minX: -3.2, maxX: 3.2, minY: 0, maxY: 1.35, minZ: -1.6, maxZ: 1.6 }, // Mid low shrine cover
 
-  // Lane partition blocks (separating B Long from Mid)
-  { minX: 12, maxX: 16, minY: 0, maxY: 8, minZ: 6, maxZ: 32 },
-  { minX: 12, maxX: 16, minY: 0, maxY: 8, minZ: -12, maxZ: -2 },
+  // Site A (West): Elevated reactor structure & tactical crates
+  { minX: -26, maxX: -18, minY: 0, maxY: 1.1, minZ: -22, maxZ: -14 }, // A Platform
+  { minX: -24, maxX: -21, minY: 1.1, maxY: 3.4, minZ: -20, maxZ: -17 }, // Reactor core
+  { minX: -30, maxX: -27.5, minY: 0, maxY: 2.0, minZ: -14, maxZ: -11 }, // A Long Corner crate
+  { minX: -14.5, maxX: -12, minY: 0, maxY: 1.8, minZ: -22, maxZ: -19 }, // A Connector crate
 
-  // Mid central courtyard monument & sniper arch
-  { minX: -3.5, maxX: 3.5, minY: 0, maxY: 1.55, minZ: -2, maxZ: 2 },
-  { minX: -8, maxX: -6, minY: 0, maxY: 7, minZ: -5, maxZ: 5 },
-  { minX: 6, maxX: 8, minY: 0, maxY: 7, minZ: -5, maxZ: 5 },
-
-  // Site A: Elevated reactor structure & tactical crates
-  { minX: -26, maxX: -18, minY: 0, maxY: 1.2, minZ: -22, maxZ: -14 }, // A Platform
-  { minX: -24, maxX: -21, minY: 1.2, maxY: 3.6, minZ: -20, maxZ: -17 }, // Reactor core
-  { minX: -30, maxX: -28, minY: 0, maxY: 2.5, minZ: -14, maxZ: -10 }, // A Long Corner crate
-  { minX: -14, maxX: -12, minY: 0, maxY: 2.5, minZ: -22, maxZ: -18 }, // A Connector crate
-  { minX: -34, maxX: -31, minY: 0, maxY: 5, minZ: 2, maxZ: 10 }, // A Long choke wall
-
-  // Site B: Dual tech pillars & defensive barriers
-  { minX: 18, maxX: 21, minY: 0, maxY: 7, minZ: -22, maxZ: -19 }, // Pillar 1
-  { minX: 25, maxX: 28, minY: 0, maxY: 7, minZ: -18, maxZ: -15 }, // Pillar 2
-  { minX: 19, maxX: 24, minY: 0, maxY: 2.2, minZ: -14, maxZ: -12 }, // B Front Barrier
-  { minX: 29, maxX: 32, minY: 0, maxY: 3.0, minZ: -22, maxZ: -18 }, // B Back Corner
-  { minX: 31, maxX: 34, minY: 0, maxY: 5, minZ: 2, maxZ: 10 }, // B Long choke wall
-
-  // Mid-to-site connectors and doors
-  { minX: -8, maxX: -3, minY: 0, maxY: 7, minZ: -26, maxZ: -24 }, // Def Mid-A wall
-  { minX: 3, maxX: 8, minY: 0, maxY: 7, minZ: -26, maxZ: -24 }, // Def Mid-B wall
-
-  // Attacker spawn forward low cover divider
-  { minX: -6, maxX: 6, minY: 0, maxY: 1.45, minZ: 24, maxZ: 26 },
+  // Site B (East): Tech pillars & defensive barriers
+  { minX: 18, maxX: 20.5, minY: 0, maxY: 3.6, minZ: -22, maxZ: -19.5 }, // Pillar 1
+  { minX: 25.5, maxX: 28, minY: 0, maxY: 3.6, minZ: -18, maxZ: -15.5 }, // Pillar 2
+  { minX: 19.5, maxX: 24, minY: 0, maxY: 1.5, minZ: -14, maxZ: -12 }, // B Front Barrier
+  { minX: 29, maxX: 31.5, minY: 0, maxY: 2.2, minZ: -22, maxZ: -19 }, // B Back Corner
 ];
 
 // Check collision against static map colliders

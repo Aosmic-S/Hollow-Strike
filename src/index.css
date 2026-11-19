@@ -1,1 +1,50 @@
 @import "tailwindcss";
+
+:root {
+  --val-bg: #0f1923;
+  --val-surface: #18232e;
+  --val-surface-elevated: #1f2d3b;
+  --val-cream: #ece8e1;
+  --val-red: #ff4655;
+  --val-red-dark: #d93644;
+  --val-teal: #17e5b8;
+  --val-amber: #fbbf24;
+  --val-muted: #8b978f;
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Barlow Condensed", sans-serif;
+  }
+
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+
+  .clip-val-btn {
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  }
+
+  .clip-val-card {
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  }
+
+  .clip-val-panel {
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+
+  .val-grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(236, 232, 225, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(236, 232, 225, 0.04) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

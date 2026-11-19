@@ -43,28 +43,30 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
   const toCanvasY = (wz: number) => center + wz * scale;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 select-none">
-      <div className="relative flex flex-col items-center rounded-2xl border border-slate-700 bg-slate-950 p-6 shadow-2xl max-h-[95dvh] overflow-y-auto">
-        <div className="flex w-full items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/88 backdrop-blur-sm p-4 select-none">
+      <div className="relative flex flex-col items-center border border-[#ECE8E1]/20 bg-[#18232E] p-6 shadow-2xl max-h-[95dvh] overflow-y-auto clip-val-panel">
+        <div className="flex w-full items-center justify-between border-b border-[#ECE8E1]/15 pb-3 mb-4 gap-6">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-cyan-400" />
-            <h2 className="font-mono text-base font-black uppercase text-white">TACTICAL MAP OVERVIEW</h2>
+            <span className="h-2.5 w-2.5 rotate-45 bg-[#17E5B8]" />
+            <h2 className="font-display text-xl font-extrabold uppercase tracking-wider text-[#ECE8E1]">
+              TACTICAL MAP OVERVIEW
+            </h2>
           </div>
 
           <button
             onClick={onClose}
-            className="rounded border border-slate-700 bg-slate-800 px-3 py-1.5 font-mono text-xs font-bold uppercase text-slate-300 hover:text-white transition cursor-pointer"
+            className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
           >
             Close [M / Esc]
           </button>
         </div>
 
         {/* Tactical Map SVG Projection */}
-        <div className="relative overflow-hidden rounded-xl border border-slate-800 bg-[#090f1e] p-2 shadow-2xl">
+        <div className="relative overflow-hidden border border-[#ECE8E1]/15 bg-[#0F1923] p-2 shadow-2xl clip-val-card">
           <svg width={canvasSize} height={canvasSize} viewBox={`0 0 ${canvasSize} ${canvasSize}`} className="block max-w-full h-auto">
             <defs>
               <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1e293b" strokeWidth="0.5" />
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#18232E" strokeWidth="0.75" />
               </pattern>
             </defs>
             <rect width={canvasSize} height={canvasSize} fill="url(#grid)" />
@@ -82,10 +84,10 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                   y={y}
                   width={w}
                   height={h}
-                  fill="#1e293b"
-                  stroke="#334155"
+                  fill="#18232E"
+                  stroke="#3b4b5c"
                   strokeWidth="1"
-                  rx="2"
+                  rx="1"
                 />
               );
             })}
@@ -95,15 +97,15 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
               cx={toCanvasX(BOMB_SITE_A.x)}
               cy={toCanvasY(BOMB_SITE_A.z)}
               r={BOMB_SITE_A.radius * scale}
-              fill="rgba(6, 182, 212, 0.25)"
-              stroke="#06b6d4"
+              fill="rgba(23, 229, 184, 0.22)"
+              stroke="#17E5B8"
               strokeWidth="2"
               strokeDasharray="4 2"
             />
             <text
               x={toCanvasX(BOMB_SITE_A.x)}
               y={toCanvasY(BOMB_SITE_A.z) + 4}
-              fill="#06b6d4"
+              fill="#17E5B8"
               fontSize="14"
               fontWeight="bold"
               fontFamily="monospace"
@@ -117,15 +119,15 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
               cx={toCanvasX(BOMB_SITE_B.x)}
               cy={toCanvasY(BOMB_SITE_B.z)}
               r={BOMB_SITE_B.radius * scale}
-              fill="rgba(245, 158, 11, 0.25)"
-              stroke="#f59e0b"
+              fill="rgba(255, 70, 85, 0.22)"
+              stroke="#FF4655"
               strokeWidth="2"
               strokeDasharray="4 2"
             />
             <text
               x={toCanvasX(BOMB_SITE_B.x)}
               y={toCanvasY(BOMB_SITE_B.z) + 4}
-              fill="#f59e0b"
+              fill="#FF4655"
               fontSize="14"
               fontWeight="bold"
               fontFamily="monospace"
@@ -151,8 +153,8 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                     cx={cx}
                     cy={cy}
                     r={c.isHuman ? 7 : 5}
-                    fill={isAlly ? (c.isHuman ? '#38bdf8' : '#22c55e') : '#ef4444'}
-                    stroke="#ffffff"
+                    fill={isAlly ? (c.isHuman ? '#ECE8E1' : '#17E5B8') : '#FF4655'}
+                    stroke="#0F1923"
                     strokeWidth="1.5"
                   />
                   {c.isHuman && (
@@ -161,7 +163,7 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                       y1={cy}
                       x2={cx - Math.sin(c.yaw) * 18}
                       y2={cy - Math.cos(c.yaw) * 18}
-                      stroke="#38bdf8"
+                      stroke="#17E5B8"
                       strokeWidth="2.5"
                       strokeLinecap="round"
                     />
@@ -177,14 +179,14 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                   cx={toCanvasX(spikePosition.x)}
                   cy={toCanvasY(spikePosition.z)}
                   r="8"
-                  fill="#ef4444"
-                  stroke="#ffffff"
+                  fill="#FF4655"
+                  stroke="#ECE8E1"
                   strokeWidth="2"
                 />
                 <text
                   x={toCanvasX(spikePosition.x)}
                   y={toCanvasY(spikePosition.z) + 3}
-                  fill="#ffffff"
+                  fill="#ECE8E1"
                   fontSize="10"
                   fontWeight="bold"
                   textAnchor="middle"
@@ -197,17 +199,17 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
         </div>
 
         {/* Legend */}
-        <div className="mt-4 flex items-center gap-6 font-mono text-xs text-slate-300">
+        <div className="mt-4 flex items-center gap-6 font-mono text-xs text-[#ECE8E1]">
           <div className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-sky-400" />
+            <span className="h-3 w-3 rounded-full bg-[#ECE8E1]" />
             <span>You</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-emerald-500" />
+            <span className="h-3 w-3 rounded-full bg-[#17E5B8]" />
             <span>Teammate</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-red-500" />
+            <span className="h-3 w-3 rounded-full bg-[#FF4655]" />
             <span>Spotted Hostile</span>
           </div>
         </div>

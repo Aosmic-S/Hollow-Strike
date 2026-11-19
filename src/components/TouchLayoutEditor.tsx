@@ -5,6 +5,7 @@
  */
 
 import React, { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DEFAULT_TOUCH_LAYOUT,
   TOUCH_LAYOUT_PRESETS,
@@ -25,18 +26,18 @@ interface TouchLayoutEditorProps {
 }
 
 const CONTROL_META: Record<TouchControlId, { label: string; sizePx: number; isCircle?: boolean; color: string; required?: boolean }> = {
-  joystick: { label: 'MOVE JOYSTICK', sizePx: 128, isCircle: true, color: 'border-cyan-400 bg-cyan-950/70 text-cyan-200', required: true },
-  fire: { label: 'FIRE', sizePx: 76, isCircle: true, color: 'border-rose-400 bg-rose-700/80 text-white', required: true },
-  ads: { label: 'ADS', sizePx: 54, color: 'border-slate-500 bg-slate-900/90 text-slate-100' },
-  crouch: { label: 'CROUCH', sizePx: 54, color: 'border-slate-500 bg-slate-900/90 text-slate-100' },
-  jump: { label: 'JUMP', sizePx: 54, color: 'border-slate-500 bg-slate-900/90 text-slate-100' },
-  reload: { label: 'RELOAD', sizePx: 54, color: 'border-slate-500 bg-slate-900/90 text-slate-100' },
-  weaponSwap: { label: 'SWAP', sizePx: 58, color: 'border-cyan-500 bg-slate-900/90 text-cyan-300' },
-  plantDefuse: { label: 'PLANT / DEFUSE', sizePx: 64, color: 'border-amber-400 bg-amber-700/85 text-white' },
-  abilityE: { label: 'AB [E]', sizePx: 52, color: 'border-cyan-400 bg-slate-900/90 text-cyan-300' },
-  abilityQ: { label: 'AB [Q]', sizePx: 52, color: 'border-cyan-400 bg-slate-900/90 text-cyan-300' },
-  abilityC: { label: 'AB [C]', sizePx: 52, color: 'border-cyan-400 bg-slate-900/90 text-cyan-300' },
-  abilityX: { label: 'ULT [X]', sizePx: 52, color: 'border-amber-400 bg-amber-900/85 text-amber-200' },
+  joystick: { label: 'MOVE JOYSTICK', sizePx: 128, isCircle: true, color: 'border-[#17E5B8] bg-[#0F1923]/90 text-[#17E5B8]', required: true },
+  fire: { label: 'FIRE', sizePx: 76, isCircle: true, color: 'border-[#FF4655] bg-[#FF4655]/90 text-[#ECE8E1]', required: true },
+  ads: { label: 'ADS', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
+  crouch: { label: 'CROUCH', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
+  jump: { label: 'JUMP', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
+  reload: { label: 'RELOAD', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
+  weaponSwap: { label: 'SWAP', sizePx: 58, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
+  plantDefuse: { label: 'PLANT / DEFUSE', sizePx: 64, color: 'border-[#fbbf24] bg-[#fbbf24]/25 text-[#fbbf24]' },
+  abilityE: { label: 'AB [E]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
+  abilityQ: { label: 'AB [Q]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
+  abilityC: { label: 'AB [C]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
+  abilityX: { label: 'ULT [X]', sizePx: 52, color: 'border-[#FF4655] bg-[#FF4655]/25 text-[#FF4655]' },
 };
 
 export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
@@ -119,31 +120,31 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
     onClose();
   };
 
-  return (
+  return createPortal(
     <div
       ref={stageRef}
       data-testid="touch-layout-editor"
-      className="fixed inset-0 z-[70] bg-[#060a14]/95 font-mono select-none overflow-hidden touch-none"
+      className="fixed inset-0 z-[100] bg-[#0F1923] val-grid-bg font-mono select-none overflow-hidden touch-none"
     >
-      {/* Tactical Blueprint Grid */}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#1e293b33_1px,transparent_1px),linear-gradient(to_bottom,#1e293b33_1px,transparent_1px)] bg-[size:32px_32px]" />
+      {/* Subtle Valorant crimson corner accents */}
+      <div className="pointer-events-none absolute top-0 inset-x-0 h-[2px] bg-[#FF4655]/60" />
 
       {/* HUD Reference Ghosts (Minimap & Top Scoreboard zone) */}
-      <div className="pointer-events-none absolute top-3 left-3 h-24 w-24 rounded-lg border border-dashed border-slate-700 bg-slate-900/40 flex items-center justify-center text-[9px] text-slate-500">
+      <div className="pointer-events-none absolute top-3 left-3 h-24 w-24 border border-dashed border-[#ECE8E1]/20 bg-[#18232E]/45 flex items-center justify-center text-[9px] tracking-widest text-[#8B978F]">
         RADAR ZONE
       </div>
-      <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 rounded-lg border border-dashed border-slate-700 bg-slate-900/40 px-4 py-1 text-[9px] text-slate-500">
+      <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 border border-dashed border-[#ECE8E1]/20 bg-[#18232E]/45 px-4 py-1 text-[9px] tracking-widest text-[#8B978F]">
         MATCH TIMER ZONE
       </div>
 
       {/* Center Floating Control Bar */}
-      <div className="relative z-30 mx-auto mt-14 max-w-2xl rounded-2xl border border-cyan-500/40 bg-slate-950/92 p-3 sm:p-4 shadow-2xl">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+      <div className="relative z-30 mx-auto mt-14 max-w-2xl clip-val-panel border border-[#ECE8E1]/20 bg-[#18232E]/96 p-3.5 sm:p-4 shadow-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#ECE8E1]/10 pb-2.5">
           <div>
-            <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white">
+            <h2 className="font-display text-lg sm:text-xl font-bold uppercase tracking-wider text-[#ECE8E1]">
               On-Screen HUD Layout Mapping
             </h2>
-            <p className="text-[10px] text-slate-400">
+            <p className="text-[10px] text-[#8B978F]">
               Drag any button or joystick anywhere on screen. Tap one to resize or toggle visibility.
             </p>
           </div>
@@ -151,14 +152,14 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
             <button
               type="button"
               onClick={handleReset}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold uppercase text-amber-300 hover:border-amber-400 cursor-pointer"
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#fbbf24] hover:border-[#fbbf24] transition cursor-pointer"
             >
               Reset
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold uppercase text-slate-300 hover:text-white cursor-pointer"
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#ECE8E1]/75 hover:text-[#ECE8E1] hover:border-[#ECE8E1]/40 transition cursor-pointer"
             >
               Cancel
             </button>
@@ -166,7 +167,7 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
               type="button"
               data-testid="save-touch-layout-btn"
               onClick={handleSaveAndClose}
-              className="rounded-lg bg-cyan-600 px-3 py-1.5 text-[10px] font-black uppercase text-white hover:bg-cyan-500 cursor-pointer"
+              className="clip-val-btn bg-[#FF4655] px-4 py-1.5 font-display text-sm font-bold uppercase tracking-widest text-[#ECE8E1] hover:bg-[#d93644] transition cursor-pointer"
             >
               Save Layout
             </button>
@@ -174,15 +175,15 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
         </div>
 
         {/* Presets + Selected Slot Inspector */}
-        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Presets:</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#8B978F] mr-1">Presets:</span>
             {(['DEFAULT', 'CLAW_4FINGER', 'LEFT_HANDED'] as TouchLayoutPresetId[]).map((pid) => (
               <button
                 key={pid}
                 type="button"
                 onClick={() => handlePreset(pid)}
-                className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-bold uppercase text-slate-200 hover:border-cyan-400 hover:text-cyan-300 cursor-pointer"
+                className="border border-[#ECE8E1]/15 bg-[#0F1923] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#ECE8E1] hover:border-[#17E5B8] hover:text-[#17E5B8] transition cursor-pointer"
               >
                 {TOUCH_LAYOUT_PRESETS[pid].label}
               </button>
@@ -190,10 +191,10 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
           </div>
 
           <div className="flex items-center gap-3 text-[10px]">
-            <span className="font-black text-cyan-300">
+            <span className="font-black tracking-wider text-[#17E5B8]">
               {selectedMeta.label} ({Math.round(selectedSlot.xPct)}%, {Math.round(selectedSlot.yPct)}%)
             </span>
-            <label className="flex items-center gap-1.5 text-slate-300">
+            <label className="flex items-center gap-1.5 text-[#ECE8E1]/85">
               <span>Size: {Math.round(selectedSlot.scale * 100)}%</span>
               <input
                 type="range"
@@ -208,7 +209,7 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
                     })
                   )
                 }
-                className="w-24 accent-cyan-400 cursor-pointer"
+                className="w-24 accent-[#FF4655] cursor-pointer"
               />
             </label>
             {!selectedMeta.required && (
@@ -221,10 +222,10 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
                     })
                   )
                 }
-                className={`rounded border px-2 py-1 font-bold uppercase cursor-pointer ${
+                className={`border px-2 py-1 font-bold uppercase tracking-wider cursor-pointer transition ${
                   selectedSlot.visible
-                    ? 'border-emerald-500/60 bg-emerald-950/50 text-emerald-300'
-                    : 'border-rose-500/60 bg-rose-950/50 text-rose-300'
+                    ? 'border-[#17E5B8]/60 bg-[#17E5B8]/15 text-[#17E5B8]'
+                    : 'border-[#FF4655]/60 bg-[#FF4655]/15 text-[#FF4655]'
                 }`}
               >
                 {selectedSlot.visible ? 'Shown' : 'Hidden'}
@@ -257,13 +258,14 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
               opacity: slot.visible ? 1 : 0.35,
             }}
             className={`absolute z-20 flex flex-col items-center justify-center border-2 text-center font-black uppercase shadow-xl cursor-grab active:cursor-grabbing touch-none ${
-              meta.isCircle ? 'rounded-full' : 'rounded-2xl'
-            } ${meta.color} ${isSelected ? 'ring-2 ring-amber-300 ring-offset-2 ring-offset-slate-950' : ''}`}
+              meta.isCircle ? 'rounded-full' : 'clip-val-card'
+            } ${meta.color} ${isSelected ? 'ring-2 ring-[#FF4655] ring-offset-2 ring-offset-[#0F1923]' : ''}`}
           >
             <span className="text-[10px] leading-tight px-1 pointer-events-none">{meta.label}</span>
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 };
