@@ -1,9 +1,10 @@
 /**
- * Hollow Strike - Minimal PWA Service Worker
- * Caches app shell assets for offline access and instant loading.
+ * Hollow Strike - PWA Service Worker (Network-First for HTML/Navigation)
+ * Ensures new HTML and page loads are always fetched fresh from the network when online,
+ * falling back to cached shell assets when offline.
  */
 
-const CACHE_NAME = 'hollow-strike-v1';
+const CACHE_NAME = 'hollow-strike-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -35,19 +36,49 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+
+  const url = new URL(event.request.url);
+  const isHtml =
+    event.request.mode === 'navigate' ||
+    event.request.headers.get('accept')?.includes('text/html') ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html');
+
+  if (isHtml) {
+    // Network-First Strategy for HTML / Navigation requests
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
           return networkResponse;
-        }
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-        return networkResponse;
-      });
-    })
-  );
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cached) => cached || caches.match('/index.html'));
+        })
+    );
+  } else {
+    // Cache-First with background update for static assets
+    event.respondWith(
+      caches.match(event.request).then((cachedResponse) => {
+        const fetchPromise = fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              const responseToCache = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+            }
+            return networkResponse;
+          })
+          .catch(() => cachedResponse);
+
+        return cachedResponse || fetchPromise;
+      })
+    );
+  }
 });
