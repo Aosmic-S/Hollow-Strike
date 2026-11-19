@@ -3,7 +3,14 @@
  * Zero fake/demo data: all metrics start at zero and update strictly from real matches played.
  */
 
-import { DEFAULT_KEY_BINDINGS, GameSettings, MatchRecord, PlayerProfile, WeaponCareerStats } from './types';
+import {
+  DEFAULT_KEY_BINDINGS,
+  GameSettings,
+  MatchRecord,
+  PlayerProfile,
+  WeaponCareerStats,
+} from './types';
+import { clampCrosshairConfig, normalizeTouchLayout, resolveCrosshairConfig } from './rules';
 
 const PROFILE_STORAGE_KEY = 'hollow_strike_profile_v1';
 const SETTINGS_STORAGE_KEY = 'hollow_strike_settings_v1';
@@ -202,9 +209,19 @@ export function loadSavedSettings(defaults: GameSettings): GameSettings {
       ...(defaults.keyBindings ?? {}),
       ...(parsed.keyBindings ?? {}),
     };
+    merged.crosshairConfig = resolveCrosshairConfig({
+      crosshairColor: merged.crosshairColor,
+      crosshairSize: merged.crosshairSize,
+      crosshairConfig: parsed.crosshairConfig ?? defaults.crosshairConfig,
+    });
+    merged.touchLayout = normalizeTouchLayout(parsed.touchLayout ?? defaults.touchLayout);
     return merged;
   } catch {
-    return defaults;
+    return {
+      ...defaults,
+      crosshairConfig: clampCrosshairConfig(defaults.crosshairConfig),
+      touchLayout: normalizeTouchLayout(defaults.touchLayout),
+    };
   }
 }
 

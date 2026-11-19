@@ -115,6 +115,7 @@ export default function App() {
   const [fps, setFps] = useState<number>(60);
   const [matchWinner, setMatchWinner] = useState<TeamSide | null>(null);
   const [spectateState, setSpectateState] = useState<SpectateState | null>(null);
+  const [crosshairBloomPx, setCrosshairBloomPx] = useState<number>(0);
 
   // Spike States
   const [spikeState, setSpikeState] = useState<'not_planted' | 'planted' | 'defused' | 'detonated'>('not_planted');
@@ -274,6 +275,7 @@ export default function App() {
           },
           onFpsUpdate: (currentFps) => setFps(currentFps),
           onSpectateUpdate: (nextSpectate) => setSpectateState(nextSpectate),
+          onCrosshairBloomUpdate: (bloomPx) => setCrosshairBloomPx(bloomPx),
           onMatchOver: (winner, summary) => {
             setMatchWinner(winner);
             setAppState('gameover');
@@ -457,6 +459,8 @@ export default function App() {
             damageFlash={damageFlash}
             crosshairColor={settings.crosshairColor}
             crosshairSize={settings.crosshairSize}
+            crosshairConfig={settings.crosshairConfig}
+            crosshairBloomPx={crosshairBloomPx}
             isBlinded={isBlinded}
             isPointerLocked={isPointerLocked}
             isMobile={isMobile}

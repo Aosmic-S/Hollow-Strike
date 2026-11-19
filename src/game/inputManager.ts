@@ -18,6 +18,7 @@ export interface InputState {
   jumpJustPressed: boolean;
   crouchHeld: boolean;
   reloadJustPressed: boolean;
+  inspectWeaponJustPressed: boolean;
   plantDefuseHeld: boolean;
   abilityQJustPressed: boolean;
   abilityEJustPressed: boolean;
@@ -45,6 +46,7 @@ export class InputManager {
     jumpJustPressed: false,
     crouchHeld: false,
     reloadJustPressed: false,
+    inspectWeaponJustPressed: false,
     plantDefuseHeld: false,
     abilityQJustPressed: false,
     abilityEJustPressed: false,
@@ -197,6 +199,8 @@ export class InputManager {
       this.state.jumpJustPressed = true;
     } else if (e.code === kb.reload) {
       this.state.reloadJustPressed = true;
+    } else if (e.code === kb.inspectWeapon) {
+      this.state.inspectWeaponJustPressed = true;
     } else if (e.code === kb.abilityQ) {
       this.state.abilityQJustPressed = true;
     } else if (e.code === kb.abilityE) {
@@ -339,6 +343,11 @@ export class InputManager {
     this.state.reloadJustPressed = true;
   }
 
+  public triggerMobileInspect(): void {
+    soundEngine.init();
+    this.state.inspectWeaponJustPressed = true;
+  }
+
   public triggerMobileWeaponSlot(slot: 1 | 2): void {
     soundEngine.init();
     this.state.weaponSlotJustPressed = slot;
@@ -402,6 +411,7 @@ export class InputManager {
     this.state.fireJustPressed = false;
     this.state.jumpJustPressed = false;
     this.state.reloadJustPressed = false;
+    this.state.inspectWeaponJustPressed = false;
     this.state.abilityQJustPressed = false;
     this.state.abilityEJustPressed = false;
     this.state.abilityCJustPressed = false;

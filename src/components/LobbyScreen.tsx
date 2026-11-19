@@ -243,7 +243,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
 
           {/* LEFT PANEL: Queue & Difficulty */}
-          <div className="flex w-full md:w-56 lg:w-64 shrink-0 flex-col justify-between md:border-r md:border-slate-800/60 md:pr-4">
+          <div className="flex w-full md:w-52 lg:w-60 shrink-0 flex-col justify-between md:border-r md:border-slate-800/60 md:pr-4">
             <div className="space-y-4">
               <div>
                 <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400">
@@ -326,7 +326,11 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               </button>
             </div>
 
-            <div className="my-auto flex items-center justify-start md:justify-center gap-2.5 sm:gap-3.5 w-full max-w-4xl overflow-x-auto pb-1">
+            <div
+              data-testid="lobby-squad-scroll"
+              className="my-auto w-full max-w-4xl overflow-x-auto pb-1"
+            >
+              <div className="mx-auto flex w-max items-center gap-2.5 sm:gap-3 px-1">
               {[0, 1, 2, 3, 4].map((idx) => {
                 const member = squadMembers[idx];
 
@@ -334,6 +338,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   return (
                     <div
                       key={idx}
+                      data-testid={`squad-card-${idx}`}
                       onClick={() => {
                         if (member.isLeader) {
                           setActiveTab('AGENTS');
@@ -341,7 +346,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                           handleCycleBotAgent(member.botIndex);
                         }
                       }}
-                      className="relative flex h-56 sm:h-64 lg:h-72 w-32 sm:w-40 lg:w-44 shrink-0 flex-col justify-between rounded-2xl border p-3.5 shadow-2xl transition hover:brightness-110 cursor-pointer"
+                      className="relative flex h-52 sm:h-60 lg:h-68 w-28 sm:w-32 lg:w-36 xl:w-42 shrink-0 flex-col justify-between rounded-2xl border p-3 shadow-2xl transition hover:brightness-110 cursor-pointer"
                       style={{
                         borderColor: `${member.agent.primaryColor}66`,
                         background: `linear-gradient(to bottom, ${member.agent.primaryColor}16, #090d18 82%)`,
@@ -369,7 +374,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
                       <div className="my-auto flex flex-col items-center text-center">
                         <div
-                          className="flex h-14 w-14 sm:h-18 sm:w-18 items-center justify-center rounded-2xl border font-mono text-2xl sm:text-3xl font-black"
+                          className="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-2xl border font-mono text-2xl sm:text-3xl font-black"
                           style={{
                             borderColor: member.agent.primaryColor,
                             backgroundColor: `${member.agent.primaryColor}20`,
@@ -378,7 +383,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                         >
                           {member.agent.name[0]}
                         </div>
-                        <span className="mt-2.5 font-mono text-xs sm:text-sm font-black text-white tracking-wide truncate max-w-full">
+                        <span className="mt-2 font-mono text-xs sm:text-sm font-black text-white tracking-wide truncate max-w-full">
                           {member.name}
                         </span>
                         <span
@@ -400,17 +405,18 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   <button
                     key={idx}
                     onClick={handleAddBotSlot}
-                    className="flex h-56 sm:h-64 lg:h-72 w-32 sm:w-40 lg:w-44 shrink-0 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-4 transition hover:border-cyan-500/50 hover:bg-slate-900/40 cursor-pointer group"
+                    className="flex h-52 sm:h-60 lg:h-68 w-28 sm:w-32 lg:w-36 xl:w-42 shrink-0 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-3 transition hover:border-cyan-500/50 hover:bg-slate-900/40 cursor-pointer group"
                   >
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-800 bg-slate-900 text-slate-500 group-hover:border-cyan-500 group-hover:text-cyan-400 transition">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-800 bg-slate-900 text-slate-500 group-hover:border-cyan-500 group-hover:text-cyan-400 transition">
                       +
                     </div>
-                    <span className="mt-3 font-mono text-xs font-bold uppercase text-slate-500 group-hover:text-slate-300 transition">
+                    <span className="mt-3 font-mono text-[11px] font-bold uppercase text-slate-500 group-hover:text-slate-300 transition">
                       ADD AI ALLY
                     </span>
                   </button>
                 );
               })}
+              </div>
             </div>
 
             {/* Bottom Action Bar */}
@@ -500,9 +506,9 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   </div>
                   <div className="flex justify-between"><span>Fire / ADS</span><span className="text-slate-200">LMB / RMB</span></div>
                   <div className="flex justify-between">
-                    <span>Weapons</span>
+                    <span>Weapons / Inspect</span>
                     <span className="text-slate-200">
-                      {formatKeyCode(settings.keyBindings.primaryWeapon)} / {formatKeyCode(settings.keyBindings.sidearmWeapon)} · {formatKeyCode(settings.keyBindings.reload)}
+                      {formatKeyCode(settings.keyBindings.primaryWeapon)} / {formatKeyCode(settings.keyBindings.sidearmWeapon)} · {formatKeyCode(settings.keyBindings.reload)} · {formatKeyCode(settings.keyBindings.inspectWeapon)}
                     </span>
                   </div>
                   <div className="flex justify-between">

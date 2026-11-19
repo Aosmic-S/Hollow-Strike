@@ -146,6 +146,191 @@ export interface PlayerStats {
 
 export type CrosshairColor = 'cyan' | 'green' | 'amber' | 'white' | 'rose';
 export type CrosshairSize = 'small' | 'medium' | 'large';
+export type CrosshairStyle = 'classic' | 'cross' | 'dot' | 'circle' | 'chevron' | 't-shape';
+
+export interface CrosshairConfig {
+  style: CrosshairStyle;
+  color: string; // Hex color string (e.g. #22d3ee)
+  length: number; // 2 - 22 px
+  thickness: number; // 1 - 6 px
+  gap: number; // 0 - 16 px
+  showDot: boolean;
+  dotSize: number; // 2 - 8 px
+  opacity: number; // 0.25 - 1.0
+  outline: boolean;
+  dynamic: boolean;
+}
+
+export const DEFAULT_CROSSHAIR_CONFIG: CrosshairConfig = {
+  style: 'classic',
+  color: '#22d3ee',
+  length: 8,
+  thickness: 2,
+  gap: 5,
+  showDot: true,
+  dotSize: 4,
+  opacity: 0.92,
+  outline: true,
+  dynamic: true,
+};
+
+export interface CrosshairPreset {
+  id: string;
+  label: string;
+  config: CrosshairConfig;
+}
+
+export const CROSSHAIR_PRESETS: CrosshairPreset[] = [
+  {
+    id: 'competitive',
+    label: 'Competitive',
+    config: { ...DEFAULT_CROSSHAIR_CONFIG },
+  },
+  {
+    id: 'headshot_dot',
+    label: 'Pinpoint Dot',
+    config: {
+      style: 'dot',
+      color: '#34d399',
+      length: 4,
+      thickness: 2,
+      gap: 2,
+      showDot: true,
+      dotSize: 5,
+      opacity: 1,
+      outline: true,
+      dynamic: false,
+    },
+  },
+  {
+    id: 'holo_ring',
+    label: 'Holo Ring',
+    config: {
+      style: 'circle',
+      color: '#fbbf24',
+      length: 7,
+      thickness: 2,
+      gap: 6,
+      showDot: true,
+      dotSize: 3,
+      opacity: 0.9,
+      outline: true,
+      dynamic: true,
+    },
+  },
+  {
+    id: 'tactical_t',
+    label: 'T-Bar Precision',
+    config: {
+      style: 't-shape',
+      color: '#f8fafc',
+      length: 9,
+      thickness: 2,
+      gap: 4,
+      showDot: false,
+      dotSize: 3,
+      opacity: 0.95,
+      outline: true,
+      dynamic: true,
+    },
+  },
+  {
+    id: 'cyber_chevron',
+    label: 'Cyber Chevron',
+    config: {
+      style: 'chevron',
+      color: '#fb7185',
+      length: 9,
+      thickness: 2,
+      gap: 4,
+      showDot: true,
+      dotSize: 3,
+      opacity: 0.95,
+      outline: true,
+      dynamic: true,
+    },
+  },
+];
+
+export type TouchControlId =
+  | 'joystick'
+  | 'fire'
+  | 'ads'
+  | 'crouch'
+  | 'jump'
+  | 'reload'
+  | 'weaponSwap'
+  | 'plantDefuse'
+  | 'abilityE'
+  | 'abilityQ'
+  | 'abilityC'
+  | 'abilityX';
+
+export interface TouchControlSlot {
+  xPct: number; // Horizontal center anchor % of viewport width (4..96)
+  yPct: number; // Vertical center anchor % of viewport height (12..94)
+  scale: number; // 0.65..1.5
+  visible: boolean;
+}
+
+export type TouchControlLayout = Record<TouchControlId, TouchControlSlot>;
+export type TouchLayoutPresetId = 'DEFAULT' | 'CLAW_4FINGER' | 'LEFT_HANDED';
+
+export const DEFAULT_TOUCH_LAYOUT: TouchControlLayout = {
+  joystick: { xPct: 12, yPct: 78, scale: 1.0, visible: true },
+  fire: { xPct: 92, yPct: 81, scale: 1.0, visible: true },
+  plantDefuse: { xPct: 92, yPct: 60, scale: 1.0, visible: true },
+  weaponSwap: { xPct: 92, yPct: 43, scale: 1.0, visible: true },
+  jump: { xPct: 81, yPct: 86, scale: 1.0, visible: true },
+  reload: { xPct: 81, yPct: 71, scale: 1.0, visible: true },
+  ads: { xPct: 81, yPct: 56, scale: 1.0, visible: true },
+  crouch: { xPct: 81, yPct: 41, scale: 1.0, visible: true },
+  abilityX: { xPct: 72, yPct: 86, scale: 1.0, visible: true },
+  abilityC: { xPct: 72, yPct: 71, scale: 1.0, visible: true },
+  abilityQ: { xPct: 72, yPct: 56, scale: 1.0, visible: true },
+  abilityE: { xPct: 72, yPct: 41, scale: 1.0, visible: true },
+};
+
+export const TOUCH_LAYOUT_PRESETS: Record<TouchLayoutPresetId, { label: string; layout: TouchControlLayout }> = {
+  DEFAULT: {
+    label: 'Default Thumb',
+    layout: DEFAULT_TOUCH_LAYOUT,
+  },
+  CLAW_4FINGER: {
+    label: '4-Finger Claw',
+    layout: {
+      joystick: { xPct: 12, yPct: 78, scale: 1.0, visible: true },
+      fire: { xPct: 12, yPct: 26, scale: 1.05, visible: true },
+      ads: { xPct: 89, yPct: 26, scale: 1.0, visible: true },
+      jump: { xPct: 91, yPct: 78, scale: 1.05, visible: true },
+      crouch: { xPct: 81, yPct: 84, scale: 0.95, visible: true },
+      reload: { xPct: 80, yPct: 67, scale: 0.95, visible: true },
+      weaponSwap: { xPct: 92, yPct: 56, scale: 0.95, visible: true },
+      plantDefuse: { xPct: 80, yPct: 46, scale: 1.0, visible: true },
+      abilityE: { xPct: 70, yPct: 72, scale: 0.9, visible: true },
+      abilityQ: { xPct: 70, yPct: 56, scale: 0.9, visible: true },
+      abilityC: { xPct: 62, yPct: 84, scale: 0.9, visible: true },
+      abilityX: { xPct: 71, yPct: 86, scale: 0.95, visible: true },
+    },
+  },
+  LEFT_HANDED: {
+    label: 'Left-Handed Swap',
+    layout: {
+      joystick: { xPct: 88, yPct: 78, scale: 1.0, visible: true },
+      fire: { xPct: 8, yPct: 81, scale: 1.0, visible: true },
+      plantDefuse: { xPct: 8, yPct: 60, scale: 1.0, visible: true },
+      weaponSwap: { xPct: 8, yPct: 43, scale: 1.0, visible: true },
+      jump: { xPct: 19, yPct: 86, scale: 1.0, visible: true },
+      reload: { xPct: 19, yPct: 71, scale: 1.0, visible: true },
+      ads: { xPct: 19, yPct: 56, scale: 1.0, visible: true },
+      crouch: { xPct: 19, yPct: 41, scale: 1.0, visible: true },
+      abilityX: { xPct: 28, yPct: 86, scale: 1.0, visible: true },
+      abilityC: { xPct: 28, yPct: 71, scale: 1.0, visible: true },
+      abilityQ: { xPct: 28, yPct: 56, scale: 1.0, visible: true },
+      abilityE: { xPct: 28, yPct: 41, scale: 1.0, visible: true },
+    },
+  },
+};
 
 export interface KeyBindings {
   moveForward: string;
@@ -155,6 +340,7 @@ export interface KeyBindings {
   jump: string;
   crouch: string;
   reload: string;
+  inspectWeapon: string;
   plantDefuse: string;
   abilityE: string;
   abilityQ: string;
@@ -177,6 +363,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   jump: 'Space',
   crouch: 'ControlLeft',
   reload: 'KeyR',
+  inspectWeapon: 'KeyY',
   plantDefuse: 'KeyF',
   abilityE: 'KeyE',
   abilityQ: 'KeyQ',
@@ -202,12 +389,14 @@ export interface GameSettings {
   fov: number;
   crosshairColor: CrosshairColor;
   crosshairSize: CrosshairSize;
+  crosshairConfig?: CrosshairConfig;
   volume: number;
   soundEnabled: boolean;
   autoFireMobile: boolean;
   aimAssistMobile: boolean;
   touchScale: number; // 0.8 - 1.3
   touchOpacity: number; // 0.3 - 1.0
+  touchLayout?: TouchControlLayout;
   controlMode: ControlMode;
   keyBindings: KeyBindings;
 }
@@ -339,7 +528,67 @@ export const WEAPON_REGISTRY: Record<string, WeaponDef> = {
     firstShotAccurate: true,
     canADS: true,
     adsZoom: 0.35,
-    description: 'High-caliber anti-material sniper with devastating kinetic punch.',
+    description: 'High-caliber anti-material cannon with devastating kinetic punch.',
+  },
+  ION_PISTOL: {
+    id: 'ION_PISTOL',
+    name: 'Ion-X',
+    category: 'SIDEARM',
+    cost: 500,
+    damageHead: 125,
+    damageBody: 46,
+    damageLeg: 34,
+    fireRate: 3.8,
+    magazineSize: 8,
+    reserveAmmo: 32,
+    reloadTime: 1.5,
+    spreadBase: 0.006,
+    spreadRun: 0.04,
+    recoilPerShot: 0.022,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.9,
+    description: 'High-caliber sci-fi energy sidearm from the Ion Armory pack.',
+  },
+  VALKYRIE_RIFLE: {
+    id: 'VALKYRIE_RIFLE',
+    name: 'Valkyrie-R',
+    category: 'RIFLE',
+    cost: 2400,
+    damageHead: 132,
+    damageBody: 36,
+    damageLeg: 28,
+    fireRate: 10.5,
+    magazineSize: 28,
+    reserveAmmo: 84,
+    reloadTime: 2.0,
+    spreadBase: 0.007,
+    spreadRun: 0.07,
+    recoilPerShot: 0.028,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.78,
+    description: 'Lightweight sci-fi pulse carbine tuned for rapid accurate bursts.',
+  },
+  HONEY_BADGER: {
+    id: 'HONEY_BADGER',
+    name: 'Badger-300',
+    category: 'RIFLE',
+    cost: 2700,
+    damageHead: 144,
+    damageBody: 38,
+    damageLeg: 30,
+    fireRate: 10.0,
+    magazineSize: 30,
+    reserveAmmo: 90,
+    reloadTime: 2.1,
+    spreadBase: 0.006,
+    spreadRun: 0.065,
+    recoilPerShot: 0.026,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.75,
+    description: 'Integrally suppressed tactical carbine with tight close-to-mid grouping.',
   },
 };
 

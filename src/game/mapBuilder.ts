@@ -1,11 +1,12 @@
 /**
  * Hollow Strike - 3D Tactical Map Builder
- * Procedurally generates the arena with PBR materials, composite models, and site markers.
+ * Integrates japan_map.glb environment, sci-fi pack supply props, solid low cover,
+ * and invisible tactical boundary raycast colliders without obstructing the Japanese architecture.
  */
 
 import * as THREE from 'three';
 import { BOMB_SITE_A, BOMB_SITE_B, MAP_COLLIDERS } from './mapData';
-import { loadGLBModel } from './modelLoader';
+import { loadGLBModel, loadGLBSubNode } from './modelLoader';
 
 export interface BuiltMap {
   group: THREE.Group;
@@ -22,108 +23,42 @@ export function buildTacticalMap(scene: THREE.Scene): BuiltMap {
   mapGroup.name = 'TacticalMap';
   const collidableMeshes: THREE.Mesh[] = [];
 
-  // 1. Procedural Floor Texture (High-tech tactical grid concrete)
-  const floorCanvas = document.createElement('canvas');
-  floorCanvas.width = 512;
-  floorCanvas.height = 512;
-  const ctx = floorCanvas.getContext('2d')!;
-  ctx.fillStyle = '#1e2430';
-  ctx.fillRect(0, 0, 512, 512);
-
-  // Concrete speckles
-  for (let i = 0; i < 4000; i++) {
-    const shade = Math.floor(25 + Math.random() * 20);
-    ctx.fillStyle = `rgb(${shade}, ${shade + 4}, ${shade + 10})`;
-    ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
-  }
-
-  // Tactical grid lines
-  ctx.strokeStyle = 'rgba(75, 95, 125, 0.25)';
-  ctx.lineWidth = 2;
-  for (let x = 0; x <= 512; x += 64) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, 512);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= 512; y += 64) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(512, y);
-    ctx.stroke();
-  }
-
-  const floorTexture = new THREE.CanvasTexture(floorCanvas);
-  floorTexture.wrapS = THREE.RepeatWrapping;
-  floorTexture.wrapT = THREE.RepeatWrapping;
-  floorTexture.repeat.set(16, 16);
-  floorTexture.colorSpace = THREE.SRGBColorSpace;
-
-  // Primary Floor
-  const floorGeo = new THREE.PlaneGeometry(110, 110);
+  // 1. Subtle Fallback Ground Plate below japan_map street level (y = -0.18 prevents Z-fighting)
+  const floorGeo = new THREE.PlaneGeometry(240, 240);
   const floorMat = new THREE.MeshStandardMaterial({
-    map: floorTexture,
-    roughness: 0.85,
-    metalness: 0.15,
+    color: 0x18202c,
+    roughness: 0.9,
+    metalness: 0.1,
   });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.18;
   floor.receiveShadow = true;
   mapGroup.add(floor);
 
-  // Exterior natural mountain cliffs beyond boundaries so arena never floats in void
-  const cliffMat = new THREE.MeshStandardMaterial({
-    color: 0x111622,
-    roughness: 0.95,
-    metalness: 0.05,
-    flatShading: true,
-  });
-  const cliffGeo = new THREE.BoxGeometry(130, 24, 8);
-
-  const cliffNorth = new THREE.Mesh(cliffGeo, cliffMat);
-  cliffNorth.position.set(0, 10, -56);
-  mapGroup.add(cliffNorth);
-
-  const cliffSouth = new THREE.Mesh(cliffGeo, cliffMat);
-  cliffSouth.position.set(0, 10, 56);
-  mapGroup.add(cliffSouth);
-
-  const cliffWest = new THREE.Mesh(new THREE.BoxGeometry(8, 24, 130), cliffMat);
-  cliffWest.position.set(-56, 10, 0);
-  mapGroup.add(cliffWest);
-
-  const cliffEast = new THREE.Mesh(new THREE.BoxGeometry(8, 24, 130), cliffMat);
-  cliffEast.position.set(56, 10, 0);
-  mapGroup.add(cliffEast);
-
-  // 2. Concrete & Metal Materials for Structures
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x242d3d,
-    roughness: 0.7,
-    metalness: 0.2,
+  // 2. Materials for Colliders & Tactical Cover
+  // Invisible solid bullet/camera blocker for perimeter/high colliders (never hides real Japan architecture!)
+  const invisibleColliderMat = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: false,
     transparent: true,
-    opacity: 0.15,
-  });
-
-  const trimMat = new THREE.MeshStandardMaterial({
-    color: 0x0ea5e9, // Cyan trim
-    roughness: 0.35,
-    metalness: 0.6,
+    opacity: 0,
   });
 
   const crateDarkMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.6,
-    metalness: 0.4,
+    color: 0x263040,
+    roughness: 0.65,
+    metalness: 0.35,
   });
 
   const crateAccentMat = new THREE.MeshStandardMaterial({
-    color: 0xf59e0b, // Amber hazard crate
+    color: 0xd97706,
     roughness: 0.5,
-    metalness: 0.3,
+    metalness: 0.25,
   });
 
-  // Build architectural structures from colliders
+  // Build collidable volumes: outer/tall walls stay invisible so Japan buildings dominate the view,
+  // while waist-high cover & site platforms render as clean solid tactical crates/structures.
   for (const c of MAP_COLLIDERS) {
     const width = c.maxX - c.minX;
     const height = c.maxY - c.minY;
@@ -132,131 +67,148 @@ export function buildTacticalMap(scene: THREE.Scene): BuiltMap {
     const centerY = (c.minY + c.maxY) / 2;
     const centerZ = (c.minZ + c.maxZ) / 2;
 
+    const isInvisibleBoundary =
+      height >= 4.2 || Math.abs(centerX) >= 41 || Math.abs(centerZ) >= 43;
+
     const blockGeo = new THREE.BoxGeometry(width, height, depth);
-    const block = new THREE.Mesh(blockGeo, wallMat);
+    const mat = isInvisibleBoundary ? invisibleColliderMat : crateDarkMat;
+    const block = new THREE.Mesh(blockGeo, mat);
     block.position.set(centerX, centerY, centerZ);
-    block.castShadow = true;
-    block.receiveShadow = true;
+    if (!isInvisibleBoundary) {
+      block.castShadow = true;
+      block.receiveShadow = true;
+    }
     mapGroup.add(block);
     collidableMeshes.push(block);
-
-    // Decorative top trim on taller walls
-    if (height >= 5) {
-      const trimGeo = new THREE.BoxGeometry(width + 0.1, 0.3, depth + 0.1);
-      const trim = new THREE.Mesh(trimGeo, trimMat);
-      trim.position.set(centerX, c.maxY + 0.15, centerZ);
-      mapGroup.add(trim);
-    }
   }
 
-  // 3. Composite Site A: Reactor Core on Platform
-  const corePlatformGeo = new THREE.BoxGeometry(8.2, 1.2, 8.2);
-  const corePlatform = new THREE.Mesh(corePlatformGeo, crateDarkMat);
-  corePlatform.position.set(BOMB_SITE_A.x, 0.6, BOMB_SITE_A.z);
-  corePlatform.receiveShadow = true;
-  mapGroup.add(corePlatform);
-
-  // Reactor Cylinder (3-part assembly)
-  const coreCylinderGeo = new THREE.CylinderGeometry(1.6, 1.8, 3.2, 16);
+  // 3. Site A & Site B Tactical Anchors + Sci-Fi Supply Chests
+  const coreCylinderGeo = new THREE.CylinderGeometry(1.3, 1.5, 2.8, 16);
   const coreMat = new THREE.MeshStandardMaterial({
     color: 0x0f172a,
-    roughness: 0.2,
+    roughness: 0.25,
     metalness: 0.8,
   });
   const coreMesh = new THREE.Mesh(coreCylinderGeo, coreMat);
-  coreMesh.position.set(BOMB_SITE_A.x, 2.8, BOMB_SITE_A.z);
+  coreMesh.position.set(BOMB_SITE_A.x, 2.6, BOMB_SITE_A.z);
   coreMesh.castShadow = true;
   mapGroup.add(coreMesh);
 
-  // Glowing reactor ring
-  const ringGeo = new THREE.TorusGeometry(1.9, 0.15, 8, 24);
+  const ringGeo = new THREE.TorusGeometry(1.6, 0.12, 8, 24);
   const ringMat = new THREE.MeshStandardMaterial({
     color: 0x06b6d4,
     emissive: 0x06b6d4,
-    emissiveIntensity: 1.5,
+    emissiveIntensity: 1.4,
     roughness: 0.1,
   });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = Math.PI / 2;
-  ring.position.set(BOMB_SITE_A.x, 2.8, BOMB_SITE_A.z);
+  ring.position.set(BOMB_SITE_A.x, 2.6, BOMB_SITE_A.z);
   mapGroup.add(ring);
 
-  // 4. Composite Site B: Tech Monoliths & Courtyard
-  const pillarMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
-    roughness: 0.4,
-    metalness: 0.5,
-  });
-  const pillarGeo = new THREE.BoxGeometry(3, 7, 3);
-  const pillar1 = new THREE.Mesh(pillarGeo, pillarMat);
-  pillar1.position.set(19.5, 3.5, -20.5);
-  pillar1.castShadow = true;
-  mapGroup.add(pillar1);
-
-  const pillar2 = new THREE.Mesh(pillarGeo, pillarMat);
-  pillar2.position.set(26.5, 3.5, -16.5);
-  pillar2.castShadow = true;
-  mapGroup.add(pillar2);
-
-  // Accent crates around Site B
-  const bCrate = new THREE.Mesh(new THREE.BoxGeometry(2, 2.2, 2), crateAccentMat);
-  bCrate.position.set(21, 1.1, -13);
+  const bCrate = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), crateAccentMat);
+  bCrate.position.set(21, 0.9, -13);
   bCrate.castShadow = true;
+  bCrate.receiveShadow = true;
   mapGroup.add(bCrate);
 
-  // 5. Bomb Site Decal Rings on Floor
-  const ringDecalGeo = new THREE.RingGeometry(BOMB_SITE_A.radius - 0.4, BOMB_SITE_A.radius, 32);
+  // Add Sci-Fi Supply Chests from free_pack_-_sci_fi_weapon.glb onto Site A & Site B
+  loadGLBSubNode('/models/free_pack_-_sci_fi_weapon.glb', 'SM_Sci_FiWeapon_Chest').then((chestTemplate) => {
+    if (!chestTemplate) return;
+    const box = new THREE.Box3().setFromObject(chestTemplate);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const scale = 1.6 / Math.max(0.01, size.x);
+
+    const placeChest = (x: number, y: number, z: number, rotY: number) => {
+      const wrapper = new THREE.Group();
+      const clone = chestTemplate.clone(true);
+      clone.position.set(-center.x, -box.min.y, -center.z);
+      wrapper.add(clone);
+      wrapper.scale.setScalar(scale);
+      wrapper.position.set(x, y, z);
+      wrapper.rotation.y = rotY;
+      mapGroup.add(wrapper);
+    };
+
+    placeChest(BOMB_SITE_A.x + 2.8, 1.2, BOMB_SITE_A.z + 2.2, 0.4);
+    placeChest(BOMB_SITE_B.x - 2.6, 0, BOMB_SITE_B.z - 2.4, -0.5);
+  });
+
+  // 4. Bomb Site Decal Rings on Floor
+  const ringDecalGeo = new THREE.RingGeometry(BOMB_SITE_A.radius - 0.35, BOMB_SITE_A.radius, 32);
   const siteAMat = new THREE.MeshBasicMaterial({
     color: 0x06b6d4,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.65,
   });
   const siteAMarker = new THREE.Mesh(ringDecalGeo, siteAMat);
   siteAMarker.rotation.x = -Math.PI / 2;
-  siteAMarker.position.set(BOMB_SITE_A.x, 0.03, BOMB_SITE_A.z);
+  siteAMarker.position.set(BOMB_SITE_A.x, 0.04, BOMB_SITE_A.z);
   mapGroup.add(siteAMarker);
 
   const siteBMat = new THREE.MeshBasicMaterial({
     color: 0xf59e0b,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.65,
   });
   const siteBMarker = new THREE.Mesh(ringDecalGeo.clone(), siteBMat);
   siteBMarker.rotation.x = -Math.PI / 2;
-  siteBMarker.position.set(BOMB_SITE_B.x, 0.03, BOMB_SITE_B.z);
+  siteBMarker.position.set(BOMB_SITE_B.x, 0.04, BOMB_SITE_B.z);
   mapGroup.add(siteBMarker);
 
-  // 6. Buy Phase Barriers (Translucent Energy Shields)
-  const barrierGeo = new THREE.BoxGeometry(84, 8, 0.4);
+  // 5. Buy Phase Energy Barriers
+  const barrierGeo = new THREE.BoxGeometry(84, 5.5, 0.25);
   const barrierMatAtt = new THREE.MeshBasicMaterial({
     color: 0xef4444,
     transparent: true,
-    opacity: 0.35,
-    wireframe: true,
+    opacity: 0.22,
+    depthWrite: false,
   });
   const barrierAttackers = new THREE.Mesh(barrierGeo, barrierMatAtt);
-  barrierAttackers.position.set(0, 4, 18);
+  barrierAttackers.position.set(0, 2.75, 18);
   mapGroup.add(barrierAttackers);
 
   const barrierMatDef = new THREE.MeshBasicMaterial({
     color: 0x3b82f6,
     transparent: true,
-    opacity: 0.35,
-    wireframe: true,
+    opacity: 0.22,
+    depthWrite: false,
   });
   const barrierDefenders = new THREE.Mesh(barrierGeo.clone(), barrierMatDef);
-  barrierDefenders.position.set(0, 4, -26);
+  barrierDefenders.position.set(0, 2.75, -26);
   mapGroup.add(barrierDefenders);
 
-  // Load Japan map GLB as the central arena map environment
+  // 6. Load Japan City Street Map GLB centered onto tactical arena
+  // Raw japan_map coordinates place House1/House2 plaza around X=8250, Y=50, Z=-900.
+  // Scaling by 0.016 puts street floor cleanly at Y=0 and Japanese buildings tightly framing the 88m arena!
   loadGLBModel('/models/japan_map.glb').then((mapModel) => {
-    if (mapModel) {
-      mapModel.position.set(0, 0, 0);
-      mapModel.scale.set(2.5, 2.5, 2.5);
-      mapGroup.add(mapModel);
-    }
+    if (!mapModel) return;
+
+    const toRemove: THREE.Object3D[] = [];
+    mapModel.traverse((obj) => {
+      // Strip exported Blender camera and tilted sky plane card
+      if (obj.name === 'Camera' || obj.name === 'Object_21' || obj.name === 'Plane.023') {
+        toRemove.push(obj);
+        return;
+      }
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (mesh.name.includes('House')) {
+          collidableMeshes.push(mesh);
+        }
+      }
+    });
+    toRemove.forEach((o) => o.parent?.remove(o));
+
+    const mapScale = 0.016;
+    mapModel.scale.setScalar(mapScale);
+    mapModel.position.set(-8250 * mapScale, -50 * mapScale, -(-900) * mapScale);
+    mapGroup.add(mapModel);
   });
 
   scene.add(mapGroup);
@@ -270,15 +222,18 @@ export function buildTacticalMap(scene: THREE.Scene): BuiltMap {
     collidableMeshes,
     dispose: () => {
       scene.remove(mapGroup);
-      floorTexture.dispose();
       floorGeo.dispose();
       floorMat.dispose();
-      cliffGeo.dispose();
-      cliffMat.dispose();
-      wallMat.dispose();
-      trimMat.dispose();
+      invisibleColliderMat.dispose();
       crateDarkMat.dispose();
       crateAccentMat.dispose();
+      coreCylinderGeo.dispose();
+      coreMat.dispose();
+      ringGeo.dispose();
+      ringMat.dispose();
+      ringDecalGeo.dispose();
+      siteAMat.dispose();
+      siteBMat.dispose();
       barrierGeo.dispose();
       barrierMatAtt.dispose();
       barrierMatDef.dispose();

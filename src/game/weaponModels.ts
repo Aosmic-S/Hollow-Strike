@@ -1,9 +1,11 @@
 /**
- * Hollow Strike - Procedural & GLB 3D Weapon Models & Viewmodel Rig
+ * Hollow Strike - Procedural & GLB 3D Weapon Models & Viewmodel Profiles
+ * All firearms are geometrically normalized via Box3 to real-world meter lengths,
+ * oriented cleanly with barrel pointing along -Z and grip centered near (0,0,0).
  */
 
 import * as THREE from 'three';
-import { loadGLBModel } from './modelLoader';
+import { loadGLBModel, loadGLBSubNode, normalizeWeaponModel, NormalizeWeaponOptions } from './modelLoader';
 
 const darkMetalMat = new THREE.MeshStandardMaterial({
   color: 0x1e2430,
@@ -17,155 +19,271 @@ const polymerMat = new THREE.MeshStandardMaterial({
   metalness: 0.1,
 });
 
-const accentCyanMat = new THREE.MeshStandardMaterial({
-  color: 0x06b6d4,
-  emissive: 0x06b6d4,
-  emissiveIntensity: 0.6,
-  roughness: 0.2,
-  metalness: 0.6,
-});
+export interface WeaponViewmodelProfile {
+  hipPos: [number, number, number];
+  adsPos: [number, number, number];
+  flashPos: [number, number, number];
+}
 
-const opticLensMat = new THREE.MeshStandardMaterial({
-  color: 0x38bdf8,
-  emissive: 0x0284c7,
-  emissiveIntensity: 0.8,
-  roughness: 0.1,
-  transparent: true,
-  opacity: 0.7,
-});
+const WEAPON_VIEWMODEL_PROFILES: Record<string, WeaponViewmodelProfile> = {
+  APEX_9: {
+    hipPos: [0.22, -0.21, -0.40],
+    adsPos: [0, -0.13, -0.32],
+    flashPos: [0, 0.04, -0.15],
+  },
+  ION_PISTOL: {
+    hipPos: [0.22, -0.21, -0.40],
+    adsPos: [0, -0.13, -0.32],
+    flashPos: [0, 0.04, -0.16],
+  },
+  VIPER_9: {
+    hipPos: [0.24, -0.22, -0.42],
+    adsPos: [0, -0.14, -0.30],
+    flashPos: [0, 0.04, -0.27],
+  },
+  PHANTOM_V: {
+    hipPos: [0.25, -0.23, -0.46],
+    adsPos: [0, -0.15, -0.32],
+    flashPos: [0, 0.045, -0.42],
+  },
+  VALKYRIE_RIFLE: {
+    hipPos: [0.25, -0.22, -0.45],
+    adsPos: [0, -0.145, -0.31],
+    flashPos: [0, 0.04, -0.41],
+  },
+  HONEY_BADGER: {
+    hipPos: [0.25, -0.23, -0.45],
+    adsPos: [0, -0.145, -0.31],
+    flashPos: [0, 0.04, -0.40],
+  },
+  VOID_LANCE: {
+    hipPos: [0.26, -0.24, -0.48],
+    adsPos: [0, -0.15, -0.30],
+    flashPos: [0, 0.045, -0.48],
+  },
+};
 
-function applyGLBOrFallback(group: THREE.Group, glbPath: string, scale: number = 0.08, rotY: number = 0) {
-  loadGLBModel(glbPath).then((glbGroup) => {
-    if (glbGroup) {
-      while (group.children.length > 0) {
-        group.remove(group.children[0]);
-      }
-      glbGroup.scale.set(scale, scale, scale);
-      glbGroup.rotation.y = rotY;
-      group.add(glbGroup);
-    }
+export function getWeaponViewmodelProfile(weaponId: string): WeaponViewmodelProfile {
+  return WEAPON_VIEWMODEL_PROFILES[weaponId] ?? WEAPON_VIEWMODEL_PROFILES.APEX_9;
+}
+
+function syncLayerMask(target: THREE.Object3D, mask: number) {
+  target.traverse((child) => {
+    child.layers.mask = mask;
   });
 }
 
+function attachNormalizedGLB(
+  container: THREE.Group,
+  loaderFn: () => Promise<THREE.Group | null>,
+  options: NormalizeWeaponOptions
+) {
+  loaderFn().then((rawObj) => {
+    if (!rawObj) return;
+    const normalized = normalizeWeaponModel(rawObj, options);
+    // Preserve Layer assignment if container was already isolated (e.g., Layer 1 for local player body)
+    syncLayerMask(normalized, container.layers.mask);
+
+    while (container.children.length > 0) {
+      const child = container.children[0];
+      // Never remove a mounted muzzle flash helper named 'vm_muzzle_flash'
+      if (child.name === 'vm_muzzle_flash') break;
+      container.remove(child);
+    }
+
+    // Remove all non-flash placeholders
+    for (let i = container.children.length - 1; i >= 0; i--) {
+      if (container.children[i].name !== 'vm_muzzle_flash') {
+        container.remove(container.children[i]);
+      }
+    }
+
+    container.add(normalized);
+  });
+}
+
+function buildCompactFallback(length: number, height: number): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, height, length * 0.72), darkMetalMat);
+  body.position.set(0, 0.02, -length * 0.08);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.10, 0.05), polymerMat);
+  grip.rotation.x = -0.25;
+  grip.position.set(0, -0.05, 0.03);
+  g.add(body, grip);
+  return g;
+}
+
 /**
- * Apex-9 Sidearm -> Uses /models/sci-fi_gun.glb
+ * Apex-9 Sidearm -> /models/sci-fi_gun.glb (Compact handgun: 0.24m)
  */
 export function createApex9Model(): THREE.Group {
-  const group = new THREE.Group();
-
-  const slideGeo = new THREE.BoxGeometry(0.045, 0.05, 0.22);
-  const slide = new THREE.Mesh(slideGeo, darkMetalMat);
-  slide.position.set(0, 0.04, -0.04);
-  group.add(slide);
-
-  const frameGeo = new THREE.BoxGeometry(0.04, 0.04, 0.2);
-  const frame = new THREE.Mesh(frameGeo, polymerMat);
-  frame.position.set(0, 0.015, -0.04);
-  group.add(frame);
-
-  const gripGeo = new THREE.BoxGeometry(0.038, 0.11, 0.055);
-  const grip = new THREE.Mesh(gripGeo, polymerMat);
-  grip.rotation.x = -0.25;
-  grip.position.set(0, -0.05, 0.02);
-  group.add(grip);
-
-  applyGLBOrFallback(group, '/models/sci-fi_gun.glb', 0.045, 0);
-
+  const group = buildCompactFallback(0.24, 0.045);
+  attachNormalizedGLB(group, () => loadGLBModel('/models/sci-fi_gun.glb'), {
+    targetLength: 0.24,
+    forwardAxis: '-z',
+    pivotShift: [0, 0.01, -0.02],
+  });
   return group;
 }
 
 /**
- * Viper-9 SMG -> Uses /models/smg.glb
+ * Ion-X Sidearm -> free_pack_-_sci_fi_weapon.glb / SM_Sci_FiWeapon_HandGun (0.25m)
+ */
+export function createIonPistolModel(): THREE.Group {
+  const group = buildCompactFallback(0.25, 0.048);
+  attachNormalizedGLB(
+    group,
+    () => loadGLBSubNode('/models/free_pack_-_sci_fi_weapon.glb', 'SM_Sci_FiWeapon_HandGun'),
+    {
+      targetLength: 0.25,
+      forwardAxis: '+x',
+      pivotShift: [0, 0.01, -0.02],
+    }
+  );
+  return group;
+}
+
+/**
+ * Viper-9 SMG -> /models/smg.glb (0.48m)
  */
 export function createViper9Model(): THREE.Group {
-  const group = new THREE.Group();
-
-  const receiverGeo = new THREE.BoxGeometry(0.06, 0.07, 0.32);
-  const receiver = new THREE.Mesh(receiverGeo, darkMetalMat);
-  receiver.position.set(0, 0.04, -0.08);
-  group.add(receiver);
-
-  const gripGeo = new THREE.BoxGeometry(0.04, 0.13, 0.06);
-  const grip = new THREE.Mesh(gripGeo, polymerMat);
-  grip.rotation.x = -0.2;
-  grip.position.set(0, -0.06, 0.02);
-  group.add(grip);
-
-  applyGLBOrFallback(group, '/models/smg.glb', 0.08, 0);
-
+  const group = buildCompactFallback(0.48, 0.065);
+  attachNormalizedGLB(group, () => loadGLBModel('/models/smg.glb'), {
+    targetLength: 0.48,
+    forwardAxis: '-z',
+    pivotShift: [0, 0.01, -0.04],
+  });
   return group;
 }
 
 /**
- * Phantom-V Rifle -> Uses /models/carbine_rifle.glb (Increased size)
+ * Phantom-V Carbine -> /models/carbine_rifle.glb (Increased full rifle size: 0.78m)
  */
 export function createPhantomVModel(): THREE.Group {
-  const group = new THREE.Group();
-
-  const receiverGeo = new THREE.BoxGeometry(0.065, 0.085, 0.42);
-  const receiver = new THREE.Mesh(receiverGeo, darkMetalMat);
-  receiver.position.set(0, 0.04, -0.1);
-  group.add(receiver);
-
-  const gripGeo = new THREE.BoxGeometry(0.042, 0.14, 0.065);
-  const grip = new THREE.Mesh(gripGeo, polymerMat);
-  grip.rotation.x = -0.28;
-  grip.position.set(0, -0.065, 0.04);
-  group.add(grip);
-
-  applyGLBOrFallback(group, '/models/carbine_rifle.glb', 0.13, 0);
-
+  const group = buildCompactFallback(0.78, 0.08);
+  attachNormalizedGLB(group, () => loadGLBModel('/models/carbine_rifle.glb'), {
+    targetLength: 0.78,
+    forwardAxis: '-z',
+    pivotShift: [0, 0.015, -0.06],
+  });
   return group;
 }
 
 /**
- * Void-Lance Sniper -> Uses /models/free_pack_-_sci_fi_weapon.glb
+ * Valkyrie-R Pulse Rifle -> free_pack_-_sci_fi_weapon.glb / SM_Sci_FiWeapon_RifleGun (0.76m)
+ */
+export function createValkyrieRifleModel(): THREE.Group {
+  const group = buildCompactFallback(0.76, 0.08);
+  attachNormalizedGLB(
+    group,
+    () => loadGLBSubNode('/models/free_pack_-_sci_fi_weapon.glb', 'SM_Sci_FiWeapon_RifleGun'),
+    {
+      targetLength: 0.76,
+      forwardAxis: '+x',
+      pivotShift: [0, 0.015, -0.05],
+    }
+  );
+  return group;
+}
+
+/**
+ * Badger-300 Suppressed Carbine -> /models/aac_honey_badger.glb (0.74m)
+ */
+export function createHoneyBadgerModel(): THREE.Group {
+  const group = buildCompactFallback(0.74, 0.075);
+  attachNormalizedGLB(group, () => loadGLBModel('/models/aac_honey_badger.glb'), {
+    targetLength: 0.74,
+    forwardAxis: '+x',
+    pivotShift: [0, 0.01, -0.05],
+  });
+  return group;
+}
+
+/**
+ * Void-Lance Heavy Cannon -> free_pack_-_sci_fi_weapon.glb / SM_Sci_FiWeapon_MachineGun (0.90m)
  */
 export function createVoidLanceModel(): THREE.Group {
-  const group = new THREE.Group();
-
-  const receiverGeo = new THREE.BoxGeometry(0.075, 0.09, 0.52);
-  const receiver = new THREE.Mesh(receiverGeo, darkMetalMat);
-  receiver.position.set(0, 0.04, -0.12);
-  group.add(receiver);
-
-  const stockGeo = new THREE.BoxGeometry(0.06, 0.11, 0.3);
-  const stock = new THREE.Mesh(stockGeo, polymerMat);
-  stock.position.set(0, 0.01, 0.24);
-  group.add(stock);
-
-  applyGLBOrFallback(group, '/models/free_pack_-_sci_fi_weapon.glb', 0.09, 0);
-
+  const group = buildCompactFallback(0.90, 0.09);
+  attachNormalizedGLB(
+    group,
+    () => loadGLBSubNode('/models/free_pack_-_sci_fi_weapon.glb', 'SM_Sci_FiWeapon_MachineGun'),
+    {
+      targetLength: 0.90,
+      forwardAxis: '+x',
+      pivotShift: [0, 0.015, -0.06],
+    }
+  );
   return group;
 }
 
 /**
- * Creates 3D model for the Tactical Spike Core
+ * Unified Weapon Model Factory by Weapon ID
+ */
+export function createWeaponModel(weaponId: string): THREE.Group {
+  switch (weaponId) {
+    case 'APEX_9':
+      return createApex9Model();
+    case 'ION_PISTOL':
+      return createIonPistolModel();
+    case 'VIPER_9':
+      return createViper9Model();
+    case 'PHANTOM_V':
+      return createPhantomVModel();
+    case 'VALKYRIE_RIFLE':
+      return createValkyrieRifleModel();
+    case 'HONEY_BADGER':
+      return createHoneyBadgerModel();
+    case 'VOID_LANCE':
+      return createVoidLanceModel();
+    default:
+      return createApex9Model();
+  }
+}
+
+/**
+ * Creates 3D model for the Tactical Spike Core (uses SM_Sci_FiWeapon_Bomb from the sci-fi pack)
  */
 export function createSpikeModel(): THREE.Group {
   const group = new THREE.Group();
 
-  const baseGeo = new THREE.CylinderGeometry(0.24, 0.28, 0.15, 16);
+  const baseGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.12, 16);
   const base = new THREE.Mesh(baseGeo, darkMetalMat);
-  base.position.y = 0.075;
+  base.position.y = 0.06;
   group.add(base);
 
-  const coreGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.35, 16);
+  const coreGeo = new THREE.CylinderGeometry(0.16, 0.18, 0.30, 16);
   const core = new THREE.Mesh(coreGeo, polymerMat);
-  core.position.y = 0.3;
+  core.position.y = 0.25;
   group.add(core);
 
-  const lightGeo = new THREE.TorusGeometry(0.2, 0.03, 8, 24);
+  const lightGeo = new THREE.TorusGeometry(0.19, 0.028, 8, 24);
   const lightMat = new THREE.MeshStandardMaterial({
     color: 0xef4444,
     emissive: 0xef4444,
-    emissiveIntensity: 2.0,
+    emissiveIntensity: 2.2,
   });
   const light = new THREE.Mesh(lightGeo, lightMat);
   light.rotation.x = Math.PI / 2;
-  light.position.y = 0.35;
+  light.position.y = 0.42;
   light.name = 'spike_light';
   group.add(light);
+
+  loadGLBSubNode('/models/free_pack_-_sci_fi_weapon.glb', 'SM_Sci_FiWeapon_Bomb').then((bomb) => {
+    if (!bomb) return;
+    const box = new THREE.Box3().setFromObject(bomb);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const targetH = 0.48;
+    const scale = targetH / Math.max(0.01, size.y);
+
+    const holder = new THREE.Group();
+    bomb.position.set(-center.x, -box.min.y, -center.z);
+    holder.add(bomb);
+    holder.scale.setScalar(scale);
+
+    group.remove(base, core);
+    group.add(holder);
+  });
 
   return group;
 }

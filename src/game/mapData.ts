@@ -44,7 +44,7 @@ export const MAP_COLLIDERS: MapAABB[] = [
   { minX: 12, maxX: 16, minY: 0, maxY: 8, minZ: -12, maxZ: -2 },
 
   // Mid central courtyard monument & sniper arch
-  { minX: -3.5, maxX: 3.5, minY: 0, maxY: 2.8, minZ: -2, maxZ: 2 },
+  { minX: -3.5, maxX: 3.5, minY: 0, maxY: 1.55, minZ: -2, maxZ: 2 },
   { minX: -8, maxX: -6, minY: 0, maxY: 7, minZ: -5, maxZ: 5 },
   { minX: 6, maxX: 8, minY: 0, maxY: 7, minZ: -5, maxZ: 5 },
 
@@ -66,8 +66,8 @@ export const MAP_COLLIDERS: MapAABB[] = [
   { minX: -8, maxX: -3, minY: 0, maxY: 7, minZ: -26, maxZ: -24 }, // Def Mid-A wall
   { minX: 3, maxX: 8, minY: 0, maxY: 7, minZ: -26, maxZ: -24 }, // Def Mid-B wall
 
-  // Attacker spawn forward divider
-  { minX: -6, maxX: 6, minY: 0, maxY: 3.5, minZ: 24, maxZ: 26 },
+  // Attacker spawn forward low cover divider
+  { minX: -6, maxX: 6, minY: 0, maxY: 1.45, minZ: 24, maxZ: 26 },
 ];
 
 // Check collision against static map colliders

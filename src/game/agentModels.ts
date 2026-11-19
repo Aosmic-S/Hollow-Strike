@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import { AgentDef, TeamSide } from './types';
-import { createApex9Model, createViper9Model, createPhantomVModel, createVoidLanceModel } from './weaponModels';
+import { createWeaponModel } from './weaponModels';
 
 export interface AgentMeshPackage {
   root: THREE.Group;
@@ -170,7 +170,7 @@ export function createAgentModel(agent: AgentDef, team: TeamSide): AgentMeshPack
   const flashGeo = new THREE.ConeGeometry(0.10, 0.28, 6);
   flashGeo.rotateX(-Math.PI / 2);
   const muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
-  muzzleFlashMesh.position.set(0, 0.05, -0.75);
+  muzzleFlashMesh.position.set(0, 0.05, -0.48);
   muzzleFlashMesh.visible = false;
   muzzleFlashMesh.raycast = () => {};
   weaponHolder.add(muzzleFlashMesh);
@@ -244,24 +244,11 @@ export function createAgentModel(agent: AgentDef, team: TeamSide): AgentMeshPack
       weaponHolder.remove(currentWeaponMesh);
     }
 
-    switch (weaponId) {
-      case 'APEX_9':
-        currentWeaponMesh = createApex9Model();
-        break;
-      case 'VIPER_9':
-        currentWeaponMesh = createViper9Model();
-        break;
-      case 'PHANTOM_V':
-        currentWeaponMesh = createPhantomVModel();
-        break;
-      case 'VOID_LANCE':
-        currentWeaponMesh = createVoidLanceModel();
-        break;
-      default:
-        currentWeaponMesh = createApex9Model();
-    }
-
-    currentWeaponMesh.scale.set(1.4, 1.4, 1.4);
+    currentWeaponMesh = createWeaponModel(weaponId);
+    currentWeaponMesh.scale.setScalar(1.05);
+    currentWeaponMesh.traverse((obj) => {
+      obj.layers.mask = root.layers.mask;
+    });
     weaponHolder.add(currentWeaponMesh);
   }
 

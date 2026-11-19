@@ -43,7 +43,7 @@ import {
 import { buildTacticalMap, BuiltMap } from './mapBuilder';
 import { BOMB_SITE_A, BOMB_SITE_B, SPAWN_ATTACKERS, SPAWN_DEFENDERS, checkCollision } from './mapData';
 import { createAgentModel } from './agentModels';
-import { createApex9Model, createViper9Model, createPhantomVModel, createVoidLanceModel, createSpikeModel } from './weaponModels';
+import { createWeaponModel, getWeaponViewmodelProfile, createSpikeModel } from './weaponModels';
 import { soundEngine } from './audio';
 import { AbilityManager } from './abilities';
 import { BotCombatant, BotController } from './botAI';
@@ -92,6 +92,7 @@ export interface EngineCallbacks {
   onMatchOver: (winner: TeamSide, summary: MatchSummaryPayload) => void;
   onPointerLockLost?: () => void;
   onSpectateUpdate?: (state: SpectateState | null) => void;
+  onCrosshairBloomUpdate?: (bloomPx: number) => void;
 }
 
 export class GameEngine {
@@ -138,9 +139,13 @@ export class GameEngine {
   private vmRecoilPitch: number = 0;
   private vmWalkPhase: number = 0;
   private vmEquipOffset: number = 0;
+  private vmEquipRoll: number = 0;
+  private vmInspectTimer: number = 0;
+  private vmStrafeRoll: number = 0;
   private vmSwayX: number = 0;
   private vmSwayY: number = 0;
   private vmLandOffset: number = 0;
+  private lastSpreadBloomPx: number = -1;
 
   // Player Jump/Eye Physics & Status
   private playerVelY: number = 0;
@@ -207,17 +212,17 @@ export class GameEngine {
     this.matchMode = matchMode;
     this.input = new InputManager(settings.controlMode, settings.keyBindings);
 
-    // 1. Scene & Atmosphere Setup
+    // 1. Scene & Atmosphere Setup (Extended far clipping plane + gentle fog for japan_map architecture)
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x090f1d);
-    this.scene.fog = new THREE.FogExp2(0x090f1d, 0.013);
+    this.scene.background = new THREE.Color(0x0d1526);
+    this.scene.fog = new THREE.FogExp2(0x10192d, 0.0046);
 
     // 2. Camera Setup (Tactical First-Person FOV)
     this.camera = new THREE.PerspectiveCamera(
       settings.fov,
       Math.max(1, mountElement.clientWidth) / Math.max(1, mountElement.clientHeight),
-      0.1,
-      140
+      0.08,
+      700
     );
     this.camera.position.set(0, 1.65, 36);
 
@@ -344,7 +349,8 @@ export class GameEngine {
       depthTest: false,
     });
     const flash = new THREE.Mesh(flashGeo, flashMat);
-    flash.position.set(0, 0.045, -0.52);
+    flash.name = 'vm_muzzle_flash';
+    flash.position.set(0, 0.04, -0.42);
     flash.visible = false;
     flash.raycast = () => {};
     return flash;
@@ -755,32 +761,17 @@ export class GameEngine {
       this.viewmodelRig.remove(this.viewmodelWeapon);
     }
 
-    switch (weaponId) {
-      case 'APEX_9':
-        this.viewmodelWeapon = createApex9Model();
-        this.viewmodelFlash.position.set(0, 0.045, -0.22);
-        break;
-      case 'VIPER_9':
-        this.viewmodelWeapon = createViper9Model();
-        this.viewmodelFlash.position.set(0, 0.045, -0.44);
-        break;
-      case 'PHANTOM_V':
-        this.viewmodelWeapon = createPhantomVModel();
-        this.viewmodelFlash.position.set(0, 0.045, -0.66);
-        break;
-      case 'VOID_LANCE':
-        this.viewmodelWeapon = createVoidLanceModel();
-        this.viewmodelFlash.position.set(0, 0.045, -0.98);
-        break;
-      default:
-        this.viewmodelWeapon = createApex9Model();
-        this.viewmodelFlash.position.set(0, 0.045, -0.22);
-    }
+    const profile = getWeaponViewmodelProfile(weaponId);
+    this.viewmodelWeapon = createWeaponModel(weaponId);
+    this.viewmodelFlash.position.set(...profile.flashPos);
 
-    this.viewmodelWeapon.position.set(0.28, -0.24, -0.42);
+    this.viewmodelWeapon.position.set(...profile.hipPos);
     this.viewmodelWeapon.add(this.viewmodelFlash);
     this.viewmodelRig.add(this.viewmodelWeapon);
-    this.vmEquipOffset = -0.22; // Trigger raise animation
+
+    this.vmEquipOffset = -0.24; // Trigger crisp draw/equip animation
+    this.vmEquipRoll = -0.45;
+    this.vmInspectTimer = 0;
   }
 
   public switchWeaponSlot(slot: 1 | 2): boolean {
@@ -1073,6 +1064,19 @@ export class GameEngine {
       _vec3_1.normalize();
       this.vmWalkPhase += dt * (this.input.state.crouchHeld ? 6.5 : 10.5);
     }
+    this.vmStrafeRoll = THREE.MathUtils.damp(this.vmStrafeRoll, -right * 0.048, 12, dt);
+
+    // Weapon Inspect trigger [Y]
+    if (this.input.state.inspectWeaponJustPressed && p.reloadTimer <= 0 && !this.input.state.adsHeld) {
+      this.vmInspectTimer = 2.6;
+    }
+    if (this.vmInspectTimer > 0) {
+      if (this.input.state.fireHeld || this.input.state.adsHeld || p.reloadTimer > 0) {
+        this.vmInspectTimer = 0;
+      } else {
+        this.vmInspectTimer = Math.max(0, this.vmInspectTimer - dt);
+      }
+    }
 
     p.velocity.x = _vec3_1.x * baseSpeed;
     p.velocity.z = _vec3_1.z * baseSpeed;
@@ -1226,6 +1230,17 @@ export class GameEngine {
         soundEngine.playReload();
         this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true, p.activeSlot);
       }
+    }
+
+    // Dynamic reticle bloom telemetry for HUD
+    const moveBloom = isMoving ? (this.input.state.crouchHeld ? 2.5 : 6.0) : 0;
+    const airBloom = !this.isGrounded ? 10.0 : 0;
+    const recoilBloom = Math.min(12.0, this.vmRecoilZ * 95);
+    const adsFactor = this.input.state.adsHeld && p.weapon.canADS ? 0.3 : 1.0;
+    const totalBloom = Number(((moveBloom + airBloom + recoilBloom) * adsFactor).toFixed(1));
+    if (Math.abs(totalBloom - this.lastSpreadBloomPx) > 0.3) {
+      this.lastSpreadBloomPx = totalBloom;
+      this.callbacks.onCrosshairBloomUpdate?.(totalBloom);
     }
 
     this.updatePlayerSpikeActions(dt);
@@ -2178,49 +2193,69 @@ export class GameEngine {
     // Smooth viewmodel spring decays (recoil, equip raise, look sway, landing dip)
     this.vmRecoilZ = THREE.MathUtils.damp(this.vmRecoilZ, 0, 18, dt);
     this.vmRecoilPitch = THREE.MathUtils.damp(this.vmRecoilPitch, 0, 16, dt);
-    this.vmEquipOffset = THREE.MathUtils.damp(this.vmEquipOffset, 0, 14, dt);
+    this.vmEquipOffset = THREE.MathUtils.damp(this.vmEquipOffset, 0, 12, dt);
+    this.vmEquipRoll = THREE.MathUtils.damp(this.vmEquipRoll, 0, 12, dt);
     this.vmSwayX = THREE.MathUtils.damp(this.vmSwayX, 0, 12, dt);
     this.vmSwayY = THREE.MathUtils.damp(this.vmSwayY, 0, 12, dt);
     this.vmLandOffset = THREE.MathUtils.damp(this.vmLandOffset, 0, 14, dt);
 
     if (this.cameraShakeTrauma > 0) {
       const shake = this.cameraShakeTrauma * this.cameraShakeTrauma * 0.08;
-      this.camera.rotation.z = (Math.random() - 0.5) * shake;
+      this.camera.rotation.z = (Math.random() - 0.5) * shake + this.vmStrafeRoll * 0.25;
       this.camera.position.x += (Math.random() - 0.5) * shake * 0.5;
       this.camera.position.y += (Math.random() - 0.5) * shake * 0.5;
       this.cameraShakeTrauma = Math.max(0, this.cameraShakeTrauma - dt * 2.5);
     } else {
-      this.camera.rotation.z = 0;
+      this.camera.rotation.z = this.vmStrafeRoll * 0.25;
     }
 
     if (this.viewmodelWeapon) {
       const p = this.playerCombatant;
       const isADS = this.input.state.adsHeld && p.weapon.canADS;
+      const profile = getWeaponViewmodelProfile(p.weapon.id);
 
       if (isADS) {
-        _vmTargetPos.set(0, -0.145, -0.28);
+        _vmTargetPos.set(...profile.adsPos);
       } else {
-        _vmTargetPos.set(0.28, -0.24, -0.42);
+        _vmTargetPos.set(...profile.hipPos);
       }
 
-      // Multi-phase smooth reload dip + cant
+      // Multi-phase tactical reload (0..0.3 drop & tilt, 0.3..0.65 mag seat pulse, 0.65..1.0 bolt rack)
       const isReloading = p.reloadTimer > 0;
       const reloadProgress = isReloading ? 1 - p.reloadTimer / Math.max(0.2, p.weapon.reloadTime) : 0;
       const reloadWave = isReloading ? Math.sin(reloadProgress * Math.PI) : 0;
-      const reloadDip = -0.15 * reloadWave;
-      const reloadTilt = 0.56 * reloadWave;
+      const magTapPulse =
+        isReloading && reloadProgress > 0.35 && reloadProgress < 0.62
+          ? Math.sin(((reloadProgress - 0.35) / 0.27) * Math.PI) * 0.032
+          : 0;
+      const boltRackPull =
+        isReloading && reloadProgress > 0.68 && reloadProgress < 0.88
+          ? Math.sin(((reloadProgress - 0.68) / 0.2) * Math.PI) * 0.04
+          : 0;
+      const reloadDip = -0.14 * reloadWave + magTapPulse;
+      const reloadTilt = 0.52 * reloadWave;
 
-      // Movement bob & idle breathing
+      // Weapon Inspect showcase [Y]
+      const inspectNorm = this.vmInspectTimer > 0 ? Math.sin((1 - this.vmInspectTimer / 2.6) * Math.PI) : 0;
+      const inspectShiftX = -0.09 * inspectNorm;
+      const inspectShiftY = 0.055 * inspectNorm;
+      const inspectYaw = inspectNorm * 0.85;
+      const inspectRoll = inspectNorm * 0.55;
+      const inspectPitch = inspectNorm * 0.14;
+
+      // Movement figure-8 bob, crouch shift, & idle breathe
       const speed = Math.hypot(p.velocity.x, p.velocity.z);
       const moveWeight = Math.min(1, speed / 5.4);
-      const adsDamp = isADS ? 0.35 : 1.0;
-      const walkBobX = Math.cos(this.vmWalkPhase * 0.5) * 0.012 * moveWeight * adsDamp;
-      const walkBobY = Math.abs(Math.sin(this.vmWalkPhase)) * 0.014 * moveWeight * adsDamp;
-      const breath = Math.sin(performance.now() * 0.0025) * 0.004 * adsDamp;
+      const adsDamp = isADS ? 0.3 : 1.0;
+      const crouchRoll = this.input.state.crouchHeld && !isADS ? -0.14 : 0;
+      const crouchShiftY = this.input.state.crouchHeld && !isADS ? -0.025 : 0;
+      const walkBobX = Math.cos(this.vmWalkPhase * 0.5) * 0.015 * moveWeight * adsDamp;
+      const walkBobY = Math.abs(Math.sin(this.vmWalkPhase)) * 0.016 * moveWeight * adsDamp;
+      const breath = Math.sin(performance.now() * 0.0024) * 0.0045 * adsDamp;
 
-      _vmTargetPos.x += walkBobX + this.vmSwayX * adsDamp;
-      _vmTargetPos.y += breath - walkBobY + this.vmEquipOffset + reloadDip + this.vmLandOffset + this.vmSwayY * adsDamp;
-      _vmTargetPos.z += this.vmRecoilZ;
+      _vmTargetPos.x += walkBobX + this.vmSwayX * adsDamp + inspectShiftX;
+      _vmTargetPos.y += breath - walkBobY + this.vmEquipOffset + reloadDip + this.vmLandOffset + this.vmSwayY * adsDamp + crouchShiftY + inspectShiftY;
+      _vmTargetPos.z += this.vmRecoilZ + boltRackPull;
 
       this.viewmodelWeapon.position.x = THREE.MathUtils.damp(this.viewmodelWeapon.position.x, _vmTargetPos.x, 18, dt);
       this.viewmodelWeapon.position.y = THREE.MathUtils.damp(this.viewmodelWeapon.position.y, _vmTargetPos.y, 18, dt);
@@ -2228,37 +2263,48 @@ export class GameEngine {
 
       this.viewmodelWeapon.rotation.x = THREE.MathUtils.damp(
         this.viewmodelWeapon.rotation.x,
-        this.vmRecoilPitch - reloadTilt - this.vmSwayY * 0.65,
+        this.vmRecoilPitch - reloadTilt - this.vmSwayY * 0.7 + inspectPitch,
         16,
         dt
       );
       this.viewmodelWeapon.rotation.y = THREE.MathUtils.damp(
         this.viewmodelWeapon.rotation.y,
-        -this.vmSwayX * 0.85,
+        -this.vmSwayX * 0.9 + inspectYaw,
         14,
         dt
       );
       this.viewmodelWeapon.rotation.z = THREE.MathUtils.damp(
         this.viewmodelWeapon.rotation.z,
-        reloadWave * 0.34 - this.vmSwayX * 0.55,
+        reloadWave * 0.36 - this.vmSwayX * 0.55 + this.vmEquipRoll + this.vmStrafeRoll + crouchRoll + inspectRoll,
         14,
         dt
       );
 
-      // Sync arms smoothly with weapon offsets
+      // Sync arms smoothly with weapon offsets & animations
       this.viewmodelArms.position.x = THREE.MathUtils.damp(
         this.viewmodelArms.position.x,
-        (isADS ? -0.22 : 0) + this.vmSwayX * 0.6,
+        (isADS ? -0.22 : profile.hipPos[0] - 0.25) + this.vmSwayX * 0.65 + inspectShiftX * 0.5,
         16,
         dt
       );
       this.viewmodelArms.position.y = THREE.MathUtils.damp(
         this.viewmodelArms.position.y,
-        this.vmEquipOffset * 0.6 + reloadDip * 0.5 + this.vmLandOffset * 0.7,
+        this.vmEquipOffset * 0.65 + reloadDip * 0.55 + this.vmLandOffset * 0.75 + crouchShiftY * 0.7,
         16,
         dt
       );
-      this.viewmodelArms.position.z = THREE.MathUtils.damp(this.viewmodelArms.position.z, this.vmRecoilZ * 0.6, 18, dt);
+      this.viewmodelArms.position.z = THREE.MathUtils.damp(
+        this.viewmodelArms.position.z,
+        this.vmRecoilZ * 0.65 + boltRackPull * 0.8,
+        18,
+        dt
+      );
+      this.viewmodelArms.rotation.z = THREE.MathUtils.damp(
+        this.viewmodelArms.rotation.z,
+        this.vmStrafeRoll * 0.8 + crouchRoll * 0.6 + inspectRoll * 0.35,
+        14,
+        dt
+      );
 
       const targetFOV = isADS ? this.settings.fov * p.weapon.adsZoom : this.settings.fov;
       if (Math.abs(this.camera.fov - targetFOV) > 0.05) {

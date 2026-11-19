@@ -10,6 +10,7 @@ import {
   AGENT_REGISTRY,
   AgentDef,
   CrosshairColor,
+  CrosshairConfig,
   CrosshairSize,
   HitFeedback,
   KillEvent,
@@ -18,6 +19,8 @@ import {
   SpectateState,
   WeaponDef,
 } from '../game/types';
+import { resolveCrosshairConfig } from '../game/rules';
+import { CrosshairReticle } from './CrosshairReticle';
 import { Minimap } from './Minimap';
 import { BotCombatant } from '../game/botAI';
 
@@ -52,6 +55,8 @@ interface GameHUDProps {
   damageFlash: boolean;
   crosshairColor?: CrosshairColor;
   crosshairSize?: CrosshairSize;
+  crosshairConfig?: CrosshairConfig;
+  crosshairBloomPx?: number;
   isBlinded: boolean;
   isPointerLocked: boolean;
   isMobile: boolean;
@@ -71,14 +76,6 @@ interface GameHUDProps {
   onSpectateNext?: () => void;
   onToggleSpectateMode?: () => void;
 }
-
-const CROSSHAIR_HEX: Record<CrosshairColor, string> = {
-  cyan: '#22d3ee',
-  green: '#34d399',
-  amber: '#fbbf24',
-  white: '#f8fafc',
-  rose: '#fb7185',
-};
 
 export const GameHUD: React.FC<GameHUDProps> = ({
   playerCombatant,
@@ -110,6 +107,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   damageFlash,
   crosshairColor = 'cyan',
   crosshairSize = 'medium',
+  crosshairConfig,
+  crosshairBloomPx = 0,
   isBlinded,
   isPointerLocked,
   isMobile,
@@ -133,9 +132,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const aliveAttackers = allCombatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
   const aliveDefenders = allCombatants.filter((c) => c.alive && c.team === 'DEFENDERS').length;
 
-  const chColor = CROSSHAIR_HEX[crosshairColor] ?? '#22d3ee';
-  const chLen = crosshairSize === 'small' ? 6 : crosshairSize === 'large' ? 12 : 8;
-  const chGap = crosshairSize === 'small' ? 4 : crosshairSize === 'large' ? 7 : 5;
+  const resolvedCrosshair = resolveCrosshairConfig({
+    crosshairColor,
+    crosshairSize,
+    crosshairConfig,
+  });
 
   return (
     <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-2 sm:p-3 select-none">
@@ -346,42 +347,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {!isSpectating && (
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="relative flex items-center justify-center">
-          <div
-            className="h-1.5 w-1.5 rounded-full opacity-95 shadow-sm"
-            style={{ backgroundColor: chColor }}
-          />
-          <div
-            className="absolute w-0.5 opacity-85"
-            style={{
-              backgroundColor: chColor,
-              height: chLen,
-              bottom: `calc(50% + ${chGap}px)`,
-            }}
-          />
-          <div
-            className="absolute w-0.5 opacity-85"
-            style={{
-              backgroundColor: chColor,
-              height: chLen,
-              top: `calc(50% + ${chGap}px)`,
-            }}
-          />
-          <div
-            className="absolute h-0.5 opacity-85"
-            style={{
-              backgroundColor: chColor,
-              width: chLen,
-              right: `calc(50% + ${chGap}px)`,
-            }}
-          />
-          <div
-            className="absolute h-0.5 opacity-85"
-            style={{
-              backgroundColor: chColor,
-              width: chLen,
-              left: `calc(50% + ${chGap}px)`,
-            }}
-          />
+          <CrosshairReticle config={resolvedCrosshair} bloomPx={crosshairBloomPx} />
 
           {/* Crisp X Hitmarker */}
           {hitmarker?.active && (
@@ -617,7 +583,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 key={ab.id}
                 onClick={() => onTriggerAbility(ab.keySlot)}
                 title={`${ab.name}: ${ab.description}`}
-                className={`relative flex flex-col items-center justify-center rounded border px-2 py-1.5 w-16 h-16 transition cursor-pointer ${
+                className={`relative flex flex-col items-center justify-center rounded border px-1.5 py-1 w-[70px] h-16 transition cursor-pointer ${
                   !hasCharge || onCd
                     ? 'border-slate-800 bg-slate-900/40 text-slate-500'
                     : ab.isUltimate
@@ -627,21 +593,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 style={hasCharge && !onCd && !ab.isUltimate ? { borderColor: `${agent.primaryColor}88` } : undefined}
               >
                 <span
-                  className="font-mono text-xs font-black"
+                  className="font-mono text-[11px] font-black leading-none"
                   style={{ color: ab.isUltimate ? '#fbbf24' : agent.primaryColor }}
                 >
                   [{ab.keySlot}]
                 </span>
-                <span className="text-[9px] font-bold uppercase truncate max-w-full text-center mt-0.5">
+                <span className="text-[9px] font-bold uppercase truncate max-w-full text-center mt-1 leading-none">
                   {ab.name.split(' ')[0]}
                 </span>
                 {onCd ? (
-                  <span className="text-[9px] font-mono font-bold text-amber-400">
+                  <span className="text-[9px] font-mono font-bold text-amber-400 mt-1 leading-none">
                     {Math.ceil(st!.cooldownRemaining)}s
                   </span>
                 ) : ab.isUltimate ? (
-                  <span className="text-[9px] font-mono font-bold">
-                    {isUltReady ? 'ULT READY' : `${st?.ultPoints ?? 0}/${st?.ultRequired ?? 5}`}
+                  <span className="text-[9px] font-mono font-bold whitespace-nowrap mt-1 leading-none">
+                    {isUltReady ? 'READY' : `${st?.ultPoints ?? 0}/${st?.ultRequired ?? 5}`}
                   </span>
                 ) : (
                   <div className="flex gap-1 mt-0.5">

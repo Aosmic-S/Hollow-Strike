@@ -12,6 +12,11 @@ import {
   computeBotAimSolution,
   remapKeyBinding,
   formatKeyCode,
+  clampCrosshairConfig,
+  resolveCrosshairConfig,
+  normalizeTouchLayout,
+  updateTouchControlSlot,
+  applyTouchLayoutPreset,
 } from './rules';
 import { DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY } from './types';
 
@@ -219,4 +224,43 @@ test('remapKeyBinding swaps conflicting actions cleanly and formatKeyCode format
   assert.equal(formatKeyCode('Digit1'), '1');
 });
 
+test('clampCrosshairConfig & resolveCrosshairConfig sanitize custom styles and preserve legacy fallbacks', () => {
+  const resolvedLegacy = resolveCrosshairConfig({ crosshairColor: 'amber', crosshairSize: 'large' });
+  assert.equal(resolvedLegacy.color, '#fbbf24');
+  assert.equal(resolvedLegacy.length, 12);
+  assert.equal(resolvedLegacy.gap, 7);
+
+  const clamped = clampCrosshairConfig({
+    style: 'chevron',
+    color: '#ff00aa',
+    length: 99,
+    thickness: 0,
+    gap: -5,
+    dotSize: 20,
+    opacity: 0.1,
+  });
+  assert.equal(clamped.style, 'chevron');
+  assert.equal(clamped.color, '#ff00aa');
+  assert.equal(clamped.length, 22);
+  assert.equal(clamped.thickness, 1);
+  assert.equal(clamped.gap, 0);
+  assert.equal(clamped.dotSize, 8);
+  assert.equal(clamped.opacity, 0.25);
+});
+
+test('normalizeTouchLayout, updateTouchControlSlot, and applyTouchLayoutPreset clamp positions cleanly', () => {
+  const lefty = applyTouchLayoutPreset('LEFT_HANDED');
+  assert.ok(lefty.joystick.xPct > 50, 'Left-handed preset moves joystick to right side');
+  assert.ok(lefty.fire.xPct < 50, 'Left-handed preset moves fire button to left side');
+
+  const updated = updateTouchControlSlot(lefty, 'fire', { xPct: -10, yPct: 120, scale: 2.5, visible: true });
+  assert.equal(updated.fire.xPct, 4);
+  assert.equal(updated.fire.yPct, 94);
+  assert.equal(updated.fire.scale, 1.5);
+
+  const normalized = normalizeTouchLayout({ jump: { xPct: 50, yPct: 50 } });
+  assert.equal(normalized.jump.xPct, 50);
+  assert.equal(normalized.jump.yPct, 50);
+  assert.equal(normalized.fire.scale, 1.0);
+});
 

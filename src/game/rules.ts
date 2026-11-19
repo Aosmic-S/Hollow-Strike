@@ -3,7 +3,22 @@
  * Pure deterministic functions decoupled from UI and WebGL rendering.
  */
 
-import { WeaponDef, ROUNDS_TO_WIN, HALF_TIME_ROUND, TeamSide } from './types';
+import {
+  WeaponDef,
+  ROUNDS_TO_WIN,
+  HALF_TIME_ROUND,
+  TeamSide,
+  CrosshairColor,
+  CrosshairSize,
+  CrosshairConfig,
+  DEFAULT_CROSSHAIR_CONFIG,
+  TouchControlId,
+  TouchControlLayout,
+  TouchControlSlot,
+  DEFAULT_TOUCH_LAYOUT,
+  TOUCH_LAYOUT_PRESETS,
+  TouchLayoutPresetId,
+} from './types';
 
 export interface DamageResult {
   rawDamage: number;
@@ -403,4 +418,112 @@ export function formatKeyCode(code: string): string {
   return code.toUpperCase();
 }
 
+const LEGACY_CROSSHAIR_HEX: Record<CrosshairColor, string> = {
+  cyan: '#22d3ee',
+  green: '#34d399',
+  amber: '#fbbf24',
+  white: '#f8fafc',
+  rose: '#fb7185',
+};
 
+const VALID_CROSSHAIR_STYLES = new Set(['classic', 'cross', 'dot', 'circle', 'chevron', 't-shape']);
+
+function clampNum(val: unknown, min: number, max: number, fallback: number): number {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
+  return Math.max(min, Math.min(max, val));
+}
+
+export function clampCrosshairConfig(partial?: Partial<CrosshairConfig>): CrosshairConfig {
+  const src = partial ?? {};
+  const style =
+    typeof src.style === 'string' && VALID_CROSSHAIR_STYLES.has(src.style)
+      ? src.style
+      : DEFAULT_CROSSHAIR_CONFIG.style;
+  const color =
+    typeof src.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(src.color.trim())
+      ? src.color.trim()
+      : DEFAULT_CROSSHAIR_CONFIG.color;
+
+  return {
+    style,
+    color,
+    length: Math.round(clampNum(src.length, 2, 22, DEFAULT_CROSSHAIR_CONFIG.length)),
+    thickness: Math.round(clampNum(src.thickness, 1, 6, DEFAULT_CROSSHAIR_CONFIG.thickness)),
+    gap: Math.round(clampNum(src.gap, 0, 16, DEFAULT_CROSSHAIR_CONFIG.gap)),
+    showDot: typeof src.showDot === 'boolean' ? src.showDot : DEFAULT_CROSSHAIR_CONFIG.showDot,
+    dotSize: Math.round(clampNum(src.dotSize, 2, 8, DEFAULT_CROSSHAIR_CONFIG.dotSize)),
+    opacity: Number(clampNum(src.opacity, 0.25, 1.0, DEFAULT_CROSSHAIR_CONFIG.opacity).toFixed(2)),
+    outline: typeof src.outline === 'boolean' ? src.outline : DEFAULT_CROSSHAIR_CONFIG.outline,
+    dynamic: typeof src.dynamic === 'boolean' ? src.dynamic : DEFAULT_CROSSHAIR_CONFIG.dynamic,
+  };
+}
+
+export function resolveCrosshairConfig(settings: {
+  crosshairColor?: CrosshairColor;
+  crosshairSize?: CrosshairSize;
+  crosshairConfig?: Partial<CrosshairConfig>;
+}): CrosshairConfig {
+  if (settings.crosshairConfig) {
+    return clampCrosshairConfig(settings.crosshairConfig);
+  }
+  const colorHex = LEGACY_CROSSHAIR_HEX[settings.crosshairColor ?? 'cyan'] ?? DEFAULT_CROSSHAIR_CONFIG.color;
+  const length = settings.crosshairSize === 'small' ? 6 : settings.crosshairSize === 'large' ? 12 : 8;
+  const gap = settings.crosshairSize === 'small' ? 4 : settings.crosshairSize === 'large' ? 7 : 5;
+  return clampCrosshairConfig({
+    ...DEFAULT_CROSSHAIR_CONFIG,
+    color: colorHex,
+    length,
+    gap,
+  });
+}
+
+const TOUCH_CONTROL_IDS: TouchControlId[] = [
+  'joystick',
+  'fire',
+  'ads',
+  'crouch',
+  'jump',
+  'reload',
+  'weaponSwap',
+  'plantDefuse',
+  'abilityE',
+  'abilityQ',
+  'abilityC',
+  'abilityX',
+];
+
+function clampTouchSlot(raw: Partial<TouchControlSlot> | undefined, fallback: TouchControlSlot): TouchControlSlot {
+  return {
+    xPct: Number(clampNum(raw?.xPct, 4, 96, fallback.xPct).toFixed(1)),
+    yPct: Number(clampNum(raw?.yPct, 12, 94, fallback.yPct).toFixed(1)),
+    scale: Number(clampNum(raw?.scale, 0.65, 1.5, fallback.scale).toFixed(2)),
+    visible: typeof raw?.visible === 'boolean' ? raw.visible : fallback.visible,
+  };
+}
+
+export function normalizeTouchLayout(
+  partial?: Partial<Record<TouchControlId, Partial<TouchControlSlot>>>
+): TouchControlLayout {
+  const result = {} as TouchControlLayout;
+  for (const id of TOUCH_CONTROL_IDS) {
+    result[id] = clampTouchSlot(partial?.[id], DEFAULT_TOUCH_LAYOUT[id]);
+  }
+  return result;
+}
+
+export function updateTouchControlSlot(
+  layout: TouchControlLayout,
+  id: TouchControlId,
+  patch: Partial<TouchControlSlot>
+): TouchControlLayout {
+  const current = layout[id] ?? DEFAULT_TOUCH_LAYOUT[id];
+  return {
+    ...layout,
+    [id]: clampTouchSlot({ ...current, ...patch }, DEFAULT_TOUCH_LAYOUT[id]),
+  };
+}
+
+export function applyTouchLayoutPreset(presetId: TouchLayoutPresetId): TouchControlLayout {
+  const preset = TOUCH_LAYOUT_PRESETS[presetId] ?? TOUCH_LAYOUT_PRESETS.DEFAULT;
+  return normalizeTouchLayout(preset.layout);
+}

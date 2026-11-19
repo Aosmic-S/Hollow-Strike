@@ -64,9 +64,9 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
         </div>
 
         {/* Weapons Grid */}
-        <div className="mt-5">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-3">Firearms</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="mt-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-400 mb-2.5">Firearms</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
             {Object.values(WEAPON_REGISTRY).map((w: WeaponDef) => {
               const isEquipped = currentWeaponId === w.id;
               const canAfford = credits >= w.cost;
@@ -74,7 +74,8 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
               return (
                 <div
                   key={w.id}
-                  className={`flex flex-col justify-between rounded-lg border p-4 transition ${
+                  data-testid={`buy-weapon-${w.id}`}
+                  className={`flex flex-col justify-between rounded-lg border p-3 transition ${
                     isEquipped
                       ? 'border-cyan-500 bg-cyan-950/30'
                       : canAfford
@@ -86,17 +87,17 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                     <div className="flex items-start justify-between">
                       <div>
                         <span className="text-[10px] font-mono uppercase text-slate-400">{w.category}</span>
-                        <h4 className="text-base font-black text-white">{w.name}</h4>
+                        <h4 className="text-sm font-black text-white">{w.name}</h4>
                       </div>
-                      <span className="font-mono text-sm font-bold text-emerald-400">
+                      <span className="font-mono text-xs font-bold text-emerald-400">
                         {w.cost === 0 ? 'FREE' : `$${w.cost}`}
                       </span>
                     </div>
 
-                    <p className="mt-2 text-[11px] text-slate-400 leading-tight">{w.description}</p>
+                    <p className="mt-1.5 text-[10px] text-slate-400 leading-tight">{w.description}</p>
 
                     {/* Stats */}
-                    <div className="mt-3 space-y-1.5 border-t border-slate-800 pt-2 text-[10px] font-mono text-slate-300">
+                    <div className="mt-2.5 space-y-1 border-t border-slate-800 pt-2 text-[10px] font-mono text-slate-300">
                       <div className="flex justify-between">
                         <span className="text-slate-400">Head / Body / Leg:</span>
                         <span className="text-white font-bold">{w.damageHead} / {w.damageBody} / {w.damageLeg}</span>
@@ -115,7 +116,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                   <button
                     disabled={isEquipped || !canAfford || !canBuy}
                     onClick={() => onBuyWeapon(w.id)}
-                    className={`mt-4 w-full rounded py-2 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                    className={`mt-3 w-full rounded py-1.5 text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
                       isEquipped
                         ? 'border border-cyan-500/40 bg-cyan-500/20 text-cyan-300 cursor-default'
                         : canBuy && canAfford
