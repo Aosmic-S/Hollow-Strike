@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { BOMB_SITE_A, BOMB_SITE_B, MAP_COLLIDERS } from './mapData';
+import { loadGLBModel } from './modelLoader';
 
 export interface BuiltMap {
   group: THREE.Group;
@@ -100,6 +101,8 @@ export function buildTacticalMap(scene: THREE.Scene): BuiltMap {
     color: 0x242d3d,
     roughness: 0.7,
     metalness: 0.2,
+    transparent: true,
+    opacity: 0.15,
   });
 
   const trimMat = new THREE.MeshStandardMaterial({
@@ -246,6 +249,15 @@ export function buildTacticalMap(scene: THREE.Scene): BuiltMap {
   const barrierDefenders = new THREE.Mesh(barrierGeo.clone(), barrierMatDef);
   barrierDefenders.position.set(0, 4, -26);
   mapGroup.add(barrierDefenders);
+
+  // Load Japan map GLB as the central arena map environment
+  loadGLBModel('/models/japan_map.glb').then((mapModel) => {
+    if (mapModel) {
+      mapModel.position.set(0, 0, 0);
+      mapModel.scale.set(2.5, 2.5, 2.5);
+      mapGroup.add(mapModel);
+    }
+  });
 
   scene.add(mapGroup);
 

@@ -76,6 +76,45 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           </div>
         </div>
 
+        {/* Progression Unlockables */}
+        <div className="border-t border-slate-800 pt-5">
+          <div className="font-mono text-xs font-bold uppercase tracking-wider text-slate-300 mb-3">
+            Operative Unlockables & Rewards
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+            {[
+              { level: 1, title: 'Recruit Starter Kit', desc: 'Default agents & standard loadout', unlocked: rank.level >= 1 },
+              { level: 3, title: 'Tactical Operator Skin', desc: 'Custom combat fatigues & insignia', unlocked: rank.level >= 3 },
+              { level: 6, title: 'Vanguard Weapon Finish', desc: 'Cyan cobalt finish for Apex-9 & Viper-9', unlocked: rank.level >= 6 },
+              { level: 10, title: 'Phantom Elite Badge', desc: 'Exclusive operator emblem & title', unlocked: rank.level >= 10 },
+            ].map((item) => (
+              <div
+                key={item.level}
+                className={`rounded-xl border p-3.5 flex items-center justify-between ${
+                  rank.level >= item.level
+                    ? 'border-cyan-500/40 bg-cyan-950/10 text-white'
+                    : 'border-slate-800 bg-slate-900/40 text-slate-500'
+                }`}
+              >
+                <div>
+                  <div className="font-bold flex items-center gap-2">
+                    <span className={rank.level >= item.level ? 'text-cyan-400' : 'text-slate-600'}>
+                      LVL {item.level}
+                    </span>
+                    <span>{item.title}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">{item.desc}</div>
+                </div>
+                <div className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg ${
+                  rank.level >= item.level ? 'bg-cyan-500/20 text-cyan-300' : 'bg-slate-800 text-slate-500'
+                }`}>
+                  {rank.level >= item.level ? 'Unlocked' : `Locked (${item.level})`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Edit Callsign */}
         <form onSubmit={handleSaveCallsign} className="space-y-2 border-t border-slate-800 pt-5">
           <label className="block font-mono text-xs font-bold uppercase tracking-wider text-slate-300">
