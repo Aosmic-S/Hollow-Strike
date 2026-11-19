@@ -101,6 +101,19 @@ export const LoadingSplash: React.FC<LoadingSplashProps> = ({ onComplete }) => {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-[#0F1923] via-[#0F1923]/65 to-transparent" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#0F1923]/55 via-transparent to-[#0F1923]/85" />
 
+      {/* Top-Right Studio Credit: AosmiC Studio (In place of Riot Games) */}
+      <div className="absolute top-6 right-8 sm:top-8 sm:right-12 z-20 flex items-center gap-3 bg-[#0F1923]/75 border border-[#ECE8E1]/20 px-3.5 py-2 clip-val-card backdrop-blur-md shadow-2xl">
+        <img
+          src="/assets/aistudio/IMG_20260612_142121_950_4842057d.webp"
+          alt="AosmiC Studio"
+          className="h-7 sm:h-9 w-auto object-contain mix-blend-screen filter drop-shadow-[0_0_10px_rgba(23,229,184,0.45)]"
+        />
+        <div className="flex flex-col leading-tight">
+          <span className="font-mono text-[9px] text-[#8B978F] uppercase tracking-[0.22em]">AOSMIC STUDIO PRESENTS</span>
+          <span className="font-display text-xs sm:text-sm font-extrabold uppercase tracking-widest text-[#ECE8E1]">TACTICAL DIVISION</span>
+        </div>
+      </div>
+
       {/* Left Architectural Vertical Frame & Diamond Track Rail (Reference geometry) */}
       <div className="pointer-events-none absolute inset-y-0 left-0 w-7 sm:w-10 border-r border-[#ECE8E1]/15 bg-[#0F1923]/75 flex flex-col items-center justify-between py-8">
         <div className="h-2.5 w-2.5 rotate-45 border border-[#17E5B8]" />
