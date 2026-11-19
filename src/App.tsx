@@ -59,7 +59,7 @@ export default function App() {
   const [settings, setSettings] = useState<GameSettings>(() => {
     const mobile = isMobileDevice('AUTO');
     return loadSavedSettings({
-      graphics: mobile || isSoftwareGl ? 'LOW' : 'HIGH',
+      graphics: 'HIGH',
       fpsCap: 60,
       showFps: false,
       mouseSensitivity: 0.0022,

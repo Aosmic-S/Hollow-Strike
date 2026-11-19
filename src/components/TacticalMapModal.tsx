@@ -53,12 +53,20 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
             </h2>
           </div>
 
-          <button
-            onClick={onClose}
-            className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
-          >
-            Close [M / Esc]
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="bg-[#FF4655] px-4 py-2 font-display text-xs font-extrabold uppercase tracking-widest text-[#ECE8E1] hover:bg-[#ff5a68] transition cursor-pointer clip-val-btn"
+            >
+              ← BACK
+            </button>
+            <button
+              onClick={onClose}
+              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
+            >
+              Close [M / Esc]
+            </button>
+          </div>
         </div>
 
         {/* Tactical Map SVG Projection */}
