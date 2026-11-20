@@ -42,6 +42,7 @@ const KEYBINDING_FIELDS: { action: keyof KeyBindings; label: string }[] = [
   { action: 'plantDefuse', label: 'Plant / Defuse' },
   { action: 'primaryWeapon', label: 'Primary Slot' },
   { action: 'sidearmWeapon', label: 'Sidearm Slot' },
+  { action: 'meleeWeapon', label: 'Hollow Blade [3]' },
   { action: 'abilityQ', label: 'Ability Q' },
   { action: 'abilityE', label: 'Ability E' },
   { action: 'abilityC', label: 'Ability C' },

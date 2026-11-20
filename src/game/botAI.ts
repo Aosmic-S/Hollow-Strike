@@ -1,12 +1,20 @@
 /**
- * Hollow Strike - Tactical Bot AI
- * Controls 4 bot teammates + 5 bot opponents with objective-driven navigation,
- * peeking, angle holding, cover taking, plant/defuse logic, and ability usage.
+ * Hollow Strike - Smart Tactical Bot AI
+ * Coordinated squad pushes, obstacle-aware flanking & peeking, utility casting across all 4 agents,
+ * range-adaptive weapon positioning (shotguns advance, snipers hold angles), and melee/sidearm fallbacks.
  */
 
 import * as THREE from 'three';
 import { BotDifficulty, TeamSide, WeaponDef } from './types';
-import { NavNode, findClosestNavNode, findNavPath, checkCollision, BOMB_SITE_A, BOMB_SITE_B } from './mapData';
+import {
+  NavNode,
+  findClosestNavNode,
+  findNavPath,
+  checkCollision,
+  isPointWalkable,
+  BOMB_SITE_A,
+  BOMB_SITE_B,
+} from './mapData';
 import { AgentMeshPackage } from './agentModels';
 import { AbilityManager } from './abilities';
 import { computeBotAimSolution } from './rules';
@@ -44,6 +52,7 @@ export interface BotCombatant {
   team: TeamSide;
   agentId: string;
   isHuman: boolean;
+  isRemoteHuman?: boolean;
   hp: number;
   armor: number;
   alive: boolean;
@@ -62,7 +71,8 @@ export interface BotCombatant {
   sidearmWeapon: WeaponDef;
   sidearmAmmoInMag: number;
   sidearmReserveAmmo: number;
-  activeSlot: 1 | 2;
+  meleeWeapon: WeaponDef;
+  activeSlot: 1 | 2 | 3;
   reloadTimer: number;
   shootCooldown: number;
   isPlanting: boolean;
@@ -86,47 +96,59 @@ export class BotController {
   private lastSeenPos: THREE.Vector3 | null = null;
   private memoryTimer: number = 0;
 
-  private abilityCooldown: number = 4 + Math.random() * 8;
+  private abilityCooldown: number = 2 + Math.random() * 5;
   private angleHoldTimer: number = 0;
   private crouchTimer: number = 0;
 
   private burstShotsFired: number = 0;
   private burstPauseTimer: number = 0;
   private strafeSign: number = Math.random() > 0.5 ? 1 : -1;
-  private strafeSwapTimer: number = 0.7;
+  private strafeSwapTimer: number = 0.55;
+  private jigglePeekTimer: number = 0;
 
   private lastProgressPos: THREE.Vector3 = new THREE.Vector3();
   private progressInit: boolean = false;
   private stuckTimer: number = 0;
   private detourTimer: number = 0;
   private detourSign: number = Math.random() > 0.5 ? 1 : -1;
+  private assignedRoleIndex: number = 0;
 
-  constructor(combatant: BotCombatant, difficulty: BotDifficulty) {
+  constructor(combatant: BotCombatant, difficulty: BotDifficulty, roleIndex = 0) {
     this.combatant = combatant;
     this.difficulty = difficulty;
+    this.assignedRoleIndex = roleIndex;
   }
 
   public setDifficulty(diff: BotDifficulty): void {
     this.difficulty = diff;
   }
 
-  /** Called when this bot takes damage so it reacts to flank/rear shots instead of ignoring attackers */
+  /** Called when this bot takes damage so it reacts immediately & dodges/retreats smartly */
   public notifyDamaged(attacker: BotCombatant): void {
     if (!this.combatant.alive || attacker.team === this.combatant.team || !attacker.alive) return;
     this.alertTarget = attacker;
-    this.alertTimer = 4.0;
+    this.alertTimer = 4.5;
     if (!this.lastSeenPos) this.lastSeenPos = new THREE.Vector3();
     this.lastSeenPos.copy(attacker.position);
-    this.memoryTimer = 3.0;
+    this.memoryTimer = 3.5;
+
+    // Smart counter-strafe jolt on incoming hit
+    if (this.difficulty !== 'EASY') {
+      this.strafeSwapTimer = 0.05;
+    }
 
     if (!this.currentEnemyTarget && this.state !== 'PLANTING' && this.state !== 'DEFUSING') {
       this.currentEnemyTarget = attacker;
-      this.reactionTimer = this.difficulty === 'HARD' ? 0.16 : this.difficulty === 'MEDIUM' ? 0.28 : 0.45;
+      this.reactionTimer = this.difficulty === 'HARD' ? 0.11 : this.difficulty === 'MEDIUM' ? 0.22 : 0.42;
       this.state = 'ENGAGING';
     }
   }
 
-  public planRound(spikePlanted: boolean, plantedSite: 'A' | 'B' | null): void {
+  public planRound(
+    spikePlanted: boolean,
+    plantedSite: 'A' | 'B' | null,
+    coordinatedTargetSite: 'A' | 'B' = 'A'
+  ): void {
     this.state = 'ROAMING';
     this.currentEnemyTarget = null;
     this.alertTarget = null;
@@ -143,21 +165,31 @@ export class BotController {
 
     if (isAttacker) {
       if (!spikePlanted) {
-        const roll = Math.random();
-        if (roll < 0.4) targetNodeId = 'site_a_plant';
-        else if (roll < 0.8) targetNodeId = 'site_b_plant';
-        else targetNodeId = 'mid_north';
+        // Coordinated squad execute: carrier + 2 bots push main site; 1-2 lurk mid/opposite connector
+        const primarySiteNode = coordinatedTargetSite === 'A' ? 'site_a_plant' : 'site_b_plant';
+        if (this.combatant.hasSpike || this.assignedRoleIndex % 3 !== 2) {
+          targetNodeId = primarySiteNode;
+        } else {
+          targetNodeId = Math.random() < 0.55 ? 'mid_north' : coordinatedTargetSite === 'A' ? 'b_connector' : 'a_connector';
+        }
       } else {
-        targetNodeId = plantedSite === 'A' ? 'site_a_back' : 'site_b_back';
+        // Post-plant defense spread across backsite & connector crossfires
+        const mod = this.assignedRoleIndex % 2;
+        if (plantedSite === 'A') {
+          targetNodeId = mod === 0 ? 'site_a_back' : 'a_connector';
+        } else {
+          targetNodeId = mod === 0 ? 'site_b_back' : 'b_connector';
+        }
       }
     } else {
       if (!spikePlanted) {
-        const rand = Math.random();
-        if (rand < 0.34) targetNodeId = 'site_a_plant';
-        else if (rand < 0.68) targetNodeId = 'site_b_plant';
-        else if (rand < 0.84) targetNodeId = 'a_connector';
-        else targetNodeId = 'b_connector';
+        // Balanced defensive setup: 2 A, 2 B, 1 Mid/Connector flex
+        const slot = this.assignedRoleIndex % 5;
+        if (slot === 0 || slot === 1) targetNodeId = slot === 0 ? 'site_a_plant' : 'a_long_corner';
+        else if (slot === 2 || slot === 3) targetNodeId = slot === 2 ? 'site_b_plant' : 'b_long_corner';
+        else targetNodeId = Math.random() < 0.5 ? 'mid_north' : 'b_connector';
       } else {
+        // Rapid coordinated retake
         targetNodeId = plantedSite === 'A' ? 'site_a_plant' : 'site_b_plant';
       }
     }
@@ -179,6 +211,8 @@ export class BotController {
     onBotPlantComplete?: (bot: BotCombatant, site: 'A' | 'B') => void,
     onBotDefuseComplete?: (bot: BotCombatant) => void
   ): void {
+    if (this.combatant.isRemoteHuman) return;
+
     if (!this.combatant.alive) {
       this.combatant.isCrouching = false;
       if (this.combatant.deathTimer > 0) {
@@ -205,6 +239,7 @@ export class BotController {
     if (this.combatant.shootCooldown > 0) this.combatant.shootCooldown -= dt;
     if (this.abilityCooldown > 0) this.abilityCooldown -= dt;
     if (this.crouchTimer > 0) this.crouchTimer -= dt;
+    if (this.jigglePeekTimer > 0) this.jigglePeekTimer -= dt;
     if (this.alertTimer > 0) {
       this.alertTimer -= dt;
       if (this.alertTimer <= 0) this.alertTarget = null;
@@ -229,14 +264,14 @@ export class BotController {
       this.currentEnemyTarget = null;
       if (this.state === 'ENGAGING') {
         this.state = 'HOLDING_ANGLE';
-        this.angleHoldTimer = 1.1;
+        this.angleHoldTimer = 0.9;
       }
     }
 
     // 3. State execution
     switch (this.state) {
       case 'ENGAGING':
-        this.executeEngage(dt, fireBulletCallback, abilityMgr, isSlowed ? 0.55 : 1.0);
+        this.executeEngage(dt, allCombatants, fireBulletCallback, abilityMgr, isSlowed ? 0.55 : 1.0);
         break;
 
       case 'PLANTING':
@@ -302,7 +337,8 @@ export class BotController {
     let closestEnemy: BotCombatant | null = null;
     let closestDist = Infinity;
 
-    const maxSightRange = this.difficulty === 'HARD' ? 48 : this.difficulty === 'MEDIUM' ? 42 : 36;
+    const maxSightRange = this.difficulty === 'HARD' ? 56 : this.difficulty === 'MEDIUM' ? 48 : 38;
+    const awarenessRadius = this.difficulty === 'HARD' ? 16 : this.difficulty === 'MEDIUM' ? 12 : 9;
 
     // Three.js local -Z is forward -> world forward = (-sin(yaw), 0, -cos(yaw))
     _forward.set(-Math.sin(this.combatant.yaw), 0, -Math.cos(this.combatant.yaw));
@@ -318,8 +354,8 @@ export class BotController {
       const isAlertAttacker = this.alertTarget?.id === c.id && this.alertTimer > 0;
       const isRevealed = abilityMgr.revealedEnemyIds.has(c.id);
 
-      // 135 deg forward FOV, 11m close footstep awareness, or active alert when shot/revealed
-      if (dot > 0.05 || dist < 11 || isAlertAttacker || isRevealed) {
+      // Wide tactical peripheral awareness + footstep radius + alert + recon reveal
+      if (dot > -0.15 || dist < awarenessRadius || isAlertAttacker || isRevealed) {
         const smokeOccluded = abilityMgr.isRayOccludedBySmoke(this.combatant.position, c.position);
         if (!smokeOccluded && dist < closestDist && this.hasLineOfSight(c, worldColliders)) {
           closestDist = dist;
@@ -333,23 +369,24 @@ export class BotController {
         this.currentEnemyTarget = closestEnemy;
         this.burstShotsFired = 0;
         this.burstPauseTimer = 0;
-        const baseDelay = this.difficulty === 'HARD' ? 0.22 : this.difficulty === 'MEDIUM' ? 0.36 : 0.6;
-        const rangeDelay = Math.min(0.25, closestDist * 0.005);
+        // Fast human-like reaction speeds scaled clearly by difficulty
+        const baseDelay = this.difficulty === 'HARD' ? 0.13 : this.difficulty === 'MEDIUM' ? 0.24 : 0.52;
+        const rangeDelay = Math.min(0.16, closestDist * 0.003);
         this.reactionTimer = baseDelay + rangeDelay;
       }
       if (!this.lastSeenPos) this.lastSeenPos = new THREE.Vector3();
       this.lastSeenPos.copy(closestEnemy.position);
-      this.memoryTimer = 2.6;
+      this.memoryTimer = 3.2;
 
       if (this.state !== 'PLANTING' && this.state !== 'DEFUSING') {
         this.state = 'ENGAGING';
       }
     } else if (this.state === 'ENGAGING') {
-      // Target slipped into cover/smoke: hold angle toward last seen position briefly rather than blindly walking away
+      // Enemy broke sightline: either chase around close corner or hold tight angle
       this.currentEnemyTarget = null;
       if (this.memoryTimer > 0 && this.lastSeenPos) {
         this.state = 'HOLDING_ANGLE';
-        this.angleHoldTimer = 1.6;
+        this.angleHoldTimer = 1.4;
       } else {
         this.state = 'ROAMING';
       }
@@ -376,7 +413,6 @@ export class BotController {
       return true;
     }
 
-    // Slide smoothly along wall X or Z axes individually
     let moved = false;
     if (!checkCollision(nextX, this.combatant.position.z, 0.45).collided && !blockedByBarrier(nextX, this.combatant.position.z)) {
       this.combatant.position.x = nextX;
@@ -391,8 +427,42 @@ export class BotController {
     return moved;
   }
 
+  private switchBotSlot(slot: 1 | 2 | 3): void {
+    const c = this.combatant;
+    if (c.activeSlot === slot) return;
+
+    if (c.activeSlot === 1) {
+      c.primaryAmmoInMag = c.ammoInMag;
+      c.primaryReserveAmmo = c.reserveAmmo;
+    } else if (c.activeSlot === 2) {
+      c.sidearmAmmoInMag = c.ammoInMag;
+      c.sidearmReserveAmmo = c.reserveAmmo;
+    }
+
+    c.activeSlot = slot;
+    c.reloadTimer = 0;
+
+    if (slot === 1 && c.primaryWeapon) {
+      c.weapon = c.primaryWeapon;
+      c.ammoInMag = c.primaryAmmoInMag;
+      c.reserveAmmo = c.primaryReserveAmmo;
+    } else if (slot === 2) {
+      c.weapon = c.sidearmWeapon;
+      c.ammoInMag = c.sidearmAmmoInMag;
+      c.reserveAmmo = c.sidearmReserveAmmo;
+    } else {
+      c.weapon = c.meleeWeapon;
+      c.ammoInMag = 1;
+      c.reserveAmmo = 0;
+    }
+
+    c.modelPackage.setWeapon(c.weapon.id);
+    this.burstShotsFired = 0;
+  }
+
   private executeEngage(
     dt: number,
+    allCombatants: BotCombatant[],
     fireBulletCallback: (shooter: BotCombatant, dir: THREE.Vector3) => void,
     abilityMgr: AbilityManager,
     speedMultiplier: number
@@ -424,7 +494,6 @@ export class BotController {
       isTargetCrouching: targetIsCrouching,
     });
 
-    // Aim cleanly at torso/center-mass (below head height)
     const targetAimY = target.position.y + aimSol.targetAimYOffset;
     _toEnemy.set(
       target.position.x - this.combatant.position.x,
@@ -435,31 +504,68 @@ export class BotController {
     const targetYaw = Math.atan2(-_toEnemy.x, -_toEnemy.z);
     const targetPitch = Math.atan2(_toEnemy.y, flatDist);
 
-    // Human-like angular tracking speed (no instant snap)
-    const turnRate = this.difficulty === 'HARD' ? 11 : this.difficulty === 'MEDIUM' ? 8 : 5.2;
+    const turnRate = this.difficulty === 'HARD' ? 14.5 : this.difficulty === 'MEDIUM' ? 10.5 : 6.0;
     this.combatant.yaw = dampAngle(this.combatant.yaw, targetYaw, turnRate, dt);
     this.combatant.pitch = THREE.MathUtils.damp(this.combatant.pitch, targetPitch, turnRate, dt);
 
-    // Dynamic strafe-step / retreat movement (no static turret standing!)
+    // Tactical crouching duck on HARD/MEDIUM bursts mid-duel
+    if (this.difficulty !== 'EASY' && this.crouchTimer <= 0 && this.burstShotsFired === 2 && flatDist < 24 && Math.random() < 0.35) {
+      this.crouchTimer = 0.42;
+    }
+
+    // Counter-strafe direction switch
     this.strafeSwapTimer -= dt;
     if (this.strafeSwapTimer <= 0) {
       this.strafeSign *= -1;
-      this.strafeSwapTimer = 0.65 + Math.random() * 0.65;
+      this.strafeSwapTimer = (this.difficulty === 'HARD' ? 0.38 : 0.6) + Math.random() * 0.5;
     }
 
-    const lowHp = this.combatant.hp < 34;
-    const needReposition = lowHp || this.burstPauseTimer > 0 || this.combatant.reloadTimer > 0;
-    const strafeSpeed = (needReposition ? 3.2 : flatDist < 22 ? 1.65 : 0.7) * speedMultiplier;
-
-    // Perpendicular lateral vector + slight backpedal when hurt/reloading
     const invLen = 1 / flatDist;
     const dirX = _toEnemy.x * invLen;
     const dirZ = _toEnemy.z * invLen;
-    const backBias = lowHp || this.combatant.reloadTimer > 0 ? -0.65 : flatDist < 7 ? -0.35 : 0;
-    _strafeDir.set(-dirZ * this.strafeSign + dirX * backBias, 0, dirX * this.strafeSign + dirZ * backBias);
+
+    const isMelee = Boolean(this.combatant.weapon.isMelee);
+    const isCloseQuartersGun =
+      isMelee || this.combatant.weapon.category === 'SHOTGUN' || this.combatant.weapon.id === 'FRENKY';
+    const isSniper = this.combatant.weapon.category === 'SNIPER';
+
+    const lowHp = this.combatant.hp < 38;
+    const needCover = lowHp || this.combatant.reloadTimer > 0;
+
+    // Range-adaptive positioning & cover ducking
+    let forwardBias = 0;
+    if (isMelee) {
+      forwardBias = 1.0; // Rush straight into slash range
+    } else if (needCover) {
+      forwardBias = -0.8;
+    } else if (isCloseQuartersGun && flatDist > 7.5) {
+      forwardBias = 0.72; // Shotguns push tight distance
+    } else if (isSniper && flatDist < 18) {
+      forwardBias = -0.55; // Snipers keep optimal range
+    } else if (flatDist < 6) {
+      forwardBias = -0.35;
+    }
+
+    // Check if strafing side is walkable; flip strafe sign immediately if hitting a wall
+    const probeX = this.combatant.position.x + (-dirZ * this.strafeSign) * 1.1;
+    const probeZ = this.combatant.position.z + (dirX * this.strafeSign) * 1.1;
+    if (!isPointWalkable(probeX, probeZ, 0.45)) {
+      this.strafeSign *= -1;
+    }
+
+    const strafeWeight = isMelee ? 0.25 : 1.0;
+    const moveSpeed =
+      (isMelee ? 6.1 : needCover ? 3.9 : isSniper && this.burstPauseTimer <= 0 ? 1.2 : 2.35) *
+      speedMultiplier;
+
+    _strafeDir.set(
+      -dirZ * this.strafeSign * strafeWeight + dirX * forwardBias,
+      0,
+      dirX * this.strafeSign * strafeWeight + dirZ * forwardBias
+    );
     if (_strafeDir.lengthSq() > 0.001) _strafeDir.normalize();
 
-    this.combatant.velocity.set(_strafeDir.x * strafeSpeed, 0, _strafeDir.z * strafeSpeed);
+    this.combatant.velocity.set(_strafeDir.x * moveSpeed, 0, _strafeDir.z * moveSpeed);
     this.tryMoveWithSlide(this.combatant.velocity.x * dt, this.combatant.velocity.z * dt, abilityMgr);
 
     if (this.reactionTimer > 0) {
@@ -467,48 +573,86 @@ export class BotController {
       return;
     }
 
-    // Tactical abilities across all 4 agents
-    if (this.abilityCooldown <= 0 && Math.random() < 0.22) {
-      this.abilityCooldown = 14;
+    // Smart multi-agent tactical abilities
+    if (this.abilityCooldown <= 0 && this.difficulty !== 'EASY') {
+      this.abilityCooldown = this.difficulty === 'HARD' ? 9.5 : 13.5;
       if (this.combatant.agentId === 'ZEPHYR') {
-        abilityMgr.deploySmoke(
-          this.combatant.position.x + dirX * Math.min(flatDist * 0.5, 10),
-          0,
-          this.combatant.position.z + dirZ * Math.min(flatDist * 0.5, 10)
-        );
-      } else if (this.combatant.agentId === 'LUMEN' && this.combatant.hp < 72) {
-        this.combatant.hp = Math.min(100, this.combatant.hp + 35);
-      } else if (this.combatant.agentId === 'BASTION' && lowHp) {
-        const bx = this.combatant.position.x + dirX * 2.2;
-        const bz = this.combatant.position.z + dirZ * 2.2;
-        abilityMgr.deployBarrier(bx, 0, bz, this.combatant.yaw);
+        if (lowHp) {
+          abilityMgr.deploySmoke(
+            this.combatant.position.x + dirX * Math.min(flatDist * 0.45, 7),
+            0,
+            this.combatant.position.z + dirZ * Math.min(flatDist * 0.45, 7)
+          );
+        } else if (flatDist < 18) {
+          abilityMgr.deployZone('TOXIN', target.position.x, target.position.z, 3.6, 6.0, this.combatant.team);
+        }
+      } else if (this.combatant.agentId === 'LUMEN') {
+        if (this.combatant.hp < 70) {
+          this.combatant.hp = Math.min(100, this.combatant.hp + 45);
+          soundEnginePlaySafe(abilityMgr, this.combatant, allCombatants);
+        } else {
+          abilityMgr.triggerReconPulse(this.combatant.position.x, 0, this.combatant.position.z, this.combatant.team, allCombatants);
+        }
+      } else if (this.combatant.agentId === 'BASTION') {
+        if (lowHp) {
+          abilityMgr.deployBarrier(
+            this.combatant.position.x + dirX * 2.1,
+            0,
+            this.combatant.position.z + dirZ * 2.1,
+            this.combatant.yaw
+          );
+        } else if (flatDist < 24) {
+          abilityMgr.deployTurret(
+            this.combatant.position.x + dirX * 1.8,
+            this.combatant.position.z + dirZ * 1.8,
+            this.combatant.yaw,
+            this.combatant.team
+          );
+        }
       } else if (this.combatant.agentId === 'BLITZ' && flatDist < 22) {
-        this.strafeSwapTimer = 0.2;
-        this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.2, dirX * this.strafeSign * 2.2, abilityMgr);
+        if (Math.random() < 0.5) {
+          abilityMgr.throwFlashOrb(
+            this.combatant.position.x,
+            this.combatant.position.y + 1.4,
+            this.combatant.position.z,
+            _toEnemy.clone().normalize(),
+            this.combatant.team
+          );
+        }
+        this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.5, dirX * this.strafeSign * 2.5, abilityMgr);
       }
     }
 
-    // Smart sidearm fallback when primary mag is empty up close
+    // Melee slash execution if wielding Hollow Blade
+    if (this.combatant.weapon.isMelee) {
+      if (flatDist <= (this.combatant.weapon.range ?? 2.8) + 0.3 && this.combatant.shootCooldown <= 0) {
+        this.combatant.shootCooldown = 1 / this.combatant.weapon.fireRate;
+        this.combatant.modelPackage.triggerMuzzleFlash();
+        _aimDir.copy(_toEnemy).normalize();
+        fireBulletCallback(this.combatant, _aimDir);
+      }
+      return;
+    }
+
+    // Smart weapon fallback when mag empties
     if (this.combatant.ammoInMag <= 0) {
-      if (
-        this.combatant.activeSlot === 1 &&
-        flatDist < 16 &&
-        this.combatant.sidearmAmmoInMag > 0
-      ) {
-        this.combatant.primaryAmmoInMag = 0;
-        this.combatant.primaryReserveAmmo = this.combatant.reserveAmmo;
-        this.combatant.activeSlot = 2;
-        this.combatant.weapon = this.combatant.sidearmWeapon;
-        this.combatant.ammoInMag = this.combatant.sidearmAmmoInMag;
-        this.combatant.reserveAmmo = this.combatant.sidearmReserveAmmo;
-        this.combatant.reloadTimer = 0;
-        this.combatant.modelPackage.setWeapon(this.combatant.weapon.id);
-        this.burstShotsFired = 0;
+      if (this.combatant.activeSlot === 1 && flatDist < 18 && this.combatant.sidearmAmmoInMag > 0) {
+        this.switchBotSlot(2);
         return;
       }
 
       if (this.combatant.reloadTimer <= 0 && this.combatant.reserveAmmo > 0) {
         this.combatant.reloadTimer = this.combatant.weapon.reloadTime;
+        return;
+      }
+
+      // Completely out of ammo -> draw Hollow Blade and charge!
+      if (this.combatant.reserveAmmo <= 0) {
+        if (this.combatant.activeSlot === 2 && this.combatant.primaryWeapon && this.combatant.primaryAmmoInMag > 0) {
+          this.switchBotSlot(1);
+        } else {
+          this.switchBotSlot(3);
+        }
       }
       return;
     }
@@ -523,11 +667,9 @@ export class BotController {
       this.burstShotsFired++;
       this.combatant.modelPackage.triggerMuzzleFlash();
 
-      // Use actual facing vector blended with distance/burst-scaled human scatter (not pure laser _toEnemy!)
       _aimDir.copy(_toEnemy).normalize();
 
       const yawJitter = (Math.random() - 0.5) * 2 * aimSol.spreadYaw;
-      // Downward-biased vertical jitter at range so bots hit torso/body or miss rather than beaming heads
       const pitchJitter =
         -Math.random() * aimSol.spreadPitchDown + Math.random() * aimSol.spreadPitchUp;
 
@@ -558,26 +700,21 @@ export class BotController {
   ): void {
     // Out-of-combat smart reload
     if (
+      !this.combatant.weapon.isMelee &&
       this.combatant.reloadTimer <= 0 &&
       this.combatant.reserveAmmo > 0 &&
-      this.combatant.ammoInMag < Math.ceil(this.combatant.weapon.magazineSize * 0.45)
+      this.combatant.ammoInMag < Math.ceil(this.combatant.weapon.magazineSize * 0.5)
     ) {
       this.combatant.reloadTimer = this.combatant.weapon.reloadTime;
     }
 
-    // Switch back to primary when out of duel and reloaded
+    // Switch back to primary rifle/SMG when safe
     if (
-      this.combatant.activeSlot === 2 &&
+      this.combatant.activeSlot !== 1 &&
       this.combatant.primaryWeapon &&
       (this.combatant.primaryAmmoInMag > 0 || this.combatant.primaryReserveAmmo > 0)
     ) {
-      this.combatant.sidearmAmmoInMag = this.combatant.ammoInMag;
-      this.combatant.sidearmReserveAmmo = this.combatant.reserveAmmo;
-      this.combatant.activeSlot = 1;
-      this.combatant.weapon = this.combatant.primaryWeapon;
-      this.combatant.ammoInMag = this.combatant.primaryAmmoInMag;
-      this.combatant.reserveAmmo = this.combatant.primaryReserveAmmo;
-      this.combatant.modelPackage.setWeapon(this.combatant.weapon.id);
+      this.switchBotSlot(1);
     }
 
     const isAttacker = this.combatant.team === 'ATTACKERS';
@@ -605,7 +742,7 @@ export class BotController {
     }
 
     if (this.currentPath.length === 0 || this.currentPathIndex >= this.currentPath.length) {
-      this.planRound(spikeState === 'planted', plantedSite);
+      this.planRound(spikeState === 'planted', plantedSite, Math.random() < 0.5 ? 'A' : 'B');
       return;
     }
 
@@ -613,17 +750,17 @@ export class BotController {
     _targetPos.set(nextNode.x, 0, nextNode.z);
     const distToNode = this.combatant.position.distanceTo(_targetPos);
 
-    if (distToNode < 1.6) {
+    if (distToNode < 1.7) {
       this.currentPathIndex++;
       this.stuckTimer = 0;
       if (this.currentPathIndex >= this.currentPath.length) {
         this.state = 'HOLDING_ANGLE';
-        this.angleHoldTimer = 1.8 + Math.random() * 2.5;
+        this.angleHoldTimer = 1.6 + Math.random() * 2.0;
         return;
       }
     }
 
-    // Stuck detection & automatic detour/repath
+    // Stuck detection & automatic obstacle-aware detour
     if (!this.progressInit) {
       this.lastProgressPos.copy(this.combatant.position);
       this.progressInit = true;
@@ -635,15 +772,14 @@ export class BotController {
         this.stuckTimer = 0;
       } else {
         this.stuckTimer += dt;
-        if (this.stuckTimer > 0.85) {
+        if (this.stuckTimer > 0.75) {
           this.stuckTimer = 0;
-          this.detourTimer = 0.65;
+          this.detourTimer = 0.7;
           this.detourSign *= -1;
-          // Advance or replan if wedged
           if (this.currentPathIndex + 1 < this.currentPath.length) {
             this.currentPathIndex++;
           } else {
-            this.planRound(spikeState === 'planted', plantedSite);
+            this.planRound(spikeState === 'planted', plantedSite, Math.random() < 0.5 ? 'A' : 'B');
           }
         }
       }
@@ -654,17 +790,16 @@ export class BotController {
 
     if (this.detourTimer > 0) {
       this.detourTimer -= dt;
-      // Steer 55 degrees laterally to walk cleanly around obstacle
       const mx = _moveDir.x;
       const mz = _moveDir.z;
-      _moveDir.set(mx * 0.55 - mz * 0.83 * this.detourSign, 0, mz * 0.55 + mx * 0.83 * this.detourSign).normalize();
+      _moveDir.set(mx * 0.5 - mz * 0.86 * this.detourSign, 0, mz * 0.5 + mx * 0.86 * this.detourSign).normalize();
     }
 
-    const moveSpeed = 4.9 * speedMultiplier;
+    const moveSpeed = 5.1 * speedMultiplier;
     this.combatant.velocity.set(_moveDir.x * moveSpeed, 0, _moveDir.z * moveSpeed);
 
     const desiredYaw = Math.atan2(-_moveDir.x, -_moveDir.z);
-    this.combatant.yaw = dampAngle(this.combatant.yaw, desiredYaw, 10, dt);
+    this.combatant.yaw = dampAngle(this.combatant.yaw, desiredYaw, 11, dt);
 
     this.tryMoveWithSlide(this.combatant.velocity.x * dt, this.combatant.velocity.z * dt, abilityMgr);
   }
@@ -698,13 +833,12 @@ export class BotController {
 
   private executeHoldAngle(dt: number): void {
     this.combatant.velocity.set(0, 0, 0);
-    // Keep pre-aiming toward last known enemy position if remembered
     if (this.lastSeenPos && this.memoryTimer > 0) {
       const dx = this.lastSeenPos.x - this.combatant.position.x;
       const dz = this.lastSeenPos.z - this.combatant.position.z;
       if (dx * dx + dz * dz > 0.25) {
         const aimYaw = Math.atan2(-dx, -dz);
-        this.combatant.yaw = dampAngle(this.combatant.yaw, aimYaw, 8, dt);
+        this.combatant.yaw = dampAngle(this.combatant.yaw, aimYaw, 9, dt);
       }
     }
     this.angleHoldTimer -= dt;
@@ -714,3 +848,14 @@ export class BotController {
   }
 }
 
+function soundEnginePlaySafe(
+  _abilityMgr: AbilityManager,
+  caster: BotCombatant,
+  allCombatants: BotCombatant[]
+) {
+  for (const ally of allCombatants) {
+    if (ally.alive && ally.team === caster.team && ally.id !== caster.id && ally.position.distanceTo(caster.position) < 12) {
+      ally.hp = Math.min(100, ally.hp + 25);
+    }
+  }
+}

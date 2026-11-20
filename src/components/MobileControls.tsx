@@ -1,10 +1,25 @@
 /**
  * Hollow Strike - Mobile Virtual Controls
- * Reads customizable TouchControlLayout coordinates and per-control scale/visibility,
- * with Pointer Events + Pointer Capture for responsive multi-touch aim, movement, and abilities.
+ * Uses crisp tactical Lucide icons for all touch combat controls, supports 1 -> 2 -> 3 (Hollow Blade)
+ * cycling, custom touch coordinate layout mapping, and multi-touch pointer capture.
  */
 
 import React, { useRef, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  BarChart2,
+  Bomb,
+  Crosshair,
+  Focus,
+  Map as MapIcon,
+  Pause,
+  Repeat,
+  RotateCw,
+  Settings,
+  ShoppingBag,
+  Swords,
+} from 'lucide-react';
 import { InputManager } from '../game/inputManager';
 import { normalizeTouchLayout } from '../game/rules';
 import {
@@ -22,8 +37,8 @@ interface MobileControlsProps {
   settings: GameSettings;
   roundPhase: RoundPhase;
   hasPrimaryWeapon: boolean;
-  activeSlot: 1 | 2;
-  onSwitchWeapon: (slot: 1 | 2) => void;
+  activeSlot: 1 | 2 | 3;
+  onSwitchWeapon: (slot: 1 | 2 | 3) => void;
   onSkipBuyPhase: () => void;
   onOpenBuyMenu: () => void;
   onOpenMap: () => void;
@@ -86,6 +101,15 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
     };
   };
 
+  const getNextWeaponSlot = (): 1 | 2 | 3 => {
+    if (hasPrimaryWeapon) {
+      if (activeSlot === 1) return 2;
+      if (activeSlot === 2) return 3;
+      return 1;
+    }
+    return activeSlot === 2 ? 3 : 2;
+  };
+
   // Joystick Pointer Event Handlers
   const handleJoystickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -133,7 +157,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
     input.setMobileMove(-dy / maxRadius, dx / maxRadius);
   };
 
-  // Full background Swipe Look Surface (supports Left-Handed & Custom Claw layouts cleanly!)
+  // Swipe Look Surface
   const handleLookPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (lookPointerId.current !== null) return;
     lookPointerId.current = e.pointerId;
@@ -220,9 +244,9 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   onPointerMove={handleJoystickPointerMove}
                   onPointerUp={handleJoystickPointerUp}
                   onPointerCancel={handleJoystickPointerUp}
-                  className="relative flex h-32 w-32 items-center justify-center rounded-full border-2 border-[#ECE8E1]/25 bg-[#0F1923]/80 touch-none shadow-2xl"
+                  className="relative flex h-32 w-32 items-center justify-center rounded-full border-2 border-[#ECE8E1]/25 bg-[#0F1923]/82 touch-none shadow-2xl"
                 >
-                  <div className="absolute h-full w-full rounded-full border border-[#17E5B8]/30" />
+                  <div className="absolute h-full w-full rounded-full border border-[#17E5B8]/35" />
                   <div className="absolute top-2 h-2.5 w-0.5 bg-[#17E5B8]" />
                   <div className="absolute bottom-2 h-2.5 w-0.5 bg-[#17E5B8]" />
                   <div className="absolute left-2 h-0.5 w-2.5 bg-[#17E5B8]" />
@@ -244,19 +268,27 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             {layout.fire.visible && (
               <button
                 type="button"
+                aria-label="Fire Weapon"
                 data-testid="touch-ctrl-fire"
                 onPointerDown={handleFirePointerDown}
                 onPointerMove={handleFirePointerMove}
                 onPointerUp={handleFirePointerUp}
                 onPointerCancel={handleFirePointerUp}
                 style={getSlotStyle('fire')}
-                className={`pointer-events-auto absolute z-40 flex h-19 w-19 items-center justify-center rounded-full border-2 text-xs font-mono font-black uppercase tracking-widest text-[#ECE8E1] shadow-2xl transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-19 w-19 flex-col items-center justify-center gap-0.5 rounded-full border-2 text-[#ECE8E1] shadow-2xl transition cursor-pointer touch-none ${
                   fireActive
                     ? 'border-[#ECE8E1] bg-[#FF4655] scale-95 shadow-[#FF4655]/50'
-                    : 'border-[#FF4655] bg-[#FF4655]/90 shadow-[#FF4655]/35'
+                    : 'border-[#FF4655] bg-[#FF4655]/92 shadow-[#FF4655]/35'
                 }`}
               >
-                FIRE
+                {activeSlot === 3 ? (
+                  <Swords className="h-7 w-7 stroke-[2.2]" />
+                ) : (
+                  <Crosshair className="h-7 w-7 stroke-[2.2]" />
+                )}
+                <span className="font-mono text-[8px] font-black uppercase tracking-widest leading-none">
+                  {activeSlot === 3 ? 'SLASH' : 'FIRE'}
+                </span>
               </button>
             )}
 
@@ -264,15 +296,17 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             {layout.jump.visible && (
               <button
                 type="button"
+                aria-label="Jump"
                 data-testid="touch-ctrl-jump"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   input.triggerMobileJump();
                 }}
                 style={getSlotStyle('jump')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/92 text-[11px] font-mono font-bold uppercase text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 flex-col items-center justify-center gap-0.5 clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/94 text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
               >
-                JUMP
+                <ArrowUp className="h-5 w-5 text-[#17E5B8] stroke-[2.4]" />
+                <span className="font-mono text-[8px] font-bold uppercase tracking-wider leading-none">JUMP</span>
               </button>
             )}
 
@@ -280,22 +314,25 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             {layout.reload.visible && (
               <button
                 type="button"
+                aria-label="Reload Weapon"
                 data-testid="touch-ctrl-reload"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   input.triggerMobileReload();
                 }}
                 style={getSlotStyle('reload')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/92 text-[10px] font-mono font-bold uppercase text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className="pointer-events-auto absolute z-40 flex h-13.5 w-13.5 flex-col items-center justify-center gap-0.5 clip-val-card border border-[#ECE8E1]/25 bg-[#18232E]/94 text-[#ECE8E1] shadow-xl active:scale-95 transition cursor-pointer touch-none"
               >
-                RELOAD
+                <RotateCw className="h-4.5 w-4.5 stroke-[2.2]" />
+                <span className="font-mono text-[8px] font-bold uppercase tracking-wider leading-none">RELOAD</span>
               </button>
             )}
 
-            {/* ADS */}
+            {/* ADS / Scope */}
             {layout.ads.visible && (
               <button
                 type="button"
+                aria-label="Aim Down Sights"
                 data-testid="touch-ctrl-ads"
                 onPointerDown={(e) => {
                   e.stopPropagation();
@@ -304,13 +341,14 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobileADS(next);
                 }}
                 style={getSlotStyle('ads')}
-                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border text-[11px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 flex-col items-center justify-center gap-0.5 clip-val-card border shadow-xl active:scale-95 transition cursor-pointer touch-none ${
                   adsActive
                     ? 'border-[#17E5B8] bg-[#17E5B8] text-[#0F1923] font-black'
-                    : 'border-[#ECE8E1]/25 bg-[#18232E]/92 text-[#ECE8E1]'
+                    : 'border-[#ECE8E1]/25 bg-[#18232E]/94 text-[#ECE8E1]'
                 }`}
               >
-                ADS
+                <Focus className="h-5 w-5 stroke-[2.2]" />
+                <span className="font-mono text-[8px] font-bold uppercase tracking-wider leading-none">SCOPE</span>
               </button>
             )}
 
@@ -318,6 +356,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             {layout.crouch.visible && (
               <button
                 type="button"
+                aria-label="Crouch"
                 data-testid="touch-ctrl-crouch"
                 onPointerDown={(e) => {
                   e.stopPropagation();
@@ -326,29 +365,42 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobileCrouch(next);
                 }}
                 style={getSlotStyle('crouch')}
-                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 items-center justify-center clip-val-card border text-[10px] font-mono font-bold uppercase shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-13.5 w-13.5 flex-col items-center justify-center gap-0.5 clip-val-card border shadow-xl active:scale-95 transition cursor-pointer touch-none ${
                   crouchActive
                     ? 'border-[#17E5B8] bg-[#17E5B8] text-[#0F1923] font-black'
-                    : 'border-[#ECE8E1]/25 bg-[#18232E]/92 text-[#ECE8E1]'
+                    : 'border-[#ECE8E1]/25 bg-[#18232E]/94 text-[#ECE8E1]'
                 }`}
               >
-                CROUCH
+                <ArrowDown className="h-5 w-5 stroke-[2.4]" />
+                <span className="font-mono text-[8px] font-bold uppercase tracking-wider leading-none">CROUCH</span>
               </button>
             )}
 
-            {/* Weapon Swap */}
-            {hasPrimaryWeapon && layout.weaponSwap.visible && (
+            {/* Weapon Swap (Cycles 1 -> 2 -> 3 Hollow Blade) */}
+            {layout.weaponSwap.visible && (
               <button
                 type="button"
+                aria-label="Switch Weapon or Hollow Blade"
                 data-testid="touch-ctrl-weaponSwap"
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  onSwitchWeapon(activeSlot === 1 ? 2 : 1);
+                  onSwitchWeapon(getNextWeaponSlot());
                 }}
                 style={getSlotStyle('weaponSwap')}
-                className="pointer-events-auto absolute z-40 flex h-13.5 w-15 items-center justify-center clip-val-card border border-[#17E5B8]/60 bg-[#18232E]/92 text-[10px] font-mono font-black uppercase text-[#17E5B8] shadow-xl active:scale-95 transition cursor-pointer touch-none"
+                className={`pointer-events-auto absolute z-40 flex h-13.5 w-15 flex-col items-center justify-center gap-0.5 clip-val-card border shadow-xl active:scale-95 transition cursor-pointer touch-none ${
+                  activeSlot === 3
+                    ? 'border-[#FF4655] bg-[#FF4655]/25 text-[#FF4655]'
+                    : 'border-[#17E5B8]/60 bg-[#18232E]/94 text-[#17E5B8]'
+                }`}
               >
-                {activeSlot === 1 ? 'SIDEARM' : 'PRIMARY'}
+                {activeSlot === 3 ? (
+                  <Swords className="h-4.5 w-4.5 stroke-[2.2]" />
+                ) : (
+                  <Repeat className="h-4.5 w-4.5 stroke-[2.2]" />
+                )}
+                <span className="font-mono text-[8px] font-black uppercase tracking-wider leading-none">
+                  {activeSlot === 1 ? 'SIDEARM' : activeSlot === 2 ? 'BLADE' : hasPrimaryWeapon ? 'PRIMARY' : 'PISTOL'}
+                </span>
               </button>
             )}
 
@@ -356,6 +408,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             {canPlantOrDefuse && layout.plantDefuse.visible && (
               <button
                 type="button"
+                aria-label="Plant or Defuse Spike"
                 data-testid="touch-ctrl-plantDefuse"
                 onPointerDown={(e) => {
                   e.stopPropagation();
@@ -370,13 +423,16 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   input.setMobilePlantDefuse(false);
                 }}
                 style={getSlotStyle('plantDefuse')}
-                className={`pointer-events-auto absolute z-40 h-15 w-18 clip-val-card border-2 text-[10px] font-mono font-black uppercase tracking-wider shadow-2xl active:scale-95 transition cursor-pointer touch-none ${
+                className={`pointer-events-auto absolute z-40 flex h-15 w-17 flex-col items-center justify-center gap-0.5 clip-val-card border-2 shadow-2xl active:scale-95 transition cursor-pointer touch-none ${
                   isPlantingOrDefusing
                     ? 'border-[#ECE8E1] bg-[#FF4655] text-[#ECE8E1]'
                     : 'border-[#fbbf24] bg-[#fbbf24] text-[#0F1923]'
                 }`}
               >
-                PLANT / DEFUSE
+                <Bomb className="h-5 w-5 stroke-[2.2]" />
+                <span className="font-mono text-[8px] font-black uppercase tracking-wider leading-none">
+                  {isPlantingOrDefusing ? 'HOLD...' : 'SPIKE'}
+                </span>
               </button>
             )}
 
@@ -395,6 +451,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                 <button
                   key={ab.id}
                   type="button"
+                  aria-label={`Ability ${ab.keySlot} ${ab.name}`}
                   data-testid={`touch-ctrl-${slotId}`}
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -411,7 +468,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                       ? 'border-[#ECE8E1]/10 bg-[#0F1923]/80 text-[#8B978F]'
                       : ab.isUltimate
                         ? 'border-[#FF4655] bg-[#FF4655] text-[#ECE8E1] shadow-[#FF4655]/30'
-                        : 'bg-[#18232E]/92 text-[#ECE8E1]'
+                        : 'bg-[#18232E]/94 text-[#ECE8E1]'
                   }`}
                 >
                   <span>{ab.keySlot}</span>
@@ -447,61 +504,59 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             }}
             className="flex min-h-11 items-center gap-1 border border-[#17E5B8]/60 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-black uppercase text-[#17E5B8] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
-            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            <span>SET</span>
+            <Settings className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">SET</span>
           </button>
 
           {!isSpectating && (
             <button
               type="button"
+              aria-label="Open Shop"
               onPointerDown={(e) => {
                 e.stopPropagation();
                 onOpenBuyMenu();
               }}
-              className="min-h-11 border border-[#fbbf24]/60 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#fbbf24] shadow-lg active:scale-95 transition cursor-pointer touch-none"
+              className="flex min-h-11 items-center gap-1 border border-[#fbbf24]/60 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#fbbf24] shadow-lg active:scale-95 transition cursor-pointer touch-none"
             >
-              SHOP
+              <ShoppingBag className="h-4 w-4 shrink-0" />
+              <span>SHOP</span>
             </button>
           )}
 
           <button
             type="button"
+            aria-label="Tactical Map"
             onPointerDown={(e) => {
               e.stopPropagation();
               onOpenMap();
             }}
-            className="min-h-11 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="flex min-h-11 items-center gap-1 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
-            MAP
+            <MapIcon className="h-4 w-4 shrink-0" />
           </button>
 
           <button
             type="button"
+            aria-label="Scoreboard"
             onPointerDown={(e) => {
               e.stopPropagation();
               onOpenScoreboard();
             }}
-            className="min-h-11 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="flex min-h-11 items-center gap-1 border border-[#ECE8E1]/20 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
-            TAB
+            <BarChart2 className="h-4 w-4 shrink-0" />
           </button>
 
           <button
             type="button"
+            aria-label="Pause Match"
             onPointerDown={(e) => {
               e.stopPropagation();
               onOpenPause();
             }}
-            className="min-h-11 border border-[#FF4655]/50 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#FF4655] shadow-lg active:scale-95 transition cursor-pointer touch-none"
+            className="flex min-h-11 items-center gap-1 border border-[#FF4655]/50 bg-[#18232E]/95 px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#FF4655] shadow-lg active:scale-95 transition cursor-pointer touch-none"
           >
-            PAUSE
+            <Pause className="h-4 w-4 shrink-0" />
           </button>
         </div>
       </div>

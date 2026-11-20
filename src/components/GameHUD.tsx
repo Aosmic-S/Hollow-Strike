@@ -1,7 +1,7 @@
 /**
  * Hollow Strike - In-Game Tactical HUD
  * Displays minimap, score banner, kill feed, crisp X-hitmarker + damage readout,
- * interactive abilities bar with live charges/cooldowns, and weapon/ammo controls.
+ * interactive abilities bar with live charges/cooldowns, and 3-slot weapon controls (Primary, Sidearm, Hollow Blade).
  */
 
 import React from 'react';
@@ -34,7 +34,7 @@ interface GameHUDProps {
   ammoInMag: number;
   reserveAmmo: number;
   isReloading: boolean;
-  activeSlot: 1 | 2;
+  activeSlot: 1 | 2 | 3;
   hasPrimaryWeapon: boolean;
   hp: number;
   armor: number;
@@ -65,7 +65,7 @@ interface GameHUDProps {
   showFps: boolean;
   spectateState?: SpectateState | null;
   onTriggerAbility: (slot: 'Q' | 'E' | 'C' | 'X') => void;
-  onSwitchWeapon: (slot: 1 | 2) => void;
+  onSwitchWeapon: (slot: 1 | 2 | 3) => void;
   onSkipBuyPhase: () => void;
   onOpenBuyMenu: () => void;
   onOpenMap: () => void;
@@ -252,7 +252,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           {/* Buy Phase Banner with Skip Button */}
           {roundPhase === 'BUY_PHASE' && (
             <div className="pointer-events-auto relative z-40 mt-1 flex items-center gap-1.5 sm:gap-2 border border-[#FF4655]/50 bg-[#18232E]/95 px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] font-mono text-[#ECE8E1] shadow-lg clip-val-card">
-              {!isMobile && <span className="hidden md:inline text-[#8B978F]">BUY PHASE · WEAPONS LOCKED BEHIND BARRIER</span>}
+              {!isMobile && <span className="hidden md:inline text-[#8B978F]">BUY PHASE · BARRIER UP</span>}
               {isMobile && <span>BUY</span>}
               <button
                 onClick={onOpenBuyMenu}
@@ -520,8 +520,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </span>
           <div className="h-4 w-px bg-[#ECE8E1]/15" />
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[10px] font-bold uppercase text-[#ECE8E1] max-w-[74px] truncate">{weapon.name}</span>
-            {isReloading ? (
+            <span className="text-[10px] font-bold uppercase text-[#ECE8E1] max-w-[82px] truncate">{weapon.name}</span>
+            {weapon.isMelee ? (
+              <span className="text-[10px] font-black text-[#17E5B8] uppercase">BLADE</span>
+            ) : isReloading ? (
               <span className="text-[10px] font-bold text-[#FF4655] uppercase animate-pulse">RLD</span>
             ) : (
               <span className={`text-sm font-black tabular-nums leading-none ${ammoInMag <= 4 ? 'text-[#FF4655]' : 'text-[#ECE8E1]'}`}>
@@ -626,10 +628,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             })}
           </div>
 
-          {/* Right: Weapon & Ammo Readout + Quick Slot Switch */}
+          {/* Right: Weapon & Ammo Readout + 3-Slot Quick Switch */}
           <div className="pointer-events-auto flex items-center gap-3 sm:gap-4 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-2.5 sm:p-3 shadow-2xl clip-val-card">
-            {hasPrimaryWeapon && (
-              <div className="hidden sm:flex flex-col gap-1 border-r border-[#ECE8E1]/15 pr-3 font-mono text-[10px]">
+            <div className="hidden sm:flex flex-col gap-0.5 border-r border-[#ECE8E1]/15 pr-3 font-mono text-[9px]">
+              {hasPrimaryWeapon && (
                 <button
                   onClick={() => onSwitchWeapon(1)}
                   className={`px-1.5 py-0.5 text-left font-bold cursor-pointer ${
@@ -640,28 +642,45 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 >
                   [1] PRIMARY
                 </button>
-                <button
-                  onClick={() => onSwitchWeapon(2)}
-                  className={`px-1.5 py-0.5 text-left font-bold cursor-pointer ${
-                    activeSlot === 2
-                      ? 'bg-[#FF4655]/20 text-[#ECE8E1] border border-[#FF4655]/60'
-                      : 'text-[#8B978F] hover:text-[#ECE8E1]'
-                  }`}
-                >
-                  [2] SIDEARM
-                </button>
-              </div>
-            )}
+              )}
+              <button
+                onClick={() => onSwitchWeapon(2)}
+                className={`px-1.5 py-0.5 text-left font-bold cursor-pointer ${
+                  activeSlot === 2
+                    ? 'bg-[#FF4655]/20 text-[#ECE8E1] border border-[#FF4655]/60'
+                    : 'text-[#8B978F] hover:text-[#ECE8E1]'
+                }`}
+              >
+                [2] SIDEARM
+              </button>
+              <button
+                data-testid="hud-slot-3-blade"
+                onClick={() => onSwitchWeapon(3)}
+                className={`px-1.5 py-0.5 text-left font-bold cursor-pointer ${
+                  activeSlot === 3
+                    ? 'bg-[#17E5B8]/20 text-[#17E5B8] border border-[#17E5B8]/60'
+                    : 'text-[#8B978F] hover:text-[#ECE8E1]'
+                }`}
+              >
+                [3] BLADE
+              </button>
+            </div>
 
             <div className="text-right">
-              <div className="text-[9px] sm:text-[10px] font-mono uppercase text-[#8B978F]">{weapon.category}</div>
+              <div className="text-[9px] sm:text-[10px] font-mono uppercase text-[#8B978F]">
+                {weapon.category.replace('_', ' ')}
+              </div>
               <div className="font-display font-extrabold uppercase tracking-wide text-sm sm:text-lg text-[#ECE8E1]">
                 {weapon.name}
               </div>
             </div>
 
             <div className="border-l border-[#ECE8E1]/15 pl-3 sm:pl-4 text-right">
-              {isReloading ? (
+              {weapon.isMelee ? (
+                <span className="font-mono text-xs sm:text-sm font-black text-[#17E5B8] uppercase">
+                  READY · ∞
+                </span>
+              ) : isReloading ? (
                 <span className="font-mono text-xs sm:text-sm font-bold text-[#FF4655] uppercase animate-pulse">
                   RELOAD...
                 </span>

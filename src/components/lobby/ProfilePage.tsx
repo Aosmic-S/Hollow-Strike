@@ -87,7 +87,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             {[
               { level: 1, title: 'Recruit Starter Kit', desc: 'Default agents & standard loadout' },
               { level: 3, title: 'Tactical Operator Skin', desc: 'Custom combat fatigues & insignia' },
-              { level: 6, title: 'Vanguard Weapon Finish', desc: 'Ion cobalt finish for Apex-9 & Viper-9' },
+              { level: 6, title: 'Vanguard Weapon Finish', desc: 'Ion cobalt finish for Kadence & Reaper' },
               { level: 10, title: 'Phantom Elite Badge', desc: 'Exclusive operator emblem & title' },
             ].map((item) => {
               const unlocked = rank.level >= item.level;

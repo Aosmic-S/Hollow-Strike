@@ -252,7 +252,7 @@ export function createAgentModel(agent: AgentDef, team: TeamSide): AgentMeshPack
     weaponHolder.add(currentWeaponMesh);
   }
 
-  setWeapon('APEX_9');
+  setWeapon('KADENCE');
 
   function triggerMuzzleFlash() {
     flashTimer = 0.055;

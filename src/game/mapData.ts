@@ -1,6 +1,7 @@
 /**
- * Hollow Strike - Map Data & Waypoint Navigation Graph
- * Defines geometric bounds, bomb site radii, collision boxes, and bot waypoints.
+ * Hollow Strike - Map Data, Dynamic Wall Colliders & Waypoint Navigation Graph
+ * Coordinates calibrated for open courtyards around House1 (SE) & House2 (NW) in japan_map.glb
+ * plus real-time extracted 3D mesh wall colliders so no player or bot can walk through walls.
  */
 
 export interface MapAABB {
@@ -21,42 +22,52 @@ export interface NavNode {
   neighbors: string[];
 }
 
-export const BOMB_SITE_A = { x: -22, y: 0, z: -18, radius: 5.5, name: 'Site A' };
-export const BOMB_SITE_B = { x: 22, y: 0, z: -18, radius: 5.5, name: 'Site B' };
+// Calibrated directly to Site_A_1 / Site_B_1 pads and Markers_1 / Markers_2 in valorant_style_map_v2
+export const BOMB_SITE_A = { x: -24.7, y: 0, z: -16.3, radius: 6.2, name: 'Site A' };
+export const BOMB_SITE_B = { x: 24.7, y: 0, z: -16.3, radius: 6.2, name: 'Site B' };
 
-export const SPAWN_ATTACKERS = { x: 0, y: 0, z: 36 };
-export const SPAWN_DEFENDERS = { x: 0, y: 0, z: -38 };
+export const SPAWN_ATTACKERS = { x: 0, y: 0, z: 41 };
+export const SPAWN_DEFENDERS = { x: 0, y: 0, z: -20 };
 
-// Static Collision Boxes (AABBs) for player/bot physical obstruction.
-// Outer perimeter walls bound the arena; every interior collider is rendered visibly as tactical cover.
+// Safety outer boundary perimeter walls (-62..+62) + dynamic mode flag
 export const MAP_COLLIDERS: MapAABB[] = [
-  // Outer perimeter boundary walls (visible dark architectural perimeter walls)
-  { minX: -42, maxX: 42, minY: 0, maxY: 5.5, minZ: 44, maxZ: 46 }, // South outer
-  { minX: -42, maxX: 42, minY: 0, maxY: 5.5, minZ: -46, maxZ: -44 }, // North outer
-  { minX: -44, maxX: -42, minY: 0, maxY: 5.5, minZ: -46, maxZ: 46 }, // West outer
-  { minX: 42, maxX: 44, minY: 0, maxY: 5.5, minZ: -46, maxZ: 46 }, // East outer
-
-  // Mid courtyard flanking tactical cover crates (open center sightline preserved!)
-  { minX: -12, maxX: -9, minY: 0, maxY: 1.5, minZ: 10, maxZ: 13 },
-  { minX: 9, maxX: 12, minY: 0, maxY: 1.5, minZ: 10, maxZ: 13 },
-  { minX: -3.2, maxX: 3.2, minY: 0, maxY: 1.35, minZ: -1.6, maxZ: 1.6 }, // Mid low shrine cover
-
-  // Site A (West): Elevated reactor structure & tactical crates
-  { minX: -26, maxX: -18, minY: 0, maxY: 1.1, minZ: -22, maxZ: -14 }, // A Platform
-  { minX: -24, maxX: -21, minY: 1.1, maxY: 3.4, minZ: -20, maxZ: -17 }, // Reactor core
-  { minX: -30, maxX: -27.5, minY: 0, maxY: 2.0, minZ: -14, maxZ: -11 }, // A Long Corner crate
-  { minX: -14.5, maxX: -12, minY: 0, maxY: 1.8, minZ: -22, maxZ: -19 }, // A Connector crate
-
-  // Site B (East): Tech pillars & defensive barriers
-  { minX: 18, maxX: 20.5, minY: 0, maxY: 3.6, minZ: -22, maxZ: -19.5 }, // Pillar 1
-  { minX: 25.5, maxX: 28, minY: 0, maxY: 3.6, minZ: -18, maxZ: -15.5 }, // Pillar 2
-  { minX: 19.5, maxX: 24, minY: 0, maxY: 1.5, minZ: -14, maxZ: -12 }, // B Front Barrier
-  { minX: 29, maxX: 31.5, minY: 0, maxY: 2.2, minZ: -22, maxZ: -19 }, // B Back Corner
+  { minX: -63, maxX: 63, minY: 0, maxY: 8, minZ: 61.5, maxZ: 63.5 },   // South outer safety bound
+  { minX: -63, maxX: 63, minY: 0, maxY: 8, minZ: -63.5, maxZ: -61.5 }, // North outer safety bound
+  { minX: -63.5, maxX: -61.5, minY: 0, maxY: 8, minZ: -63, maxZ: 63 }, // West outer safety bound
+  { minX: 61.5, maxX: 63.5, minY: 0, maxY: 8, minZ: -63, maxZ: 63 },   // East outer safety bound
 ];
 
-// Check collision against static map colliders
+let extractedWallColliders: MapAABB[] = [];
+const colliderListeners = new Set<() => void>();
+
+export function setExtractedMapColliders(boxes: MapAABB[]): void {
+  extractedWallColliders = boxes;
+  colliderListeners.forEach((cb) => cb());
+}
+
+export function getExtractedWallColliders(): MapAABB[] {
+  return extractedWallColliders;
+}
+
+export function getActiveMapColliders(): MapAABB[] {
+  if (extractedWallColliders.length === 0) return MAP_COLLIDERS;
+  return [...MAP_COLLIDERS, ...extractedWallColliders];
+}
+
+export function subscribeMapColliders(listener: () => void): () => void {
+  colliderListeners.add(listener);
+  return () => {
+    colliderListeners.delete(listener);
+  };
+}
+
+// Check collision against both base tactical cover and dynamically extracted 3D building walls
 export function checkCollision(x: number, z: number, radius = 0.5): { collided: boolean; normalX: number; normalZ: number } {
-  for (const c of MAP_COLLIDERS) {
+  const all = getActiveMapColliders();
+  for (let i = 0; i < all.length; i++) {
+    const c = all[i];
+    if (c.maxY <= 0.85 && c.minY === 0) continue;
+
     const closestX = Math.max(c.minX, Math.min(x, c.maxX));
     const closestZ = Math.max(c.minZ, Math.min(z, c.maxZ));
 
@@ -76,46 +87,50 @@ export function checkCollision(x: number, z: number, radius = 0.5): { collided: 
   return { collided: false, normalX: 0, normalZ: 0 };
 }
 
-// Full Nav Graph for Bot AI
+export function isPointWalkable(x: number, z: number, radius = 0.45): boolean {
+  return !checkCollision(x, z, radius).collided;
+}
+
+// Full Nav Graph calibrated to verified walkable corridors of valorant_style_map_v2 -> Site A (-24.7,-16.3) & Site B (24.7,-16.3)
 export const NAV_GRAPH: Record<string, NavNode> = {
-  // Attacker Spawn Area
-  att_spawn: { id: 'att_spawn', x: 0, y: 0, z: 36, type: 'spawn_att', neighbors: ['att_left', 'att_mid', 'att_right'] },
-  att_left: { id: 'att_left', x: -20, y: 0, z: 32, type: 'lane_a', neighbors: ['att_spawn', 'a_long_entry'] },
-  att_mid: { id: 'att_mid', x: 0, y: 0, z: 20, type: 'lane_mid', neighbors: ['att_spawn', 'mid_south'] },
-  att_right: { id: 'att_right', x: 20, y: 0, z: 32, type: 'lane_b', neighbors: ['att_spawn', 'b_long_entry'] },
+  // Attacker Spawn Area (South Plaza z=41)
+  att_spawn: { id: 'att_spawn', x: 0, y: 0, z: 41, type: 'spawn_att', neighbors: ['att_left', 'att_mid', 'att_right'] },
+  att_left: { id: 'att_left', x: -10, y: 0, z: 26, type: 'lane_a', neighbors: ['att_spawn', 'a_long_entry'] },
+  att_mid: { id: 'att_mid', x: -2, y: 0, z: 20, type: 'lane_mid', neighbors: ['att_spawn', 'mid_south'] },
+  att_right: { id: 'att_right', x: 10, y: 0, z: 25, type: 'lane_b', neighbors: ['att_spawn', 'b_long_entry'] },
 
-  // A Lane (West)
-  a_long_entry: { id: 'a_long_entry', x: -26, y: 0, z: 22, type: 'lane_a', neighbors: ['att_left', 'a_long_mid'] },
-  a_long_mid: { id: 'a_long_mid', x: -26, y: 0, z: 4, type: 'lane_a', neighbors: ['a_long_entry', 'a_long_corner'] },
-  a_long_corner: { id: 'a_long_corner', x: -24, y: 0, z: -8, type: 'lane_a', neighbors: ['a_long_mid', 'site_a_plant', 'a_connector'] },
+  // A Lane (West Corridor)
+  a_long_entry: { id: 'a_long_entry', x: -14, y: 0, z: 12, type: 'lane_a', neighbors: ['att_left', 'a_long_mid'] },
+  a_long_mid: { id: 'a_long_mid', x: -19, y: 0, z: 2, type: 'lane_a', neighbors: ['a_long_entry', 'a_long_corner', 'a_connector'] },
+  a_long_corner: { id: 'a_long_corner', x: -22, y: 0, z: -8, type: 'lane_a', neighbors: ['a_long_mid', 'site_a_plant'] },
 
-  // B Lane (East)
-  b_long_entry: { id: 'b_long_entry', x: 26, y: 0, z: 22, type: 'lane_b', neighbors: ['att_right', 'b_long_mid'] },
-  b_long_mid: { id: 'b_long_mid', x: 26, y: 0, z: 4, type: 'lane_b', neighbors: ['b_long_entry', 'b_long_corner'] },
-  b_long_corner: { id: 'b_long_corner', x: 24, y: 0, z: -8, type: 'lane_b', neighbors: ['b_long_mid', 'site_b_plant', 'b_connector'] },
+  // B Lane (East Corridor)
+  b_long_entry: { id: 'b_long_entry', x: 15, y: 0, z: 9, type: 'lane_b', neighbors: ['att_right', 'b_long_mid', 'mid_south'] },
+  b_long_mid: { id: 'b_long_mid', x: 22, y: 0, z: 2, type: 'lane_b', neighbors: ['b_long_entry', 'b_long_corner'] },
+  b_long_corner: { id: 'b_long_corner', x: 28, y: 0, z: -7, type: 'lane_b', neighbors: ['b_long_mid', 'site_b_plant', 'b_connector'] },
 
-  // Mid Lane (Center)
-  mid_south: { id: 'mid_south', x: 0, y: 0, z: 12, type: 'lane_mid', neighbors: ['att_mid', 'mid_center'] },
-  mid_center: { id: 'mid_center', x: 0, y: 0, z: 0, type: 'lane_mid', neighbors: ['mid_south', 'mid_north', 'a_connector', 'b_connector'] },
-  mid_north: { id: 'mid_north', x: 0, y: 0, z: -14, type: 'lane_mid', neighbors: ['mid_center', 'def_mid', 'a_connector', 'b_connector'] },
+  // Mid Lane (Center Courtyard & Bridge)
+  mid_south: { id: 'mid_south', x: -2, y: 0, z: 10, type: 'lane_mid', neighbors: ['att_mid', 'b_long_entry', 'mid_center'] },
+  mid_center: { id: 'mid_center', x: -5, y: 0, z: 1, type: 'lane_mid', neighbors: ['mid_south', 'mid_north', 'a_connector', 'b_connector'] },
+  mid_north: { id: 'mid_north', x: -6, y: 0, z: -12, type: 'lane_mid', neighbors: ['mid_center', 'def_mid', 'a_connector'] },
 
   // Connectors
-  a_connector: { id: 'a_connector', x: -10, y: 0, z: -8, type: 'cover', neighbors: ['mid_center', 'mid_north', 'site_a_plant', 'a_long_corner'] },
-  b_connector: { id: 'b_connector', x: 10, y: 0, z: -8, type: 'cover', neighbors: ['mid_center', 'mid_north', 'site_b_plant', 'b_long_corner'] },
+  a_connector: { id: 'a_connector', x: -15, y: 0, z: -6, type: 'cover', neighbors: ['mid_center', 'mid_north', 'a_long_mid', 'site_a_plant'] },
+  b_connector: { id: 'b_connector', x: 16, y: 0, z: 4, type: 'cover', neighbors: ['mid_center', 'b_long_corner', 'def_b'] },
 
-  // Bomb Site A
-  site_a_plant: { id: 'site_a_plant', x: -22, y: 0, z: -18, type: 'site_a', neighbors: ['a_long_corner', 'a_connector', 'site_a_back', 'def_a'] },
-  site_a_back: { id: 'site_a_back', x: -28, y: 0, z: -28, type: 'cover', neighbors: ['site_a_plant', 'def_a'] },
+  // Bomb Site A (West Courtyard)
+  site_a_plant: { id: 'site_a_plant', x: -24.7, y: 0, z: -16.3, type: 'site_a', neighbors: ['a_long_corner', 'a_connector', 'site_a_back'] },
+  site_a_back: { id: 'site_a_back', x: -16, y: 0, z: -22, type: 'cover', neighbors: ['site_a_plant', 'def_a'] },
 
-  // Bomb Site B
-  site_b_plant: { id: 'site_b_plant', x: 22, y: 0, z: -18, type: 'site_b', neighbors: ['b_long_corner', 'b_connector', 'site_b_back', 'def_b'] },
-  site_b_back: { id: 'site_b_back', x: 28, y: 0, z: -28, type: 'cover', neighbors: ['site_b_plant', 'def_b'] },
+  // Bomb Site B (East Courtyard)
+  site_b_plant: { id: 'site_b_plant', x: 24.7, y: 0, z: -16.3, type: 'site_b', neighbors: ['b_long_corner', 'b_connector', 'site_b_back'] },
+  site_b_back: { id: 'site_b_back', x: 18, y: 0, z: -20, type: 'cover', neighbors: ['site_b_plant', 'def_b'] },
 
-  // Defender Spawn & Rotations
-  def_spawn: { id: 'def_spawn', x: 0, y: 0, z: -38, type: 'spawn_def', neighbors: ['def_a', 'def_mid', 'def_b'] },
-  def_a: { id: 'def_a', x: -16, y: 0, z: -32, type: 'cover', neighbors: ['def_spawn', 'site_a_plant', 'site_a_back'] },
-  def_mid: { id: 'def_mid', x: 0, y: 0, z: -24, type: 'cover', neighbors: ['def_spawn', 'mid_north'] },
-  def_b: { id: 'def_b', x: 16, y: 0, z: -32, type: 'cover', neighbors: ['def_spawn', 'site_b_plant', 'site_b_back'] },
+  // Defender Spawn (North Plaza z=-20) & Rotations
+  def_spawn: { id: 'def_spawn', x: 0, y: 0, z: -20, type: 'spawn_def', neighbors: ['def_a', 'def_mid', 'def_b'] },
+  def_a: { id: 'def_a', x: -8, y: 0, z: -20, type: 'cover', neighbors: ['def_spawn', 'site_a_back'] },
+  def_mid: { id: 'def_mid', x: 0, y: 0, z: -12, type: 'cover', neighbors: ['def_spawn', 'mid_north', 'b_connector'] },
+  def_b: { id: 'def_b', x: 10, y: 0, z: -18, type: 'cover', neighbors: ['def_spawn', 'site_b_back', 'b_connector'] },
 };
 
 /**

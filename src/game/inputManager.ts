@@ -219,6 +219,8 @@ export class InputManager {
       this.state.weaponSlotJustPressed = 1;
     } else if (e.code === kb.sidearmWeapon) {
       this.state.weaponSlotJustPressed = 2;
+    } else if (e.code === kb.meleeWeapon) {
+      this.state.weaponSlotJustPressed = 3;
     } else if (e.code === kb.scoreboard) {
       e.preventDefault();
       this.state.scoreboardHeld = true;
@@ -348,7 +350,7 @@ export class InputManager {
     this.state.inspectWeaponJustPressed = true;
   }
 
-  public triggerMobileWeaponSlot(slot: 1 | 2): void {
+  public triggerMobileWeaponSlot(slot: 1 | 2 | 3): void {
     soundEngine.init();
     this.state.weaponSlotJustPressed = slot;
   }

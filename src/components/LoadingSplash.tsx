@@ -14,11 +14,11 @@ interface LoadingSplashProps {
 
 const PRELOAD_STEPS: { path: string; label: string }[] = [
   { path: '/models/japan_map.glb', label: 'LOADING JAPANESE COURTYARD ARENA' },
-  { path: '/models/sci-fi_gun.glb', label: 'CALIBRATING APEX-9 SIDEARM' },
-  { path: '/models/carbine_rifle.glb', label: 'CALIBRATING PHANTOM-V CARBINE' },
-  { path: '/models/smg.glb', label: 'CALIBRATING VIPER-9 SMG' },
-  { path: '/models/aac_honey_badger.glb', label: 'CALIBRATING HONEY BADGER' },
-  { path: '/models/free_pack_-_sci_fi_weapon.glb', label: 'PRELOADING SCI-FI WEAPON PACK' },
+  { path: '/models/sci-fi_gun.glb', label: 'CALIBRATING KADENCE SIDEARM' },
+  { path: '/models/carbine_rifle.glb', label: 'CALIBRATING REAPER CARBINE' },
+  { path: '/models/smg.glb', label: 'CALIBRATING MANTIS SMG' },
+  { path: '/models/aac_honey_badger.glb', label: 'CALIBRATING ECLIPSE RIFLE' },
+  { path: '/models/free_pack_-_sci_fi_weapon.glb', label: 'PRELOADING HOLLOW BLADE & ARMORY' },
 ];
 
 export const LoadingSplash: React.FC<LoadingSplashProps> = ({ onComplete }) => {

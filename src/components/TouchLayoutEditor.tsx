@@ -1,11 +1,22 @@
 /**
  * Hollow Strike - Interactive On-Screen Controls Layout Mapper
  * Fullscreen drag-and-drop customization for touch virtual joystick & action buttons,
- * complete with layout presets, individual control scaling, visibility toggles, and instant save.
+ * complete with Lucide tactical icons, layout presets, scaling, visibility toggles, and instant save.
  */
 
 import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  ArrowDown,
+  ArrowUp,
+  Bomb,
+  Crosshair,
+  Focus,
+  Gamepad2,
+  Repeat,
+  RotateCw,
+  Zap,
+} from 'lucide-react';
 import {
   DEFAULT_TOUCH_LAYOUT,
   TOUCH_LAYOUT_PRESETS,
@@ -25,19 +36,93 @@ interface TouchLayoutEditorProps {
   onClose: () => void;
 }
 
-const CONTROL_META: Record<TouchControlId, { label: string; sizePx: number; isCircle?: boolean; color: string; required?: boolean }> = {
-  joystick: { label: 'MOVE JOYSTICK', sizePx: 128, isCircle: true, color: 'border-[#17E5B8] bg-[#0F1923]/90 text-[#17E5B8]', required: true },
-  fire: { label: 'FIRE', sizePx: 76, isCircle: true, color: 'border-[#FF4655] bg-[#FF4655]/90 text-[#ECE8E1]', required: true },
-  ads: { label: 'ADS', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
-  crouch: { label: 'CROUCH', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
-  jump: { label: 'JUMP', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
-  reload: { label: 'RELOAD', sizePx: 54, color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]' },
-  weaponSwap: { label: 'SWAP', sizePx: 58, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
-  plantDefuse: { label: 'PLANT / DEFUSE', sizePx: 64, color: 'border-[#fbbf24] bg-[#fbbf24]/25 text-[#fbbf24]' },
-  abilityE: { label: 'AB [E]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
-  abilityQ: { label: 'AB [Q]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
-  abilityC: { label: 'AB [C]', sizePx: 52, color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]' },
-  abilityX: { label: 'ULT [X]', sizePx: 52, color: 'border-[#FF4655] bg-[#FF4655]/25 text-[#FF4655]' },
+const CONTROL_META: Record<
+  TouchControlId,
+  {
+    label: string;
+    sizePx: number;
+    isCircle?: boolean;
+    color: string;
+    required?: boolean;
+    icon: React.ReactNode;
+  }
+> = {
+  joystick: {
+    label: 'MOVE',
+    sizePx: 128,
+    isCircle: true,
+    color: 'border-[#17E5B8] bg-[#0F1923]/90 text-[#17E5B8]',
+    required: true,
+    icon: <Gamepad2 className="h-6 w-6" />,
+  },
+  fire: {
+    label: 'FIRE',
+    sizePx: 76,
+    isCircle: true,
+    color: 'border-[#FF4655] bg-[#FF4655]/90 text-[#ECE8E1]',
+    required: true,
+    icon: <Crosshair className="h-6 w-6" />,
+  },
+  ads: {
+    label: 'SCOPE',
+    sizePx: 54,
+    color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]',
+    icon: <Focus className="h-4.5 w-4.5" />,
+  },
+  crouch: {
+    label: 'CROUCH',
+    sizePx: 54,
+    color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]',
+    icon: <ArrowDown className="h-4.5 w-4.5" />,
+  },
+  jump: {
+    label: 'JUMP',
+    sizePx: 54,
+    color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]',
+    icon: <ArrowUp className="h-4.5 w-4.5" />,
+  },
+  reload: {
+    label: 'RELOAD',
+    sizePx: 54,
+    color: 'border-[#ECE8E1]/30 bg-[#18232E]/95 text-[#ECE8E1]',
+    icon: <RotateCw className="h-4 w-4" />,
+  },
+  weaponSwap: {
+    label: 'SWAP',
+    sizePx: 58,
+    color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]',
+    icon: <Repeat className="h-4.5 w-4.5" />,
+  },
+  plantDefuse: {
+    label: 'SPIKE',
+    sizePx: 64,
+    color: 'border-[#fbbf24] bg-[#fbbf24]/25 text-[#fbbf24]',
+    icon: <Bomb className="h-5 w-5" />,
+  },
+  abilityE: {
+    label: 'AB [E]',
+    sizePx: 52,
+    color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]',
+    icon: <Zap className="h-3.5 w-3.5" />,
+  },
+  abilityQ: {
+    label: 'AB [Q]',
+    sizePx: 52,
+    color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]',
+    icon: <Zap className="h-3.5 w-3.5" />,
+  },
+  abilityC: {
+    label: 'AB [C]',
+    sizePx: 52,
+    color: 'border-[#17E5B8]/60 bg-[#18232E]/95 text-[#17E5B8]',
+    icon: <Zap className="h-3.5 w-3.5" />,
+  },
+  abilityX: {
+    label: 'ULT [X]',
+    sizePx: 52,
+    color: 'border-[#FF4655] bg-[#FF4655]/25 text-[#FF4655]',
+    icon: <Zap className="h-3.5 w-3.5" />,
+  },
 };
 
 export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
@@ -126,10 +211,8 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
       data-testid="touch-layout-editor"
       className="fixed inset-0 z-[100] bg-[#0F1923] val-grid-bg font-mono select-none overflow-hidden touch-none"
     >
-      {/* Subtle Valorant crimson corner accents */}
       <div className="pointer-events-none absolute top-0 inset-x-0 h-[2px] bg-[#FF4655]/60" />
 
-      {/* HUD Reference Ghosts (Minimap & Top Scoreboard zone) */}
       <div className="pointer-events-none absolute top-3 left-3 h-24 w-24 border border-dashed border-[#ECE8E1]/20 bg-[#18232E]/45 flex items-center justify-center text-[9px] tracking-widest text-[#8B978F]">
         RADAR ZONE
       </div>
@@ -145,7 +228,7 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
               On-Screen HUD Layout Mapping
             </h2>
             <p className="text-[10px] text-[#8B978F]">
-              Drag any button or joystick anywhere on screen. Tap one to resize or toggle visibility.
+              Drag any icon button or joystick anywhere on screen. Tap one to resize or toggle visibility.
             </p>
           </div>
           <div className="flex items-center gap-1.5">
@@ -257,11 +340,12 @@ export const TouchLayoutEditor: React.FC<TouchLayoutEditorProps> = ({
               transform: `translate(-50%, -50%) scale(${slot.scale})`,
               opacity: slot.visible ? 1 : 0.35,
             }}
-            className={`absolute z-20 flex flex-col items-center justify-center border-2 text-center font-black uppercase shadow-xl cursor-grab active:cursor-grabbing touch-none ${
+            className={`absolute z-20 flex flex-col items-center justify-center gap-0.5 border-2 text-center font-black uppercase shadow-xl cursor-grab active:cursor-grabbing touch-none ${
               meta.isCircle ? 'rounded-full' : 'clip-val-card'
             } ${meta.color} ${isSelected ? 'ring-2 ring-[#FF4655] ring-offset-2 ring-offset-[#0F1923]' : ''}`}
           >
-            <span className="text-[10px] leading-tight px-1 pointer-events-none">{meta.label}</span>
+            <div className="pointer-events-none">{meta.icon}</div>
+            <span className="text-[8px] leading-tight px-1 pointer-events-none">{meta.label}</span>
           </div>
         );
       })}

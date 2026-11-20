@@ -33,6 +33,22 @@
     clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
   }
 
+  .clip-val-plaque {
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  }
+
+  .clip-pennant {
+    clip-path: polygon(0 0, 100% 0, 100% 85%, 50% 100%, 0 85%);
+  }
+
+  .clip-pennant-chevron {
+    clip-path: polygon(0 0, 100% 0, 100% 34%, 50% 100%, 0 34%);
+  }
+
+  .clip-diamond {
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  }
+
   .val-grid-bg {
     background-image:
       linear-gradient(to right, rgba(236, 232, 225, 0.04) 1px, transparent 1px),

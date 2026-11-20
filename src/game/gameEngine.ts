@@ -29,6 +29,10 @@ import {
   WeaponDef,
   SpectateCameraMode,
   SpectateState,
+  STARTER_SIDEARM_ID,
+  MELEE_WEAPON_ID,
+  CustomRoomState,
+  RemotePlayerSync,
 } from './types';
 import {
   calculateDamage,
@@ -39,9 +43,10 @@ import {
   calculateSpread,
   selectNextSpectateTargetId,
   computeGentleAimAssist,
+  pickBotPurchase,
 } from './rules';
 import { buildTacticalMap, BuiltMap } from './mapBuilder';
-import { BOMB_SITE_A, BOMB_SITE_B, SPAWN_ATTACKERS, SPAWN_DEFENDERS, checkCollision } from './mapData';
+import { BOMB_SITE_A, BOMB_SITE_B, SPAWN_ATTACKERS, SPAWN_DEFENDERS, checkCollision, isPointWalkable } from './mapData';
 import { createAgentModel } from './agentModels';
 import { createWeaponModel, getWeaponViewmodelProfile, createSpikeModel } from './weaponModels';
 import { soundEngine } from './audio';
@@ -49,6 +54,7 @@ import { AbilityManager } from './abilities';
 import { BotCombatant, BotController } from './botAI';
 import { InputManager } from './inputManager';
 import { MatchSummaryPayload } from './profileStore';
+import { multiplayerClient } from './multiplayerClient';
 
 // Software GL detector per Three.js skill
 export const isSoftwareGl = (() => {
@@ -81,7 +87,7 @@ export interface EngineCallbacks {
   onKillEvent: (event: KillEvent) => void;
   onPlayerHealthUpdate: (hp: number, armor: number, maxHp: number, maxArmor: number) => void;
   onPlayerDamage?: (amount: number) => void;
-  onWeaponUpdate: (weapon: WeaponDef, ammoInMag: number, reserveAmmo: number, isReloading: boolean, activeSlot?: 1 | 2) => void;
+  onWeaponUpdate: (weapon: WeaponDef, ammoInMag: number, reserveAmmo: number, isReloading: boolean, activeSlot?: 1 | 2 | 3) => void;
   onSpikeStateUpdate: (state: 'not_planted' | 'planted' | 'defused' | 'detonated', timer: number, plantProgress: number, defuseProgress: number) => void;
   onHitmarker: (isHeadshot: boolean) => void;
   onHitFeedback?: (feedback: HitFeedback) => void;
@@ -198,6 +204,11 @@ export class GameEngine {
   private lastSpectateKey: string = '';
   private deathCamAnchor: THREE.Vector3 = new THREE.Vector3();
   private aimAssistSwipeCooldown: number = 0;
+  private customRoom: CustomRoomState | null = null;
+  private syncAccumTimer: number = 0;
+  private unsubInMatch: (() => void) | null = null;
+  private contextLost: boolean = false;
+  private meleeSlashTimer: number = 0;
 
   constructor(
     mountElement: HTMLElement,
@@ -205,11 +216,14 @@ export class GameEngine {
     playerAgentId: string,
     botDifficulty: BotDifficulty,
     callbacks: EngineCallbacks,
-    matchMode: MatchMode = 'COMPETITIVE'
+    matchMode: MatchMode = 'CUSTOM',
+    customRoom: CustomRoomState | null = null,
+    allyBotAgentIds: string[] = []
   ) {
     this.settings = settings;
     this.callbacks = callbacks;
     this.matchMode = matchMode;
+    this.customRoom = customRoom;
     this.input = new InputManager(settings.controlMode, settings.keyBindings);
 
     // 1. Scene & Atmosphere Setup (Extended far clipping plane + gentle fog for japan_map architecture)
@@ -237,6 +251,8 @@ export class GameEngine {
     this.applyGraphicsPreset(settings.graphics);
 
     this.renderer.setSize(mountElement.clientWidth || window.innerWidth, mountElement.clientHeight || window.innerHeight);
+    this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost, false);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored, false);
     mountElement.appendChild(this.renderer.domElement);
 
     // 4. Studio Environment Lighting via RoomEnvironment
@@ -294,10 +310,13 @@ export class GameEngine {
       this.callbacks.onPointerLockChange?.(locked);
     };
 
-    // 9. Initialize 5v5 Combatants & Mode Setup
-    this.initCombatants(playerAgentId, botDifficulty);
+    // 9. Initialize Combatants, Multiplayer Relay & Mode Setup
+    this.initCombatants(playerAgentId, botDifficulty, allyBotAgentIds);
     this.initAbilitySlots(playerAgentId);
     this.configureInitialPhaseForMode();
+    if (this.customRoom) {
+      this.unsubInMatch = multiplayerClient.subscribeInMatch((msg) => this.handleIncomingMultiplayerMessage(msg));
+    }
 
     // 10. Start simulation loop
     this.lastTime = performance.now();
@@ -365,7 +384,7 @@ export class GameEngine {
       this.playerStats[0].credits = 9000;
       // Start bots roaming/engaging immediately in Practice
       for (const ctrl of this.botControllers) {
-        ctrl.planRound(false, null);
+        ctrl.planRound(false, null, 'A');
       }
       this.callbacks.onStatsUpdate([...this.playerStats]);
       this.callbacks.onRoundPhaseChange(this.roundPhase, this.roundTimer);
@@ -518,27 +537,50 @@ export class GameEngine {
     }
   }
 
-  private initCombatants(playerAgentId: string, difficulty: BotDifficulty): void {
+  private getSpawnSlotPosition(team: TeamSide, indexWithinTeam: number): THREE.Vector3 {
+    const base = team === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
+    const offsetX = (indexWithinTeam - 2) * 2.4;
+    const tx = base.x + offsetX;
+    const tz = base.z;
+    if (isPointWalkable(tx, tz, 0.5)) {
+      return new THREE.Vector3(tx, 0, tz);
+    }
+    return new THREE.Vector3(base.x, 0, base.z);
+  }
+
+  private initCombatants(playerAgentId: string, difficulty: BotDifficulty, allyBotAgentIds: string[] = []): void {
     this.combatants = [];
     this.botControllers = [];
     this.playerStats = [];
 
+    const myUsername = multiplayerClient.getCachedUsername();
+    const myMember = this.customRoom?.members.find(
+      (m) => m.username.toLowerCase() === myUsername.toLowerCase()
+    );
+    if (myMember) {
+      this.playerTeam = myMember.team;
+    }
+
+    const starterSidearm = WEAPON_REGISTRY[STARTER_SIDEARM_ID] || WEAPON_REGISTRY.KADENCE;
+    const meleeDef = WEAPON_REGISTRY[MELEE_WEAPON_ID] || WEAPON_REGISTRY.HOLLOW_BLADE;
+    const skirmishGun = WEAPON_REGISTRY.MANTIS || starterSidearm;
+
     const agentKeys = Object.keys(AGENT_REGISTRY);
     const playerAgent = AGENT_REGISTRY[playerAgentId] || AGENT_REGISTRY.ZEPHYR;
     const playerMesh = createAgentModel(playerAgent, this.playerTeam);
-    // Keep visible = true so bot raycasts always hit live hitboxMeshes, but isolate to Layer 1 so FP camera (Layer 0) doesn't render self-body
     playerMesh.root.visible = true;
     playerMesh.root.traverse((obj) => {
       obj.layers.set(1);
     });
     this.scene.add(playerMesh.root);
 
-    const initialSpawn = this.playerTeam === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
-    const playerStartYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI; // Three.js -Z is North at yaw=0
+    const playerStartPos = this.getSpawnSlotPosition(this.playerTeam, 2);
+    const playerStartYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI;
+    const playerStartWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
 
     this.playerCombatant = {
       id: 'player_0',
-      name: 'Agent (You)',
+      name: myUsername ? `${myUsername} (You)` : 'Agent (You)',
       team: this.playerTeam,
       agentId: playerAgent.id,
       isHuman: true,
@@ -546,21 +588,22 @@ export class GameEngine {
       armor: 0,
       alive: true,
       deathTimer: 0,
-      position: new THREE.Vector3(initialSpawn.x, 0, initialSpawn.z),
+      position: playerStartPos,
       velocity: new THREE.Vector3(),
       yaw: playerStartYaw,
       pitch: 0,
       hasSpike: this.playerTeam === 'ATTACKERS',
-      weapon: WEAPON_REGISTRY.APEX_9,
-      ammoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-      reserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
-      primaryWeapon: null,
-      primaryAmmoInMag: 0,
-      primaryReserveAmmo: 0,
-      sidearmWeapon: WEAPON_REGISTRY.APEX_9,
-      sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-      sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
-      activeSlot: 2,
+      weapon: playerStartWeapon,
+      ammoInMag: playerStartWeapon.magazineSize,
+      reserveAmmo: playerStartWeapon.reserveAmmo,
+      primaryWeapon: playerStartWeapon.category !== 'SIDEARM' ? playerStartWeapon : null,
+      primaryAmmoInMag: playerStartWeapon.category !== 'SIDEARM' ? playerStartWeapon.magazineSize : 0,
+      primaryReserveAmmo: playerStartWeapon.category !== 'SIDEARM' ? playerStartWeapon.reserveAmmo : 0,
+      sidearmWeapon: starterSidearm,
+      sidearmAmmoInMag: starterSidearm.magazineSize,
+      sidearmReserveAmmo: starterSidearm.reserveAmmo,
+      meleeWeapon: meleeDef,
+      activeSlot: playerStartWeapon.category !== 'SIDEARM' ? 1 : 2,
       reloadTimer: 0,
       shootCooldown: 0,
       isPlanting: false,
@@ -568,6 +611,7 @@ export class GameEngine {
       actionProgress: 0,
       modelPackage: playerMesh,
     };
+    playerMesh.setWeapon(playerStartWeapon.id);
     playerMesh.root.position.copy(this.playerCombatant.position);
     playerMesh.root.rotation.y = this.playerCombatant.yaw;
     playerMesh.root.updateMatrixWorld(true);
@@ -597,70 +641,88 @@ export class GameEngine {
       hasSpike: this.playerCombatant.hasSpike,
     });
 
-    // Create 4 Bot Teammates
-    const allySpawn = initialSpawn;
-    for (let i = 1; i <= 4; i++) {
-      const agentKey = agentKeys[i % agentKeys.length];
-      const agent = AGENT_REGISTRY[agentKey];
-      const mesh = createAgentModel(agent, this.playerTeam);
-      this.scene.add(mesh.root);
+    // Spawn remote human teammates/opponents if launched from a multiplayer room
+    const remoteMembers = (this.customRoom?.members ?? []).filter(
+      (m) => m.username.toLowerCase() !== myUsername.toLowerCase()
+    );
 
-      const offsetX = (i - 2.5) * 3.0;
-      const startYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI;
-      const startWeapon = this.matchMode === 'SKIRMISH' ? WEAPON_REGISTRY.VIPER_9 : WEAPON_REGISTRY.APEX_9;
+    const teamSlotOrder: Record<TeamSide, number[]> = {
+      ATTACKERS: this.playerTeam === 'ATTACKERS' ? [0, 1, 3, 4] : [2, 1, 3, 0, 4],
+      DEFENDERS: this.playerTeam === 'DEFENDERS' ? [0, 1, 3, 4] : [2, 1, 3, 0, 4],
+    };
+    const teamSlotCursor: Record<TeamSide, number> = {
+      ATTACKERS: 0,
+      DEFENDERS: 0,
+    };
+    const takeNextSlot = (team: TeamSide): number => {
+      const order = teamSlotOrder[team];
+      const idx = teamSlotCursor[team]++;
+      return order[idx % order.length];
+    };
 
-      const bot: BotCombatant = {
-        id: `ally_${i}`,
-        name: `Ally ${agent.name}`,
-        team: this.playerTeam,
-        agentId: agent.id,
+    for (const remote of remoteMembers) {
+      const rAgent = AGENT_REGISTRY[remote.agentId] || AGENT_REGISTRY.BLITZ;
+      const rMesh = createAgentModel(rAgent, remote.team);
+      this.scene.add(rMesh.root);
+
+      const slotIdx = takeNextSlot(remote.team);
+      const rPos = this.getSpawnSlotPosition(remote.team, slotIdx);
+      const rYaw = remote.team === 'ATTACKERS' ? 0 : Math.PI;
+      const rStartWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
+
+      const remoteCombatant: BotCombatant = {
+        id: `remote_${remote.username}`,
+        name: remote.username,
+        team: remote.team,
+        agentId: rAgent.id,
         isHuman: false,
+        isRemoteHuman: true,
         hp: 100,
         armor: 0,
         alive: true,
         deathTimer: 0,
-        position: new THREE.Vector3(allySpawn.x + offsetX, 0, allySpawn.z),
+        position: rPos,
         velocity: new THREE.Vector3(),
-        yaw: startYaw,
+        yaw: rYaw,
         pitch: 0,
         hasSpike: false,
-        weapon: startWeapon,
-        ammoInMag: startWeapon.magazineSize,
-        reserveAmmo: startWeapon.reserveAmmo,
-        primaryWeapon: startWeapon.category !== 'SIDEARM' ? startWeapon : null,
-        primaryAmmoInMag: startWeapon.category !== 'SIDEARM' ? startWeapon.magazineSize : 0,
-        primaryReserveAmmo: startWeapon.category !== 'SIDEARM' ? startWeapon.reserveAmmo : 0,
-        sidearmWeapon: WEAPON_REGISTRY.APEX_9,
-        sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-        sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
-        activeSlot: startWeapon.category !== 'SIDEARM' ? 1 : 2,
+        weapon: rStartWeapon,
+        ammoInMag: rStartWeapon.magazineSize,
+        reserveAmmo: rStartWeapon.reserveAmmo,
+        primaryWeapon: rStartWeapon.category !== 'SIDEARM' ? rStartWeapon : null,
+        primaryAmmoInMag: rStartWeapon.category !== 'SIDEARM' ? rStartWeapon.magazineSize : 0,
+        primaryReserveAmmo: rStartWeapon.category !== 'SIDEARM' ? rStartWeapon.reserveAmmo : 0,
+        sidearmWeapon: starterSidearm,
+        sidearmAmmoInMag: starterSidearm.magazineSize,
+        sidearmReserveAmmo: starterSidearm.reserveAmmo,
+        meleeWeapon: meleeDef,
+        activeSlot: rStartWeapon.category !== 'SIDEARM' ? 1 : 2,
         reloadTimer: 0,
         shootCooldown: 0,
         isPlanting: false,
         isDefusing: false,
         actionProgress: 0,
-        modelPackage: mesh,
+        modelPackage: rMesh,
       };
-      mesh.setWeapon(startWeapon.id);
-      mesh.root.position.copy(bot.position);
-      mesh.root.rotation.y = bot.yaw;
-      mesh.root.updateMatrixWorld(true);
-
-      this.combatants.push(bot);
-      this.botControllers.push(new BotController(bot, difficulty));
+      rMesh.setWeapon(rStartWeapon.id);
+      rMesh.root.position.copy(rPos);
+      rMesh.root.rotation.y = rYaw;
+      rMesh.root.updateMatrixWorld(true);
+      this.combatants.push(remoteCombatant);
 
       this.playerStats.push({
-        id: bot.id,
-        name: bot.name,
-        agentId: bot.agentId,
-        team: bot.team,
+        id: remoteCombatant.id,
+        name: remoteCombatant.name,
+        agentId: remoteCombatant.agentId,
+        team: remoteCombatant.team,
         isHuman: false,
+        isRemoteHuman: true,
         kills: 0,
         deaths: 0,
         assists: 0,
         score: 0,
         credits: 800,
-        ping: Math.floor(Math.random() * 20 + 15),
+        ping: 24,
         alive: true,
         hp: 100,
         maxHp: 100,
@@ -670,81 +732,126 @@ export class GameEngine {
       });
     }
 
-    // Create 5 Bot Opponents
+    // Spawn AI Bots only when configured (Custom Room fillBots: true, or offline AI modes).
+    // Ally bots default to empty unless player explicitly added teammates or enabled fillBots.
+    const shouldFillEnemyBots = this.customRoom
+      ? this.customRoom.fillBots
+      : this.matchMode !== 'CUSTOM';
     const oppTeam: TeamSide = this.playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
-    const oppSpawn = oppTeam === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
-    for (let i = 1; i <= 5; i++) {
-      const agentKey = agentKeys[(i + 2) % agentKeys.length];
-      const agent = AGENT_REGISTRY[agentKey];
-      const mesh = createAgentModel(agent, oppTeam);
-      this.scene.add(mesh.root);
+    const attAlready = this.combatants.filter((c) => c.team === 'ATTACKERS').length;
+    const defAlready = this.combatants.filter((c) => c.team === 'DEFENDERS').length;
 
-      const offsetX = (i - 3) * 3.0;
-      const startYaw = oppTeam === 'ATTACKERS' ? 0 : Math.PI;
-      const startWeapon = this.matchMode === 'SKIRMISH' ? WEAPON_REGISTRY.VIPER_9 : WEAPON_REGISTRY.APEX_9;
+    const spawnBotTeam = (team: TeamSide, agentQueue: string[], isAlly: boolean) => {
+      for (let i = 0; i < agentQueue.length; i++) {
+        const agentKey = agentQueue[i];
+        const agent = AGENT_REGISTRY[agentKey] || AGENT_REGISTRY.ZEPHYR;
+        const mesh = createAgentModel(agent, team);
+        this.scene.add(mesh.root);
 
-      const bot: BotCombatant = {
-        id: `opp_${i}`,
-        name: `Foe ${agent.name}`,
-        team: oppTeam,
-        agentId: agent.id,
-        isHuman: false,
-        hp: 100,
-        armor: 0,
-        alive: true,
-        deathTimer: 0,
-        position: new THREE.Vector3(oppSpawn.x + offsetX, 0, oppSpawn.z),
-        velocity: new THREE.Vector3(),
-        yaw: startYaw,
-        pitch: 0,
-        hasSpike: oppTeam === 'ATTACKERS' && i === 1,
-        weapon: startWeapon,
-        ammoInMag: startWeapon.magazineSize,
-        reserveAmmo: startWeapon.reserveAmmo,
-        primaryWeapon: startWeapon.category !== 'SIDEARM' ? startWeapon : null,
-        primaryAmmoInMag: startWeapon.category !== 'SIDEARM' ? startWeapon.magazineSize : 0,
-        primaryReserveAmmo: startWeapon.category !== 'SIDEARM' ? startWeapon.reserveAmmo : 0,
-        sidearmWeapon: WEAPON_REGISTRY.APEX_9,
-        sidearmAmmoInMag: WEAPON_REGISTRY.APEX_9.magazineSize,
-        sidearmReserveAmmo: WEAPON_REGISTRY.APEX_9.reserveAmmo,
-        activeSlot: startWeapon.category !== 'SIDEARM' ? 1 : 2,
-        reloadTimer: 0,
-        shootCooldown: 0,
-        isPlanting: false,
-        isDefusing: false,
-        actionProgress: 0,
-        modelPackage: mesh,
-      };
-      mesh.setWeapon(startWeapon.id);
-      mesh.root.position.copy(bot.position);
-      mesh.root.rotation.y = bot.yaw;
-      mesh.root.updateMatrixWorld(true);
+        const slotIdx = takeNextSlot(team);
+        const botPos = this.getSpawnSlotPosition(team, slotIdx);
+        const startYaw = team === 'ATTACKERS' ? 0 : Math.PI;
+        const startWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
+        const carrySpike = team === 'ATTACKERS' && !this.spikeCarrierId && i === 0;
 
-      this.combatants.push(bot);
-      this.botControllers.push(new BotController(bot, difficulty));
+        const bot: BotCombatant = {
+          id: `${isAlly ? 'ally' : 'opp'}_${i + 1}`,
+          name: `${isAlly ? 'Ally' : 'Foe'} ${agent.name}`,
+          team,
+          agentId: agent.id,
+          isHuman: false,
+          hp: 100,
+          armor: 0,
+          alive: true,
+          deathTimer: 0,
+          position: botPos,
+          velocity: new THREE.Vector3(),
+          yaw: startYaw,
+          pitch: 0,
+          hasSpike: carrySpike,
+          weapon: startWeapon,
+          ammoInMag: startWeapon.magazineSize,
+          reserveAmmo: startWeapon.reserveAmmo,
+          primaryWeapon: startWeapon.category !== 'SIDEARM' ? startWeapon : null,
+          primaryAmmoInMag: startWeapon.category !== 'SIDEARM' ? startWeapon.magazineSize : 0,
+          primaryReserveAmmo: startWeapon.category !== 'SIDEARM' ? startWeapon.reserveAmmo : 0,
+          sidearmWeapon: starterSidearm,
+          sidearmAmmoInMag: starterSidearm.magazineSize,
+          sidearmReserveAmmo: starterSidearm.reserveAmmo,
+          meleeWeapon: meleeDef,
+          activeSlot: startWeapon.category !== 'SIDEARM' ? 1 : 2,
+          reloadTimer: 0,
+          shootCooldown: 0,
+          isPlanting: false,
+          isDefusing: false,
+          actionProgress: 0,
+          modelPackage: mesh,
+        };
+        if (carrySpike) this.spikeCarrierId = bot.id;
 
-      this.playerStats.push({
-        id: bot.id,
-        name: bot.name,
-        agentId: bot.agentId,
-        team: bot.team,
-        isHuman: false,
-        kills: 0,
-        deaths: 0,
-        assists: 0,
-        score: 0,
-        credits: 800,
-        ping: Math.floor(Math.random() * 25 + 20),
-        alive: true,
-        hp: 100,
-        maxHp: 100,
-        armor: 0,
-        maxArmor: 50,
-        hasSpike: bot.hasSpike,
-      });
+        mesh.setWeapon(startWeapon.id);
+        mesh.root.position.copy(bot.position);
+        mesh.root.rotation.y = bot.yaw;
+        mesh.root.updateMatrixWorld(true);
+
+        this.combatants.push(bot);
+        this.botControllers.push(new BotController(bot, difficulty, slotIdx));
+
+        this.playerStats.push({
+          id: bot.id,
+          name: bot.name,
+          agentId: bot.agentId,
+          team: bot.team,
+          isHuman: false,
+          kills: 0,
+          deaths: 0,
+          assists: 0,
+          score: 0,
+          credits: 800,
+          ping: Math.floor(Math.random() * 18 + 14),
+          alive: true,
+          hp: 100,
+          maxHp: 100,
+          armor: 0,
+          maxArmor: 50,
+          hasSpike: bot.hasSpike,
+        });
+      }
+    };
+
+    if (this.customRoom) {
+      if (this.customRoom.fillBots) {
+        const allyNeeded = Math.max(0, 5 - (this.playerTeam === 'ATTACKERS' ? attAlready : defAlready));
+        const oppNeeded = Math.max(0, 5 - (oppTeam === 'ATTACKERS' ? attAlready : defAlready));
+        const allyList = Array.from({ length: allyNeeded }, (_, i) => agentKeys[(i + 1) % agentKeys.length]);
+        const oppList = Array.from({ length: oppNeeded }, (_, i) => agentKeys[(i + 2) % agentKeys.length]);
+        spawnBotTeam(this.playerTeam, allyList, true);
+        spawnBotTeam(oppTeam, oppList, false);
+      }
+    } else {
+      if (allyBotAgentIds.length > 0 && this.matchMode !== 'CUSTOM') {
+        const maxAllies = Math.max(0, 4);
+        spawnBotTeam(this.playerTeam, allyBotAgentIds.slice(0, maxAllies), true);
+      }
+      if (shouldFillEnemyBots) {
+        const oppNeeded = Math.max(0, 5 - (oppTeam === 'ATTACKERS' ? attAlready : defAlready));
+        const oppList = Array.from({ length: oppNeeded }, (_, i) => agentKeys[(i + 2) % agentKeys.length]);
+        spawnBotTeam(oppTeam, oppList, false);
+      }
     }
 
-    this.updateViewmodelWeapon(WEAPON_REGISTRY.APEX_9.id);
+    // Guarantee Spike carrier if Attackers team has at least one combatant
+    if (!this.spikeCarrierId) {
+      const firstAtt = this.combatants.find((c) => c.team === 'ATTACKERS');
+      if (firstAtt) {
+        firstAtt.hasSpike = true;
+        this.spikeCarrierId = firstAtt.id;
+        const st = this.playerStats.find((s) => s.id === firstAtt.id);
+        if (st) st.hasSpike = true;
+      }
+    }
+
+    this.updateViewmodelWeapon(playerStartWeapon.id);
     this.camera.position.set(this.playerCombatant.position.x, 1.65, this.playerCombatant.position.z);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.playerCombatant.yaw;
@@ -752,7 +859,13 @@ export class GameEngine {
 
     this.callbacks.onStatsUpdate([...this.playerStats]);
     this.callbacks.onPlayerHealthUpdate(100, 0, 100, 50);
-    this.callbacks.onWeaponUpdate(this.playerCombatant.weapon, this.playerCombatant.ammoInMag, this.playerCombatant.reserveAmmo, false, 2);
+    this.callbacks.onWeaponUpdate(
+      this.playerCombatant.weapon,
+      this.playerCombatant.ammoInMag,
+      this.playerCombatant.reserveAmmo,
+      false,
+      this.playerCombatant.activeSlot
+    );
   }
 
   private updateViewmodelWeapon(weaponId: string): void {
@@ -774,17 +887,16 @@ export class GameEngine {
     this.vmInspectTimer = 0;
   }
 
-  public switchWeaponSlot(slot: 1 | 2): boolean {
+  public switchWeaponSlot(slot: 1 | 2 | 3): boolean {
     const p = this.playerCombatant;
     if (!p.alive) return false;
     if (slot === 1 && !p.primaryWeapon) return false;
     if (slot === p.activeSlot) return false;
 
-    // Save current slot's ammo
     if (p.activeSlot === 1) {
       p.primaryAmmoInMag = p.ammoInMag;
       p.primaryReserveAmmo = p.reserveAmmo;
-    } else {
+    } else if (p.activeSlot === 2) {
       p.sidearmAmmoInMag = p.ammoInMag;
       p.sidearmReserveAmmo = p.reserveAmmo;
     }
@@ -796,10 +908,14 @@ export class GameEngine {
       p.weapon = p.primaryWeapon;
       p.ammoInMag = p.primaryAmmoInMag;
       p.reserveAmmo = p.primaryReserveAmmo;
-    } else {
+    } else if (slot === 2) {
       p.weapon = p.sidearmWeapon;
       p.ammoInMag = p.sidearmAmmoInMag;
       p.reserveAmmo = p.sidearmReserveAmmo;
+    } else {
+      p.weapon = p.meleeWeapon;
+      p.ammoInMag = 1;
+      p.reserveAmmo = 0;
     }
 
     this.input.setMobileADS(false);
@@ -810,7 +926,7 @@ export class GameEngine {
   }
 
   private tick = (): void => {
-    if (this.isDestroyed) return;
+    if (this.isDestroyed || this.contextLost) return;
 
     const now = performance.now();
     if (this.settings.fpsCap > 0) {
@@ -927,8 +1043,17 @@ export class GameEngine {
     this.spikeMesh.position.copy(this.spikePosition);
     soundEngine.playSpikePlant();
 
+    const siteChoice: 'A' | 'B' = this.roundNumber % 2 === 1 ? 'A' : 'B';
     for (const ctrl of this.botControllers) {
-      ctrl.planRound(true, this.plantedSite);
+      ctrl.planRound(true, this.plantedSite, siteChoice);
+    }
+
+    if (this.customRoom && this.spikePosition) {
+      multiplayerClient.sendSpikeEvent('PLANTED', site, [
+        this.spikePosition.x,
+        this.spikePosition.y,
+        this.spikePosition.z,
+      ]);
     }
   }
 
@@ -936,6 +1061,9 @@ export class GameEngine {
     if (this.spikeState !== 'planted') return;
     this.spikeState = 'defused';
     soundEngine.playSpikeDefused();
+    if (this.customRoom) {
+      multiplayerClient.sendSpikeEvent('DEFUSED', this.plantedSite, [0, 0, 0]);
+    }
     this.endRound('DEFENDERS', 'SPIKE_DEFUSED');
   }
 
@@ -953,8 +1081,9 @@ export class GameEngine {
         this.mapData.barrierDefenders.visible = false;
         soundEngine.playRoundStart();
 
+        const siteChoice: 'A' | 'B' = this.roundNumber % 2 === 1 ? 'A' : 'B';
         for (const ctrl of this.botControllers) {
-          ctrl.planRound(false, null);
+          ctrl.planRound(false, null, siteChoice);
         }
       }
     } else if (this.roundPhase === 'ROUND_LIVE') {
@@ -992,10 +1121,12 @@ export class GameEngine {
     }
 
     if ((this.roundPhase === 'ROUND_LIVE' || this.roundPhase === 'SPIKE_PLANTED') && this.matchMode !== 'PRACTICE') {
+      const totalAtt = this.combatants.filter((c) => c.team === 'ATTACKERS').length;
+      const totalDef = this.combatants.filter((c) => c.team === 'DEFENDERS').length;
       const aliveAtt = this.combatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
       const aliveDef = this.combatants.filter((c) => c.alive && c.team === 'DEFENDERS').length;
 
-      const check = checkRoundWin(aliveAtt, aliveDef, this.spikeState, this.roundTimer);
+      const check = checkRoundWin(aliveAtt, aliveDef, this.spikeState, this.roundTimer, totalAtt, totalDef);
       if (check.roundOver && check.winner) {
         this.endRound(check.winner, check.reason!);
       }
@@ -1043,12 +1174,12 @@ export class GameEngine {
     this.vmSwayX = THREE.MathUtils.clamp(this.vmSwayX + dx * 0.38, -0.045, 0.045);
     this.vmSwayY = THREE.MathUtils.clamp(this.vmSwayY + dy * 0.38, -0.045, 0.045);
 
-    // 3. Weapon Slot Switching (1 = Primary, 2 = Sidearm)
+    // 3. Weapon Slot Switching (1 = Primary, 2 = Sidearm, 3 = Hollow Blade)
     if (this.input.state.weaponSlotJustPressed) {
       const slot = this.input.state.weaponSlotJustPressed;
-      if (slot === 1 || slot === 2) {
+      if (slot === 1 || slot === 2 || slot === 3) {
         this.switchWeaponSlot(slot);
-      } else if (slot === 3 || slot === 4) {
+      } else {
         this.switchWeaponSlot(p.activeSlot === 1 ? 2 : 1);
       }
     }
@@ -1058,7 +1189,7 @@ export class GameEngine {
     const right = this.input.state.moveRight;
     const isMoving = Math.abs(fwd) > 0.05 || Math.abs(right) > 0.05;
 
-    let baseSpeed = 5.6;
+    let baseSpeed = p.weapon.isMelee ? 6.35 : 5.6;
     if (this.input.state.crouchHeld) baseSpeed *= 0.52;
     if (this.input.state.adsHeld && p.weapon.canADS) baseSpeed *= 0.65;
     if (this.playerOverdriveTimer > 0) baseSpeed *= 1.35;
@@ -1094,8 +1225,8 @@ export class GameEngine {
 
     let blockedByBarrier = false;
     if (this.roundPhase === 'BUY_PHASE') {
-      if (p.team === 'ATTACKERS' && nextZ < 18.2) blockedByBarrier = true;
-      if (p.team === 'DEFENDERS' && nextZ > -25.8) blockedByBarrier = true;
+      if (p.team === 'ATTACKERS' && nextZ < 25.8) blockedByBarrier = true;
+      if (p.team === 'DEFENDERS' && nextZ > -10.2) blockedByBarrier = true;
     }
 
     // Check Bastion tactical energy barriers
@@ -1200,10 +1331,19 @@ export class GameEngine {
       autoFireTrigger = this.evaluateMobileAimAndAutoFire(dt);
     }
 
-    // 8. Firing Logic
+    if (this.meleeSlashTimer > 0) this.meleeSlashTimer = Math.max(0, this.meleeSlashTimer - dt);
+
+    // 8. Firing & Melee Slash Logic
     const wantsToFire = this.input.state.fireHeld || this.input.state.fireJustPressed || autoFireTrigger;
     if (wantsToFire && p.shootCooldown <= 0 && p.reloadTimer <= 0) {
-      if (this.roundPhase === 'BUY_PHASE') {
+      if (p.weapon.isMelee) {
+        p.shootCooldown = 1 / p.weapon.fireRate;
+        this.meleeSlashTimer = 0.24;
+        this.vmRecoilZ = -0.11;
+        this.vmRecoilPitch = -0.35;
+        this.camera.getWorldDirection(_vec3_2);
+        this.fireMeleeSlash(p, _vec3_2);
+      } else if (this.roundPhase === 'BUY_PHASE') {
         if (this.input.state.fireJustPressed) {
           p.shootCooldown = 0.25;
           soundEngine.playHitmarker(false);
@@ -1253,6 +1393,32 @@ export class GameEngine {
 
     this.updatePlayerSpikeActions(dt);
     this.updatePlayerAbilities();
+
+    // Stream live multiplayer player transform at 20 Hz
+    if (this.customRoom) {
+      this.syncAccumTimer += dt;
+      if (this.syncAccumTimer >= 0.05) {
+        this.syncAccumTimer = 0;
+        const uname = multiplayerClient.getCachedUsername();
+        if (uname) {
+          multiplayerClient.sendPlayerSync({
+            username: uname,
+            team: p.team,
+            agentId: p.agentId,
+            x: Number(p.position.x.toFixed(3)),
+            y: Number(p.position.y.toFixed(3)),
+            z: Number(p.position.z.toFixed(3)),
+            yaw: Number(p.yaw.toFixed(3)),
+            pitch: Number(p.pitch.toFixed(3)),
+            crouch: Boolean(p.isCrouching),
+            weaponId: p.weapon.id,
+            hp: p.hp,
+            armor: p.armor,
+            alive: p.alive,
+          });
+        }
+      }
+    }
   }
 
   private updateSpectator(dt: number): void {
@@ -1631,8 +1797,16 @@ export class GameEngine {
             this.emitAbilityStates();
           }
 
+          const siteKey = inSiteA ? 'A' : 'B';
+          if (this.customRoom) {
+            multiplayerClient.sendSpikeEvent('PLANTED', siteKey, [
+              this.spikePosition.x,
+              this.spikePosition.y,
+              this.spikePosition.z,
+            ]);
+          }
           for (const ctrl of this.botControllers) {
-            ctrl.planRound(true, this.plantedSite);
+            ctrl.planRound(true, this.plantedSite, siteKey);
           }
         }
       } else {
@@ -1900,80 +2074,149 @@ export class GameEngine {
     return this.weaponBreakdown[weaponId];
   }
 
-  public fireBullet(shooter: BotCombatant, dir: THREE.Vector3): void {
-    soundEngine.playGunshot(shooter.weapon.category);
+  public fireMeleeSlash(shooter: BotCombatant, dir: THREE.Vector3): void {
+    soundEngine.playGunshot('MELEE');
+    const origin = shooter.isHuman
+      ? _vec3_1.copy(this.camera.position)
+      : _vec3_1.copy(shooter.position).add(_vec3_4.set(0, 1.38, 0));
 
-    if (shooter.isHuman) {
-      this.getWeaponEntry(shooter.weapon.id).shotsFired++;
+    const maxRange = shooter.weapon.range ?? 2.8;
+    _raycaster.set(origin, dir);
+    _raycaster.far = maxRange;
+
+    let closestTarget: BotCombatant | null = null;
+    let closestZone: 'head' | 'body' | 'leg' = 'body';
+    let closestPoint: THREE.Vector3 | null = null;
+    let closestDist = Infinity;
+
+    for (const target of this.combatants) {
+      if (!target.alive || target.team === shooter.team) continue;
+      target.modelPackage.root.updateMatrixWorld(true);
+      const hits = _raycaster.intersectObjects(target.modelPackage.hitboxMeshes, false);
+      if (hits.length > 0 && hits[0].distance < closestDist) {
+        closestDist = hits[0].distance;
+        closestZone = (hits[0].object.userData?.hitZone as 'head' | 'body' | 'leg') || 'body';
+        closestTarget = target;
+        closestPoint = hits[0].point;
+      } else {
+        // Generous close-quarters slash arc within 2.5m forward cone
+        const dist = origin.distanceTo(target.position);
+        if (dist <= maxRange - 0.25) {
+          _vec3_3.subVectors(target.position, origin).setY(0).normalize();
+          if (_vec3_3.dot(dir) > 0.52 && dist < closestDist) {
+            closestDist = dist;
+            closestZone = 'body';
+            closestTarget = target;
+            closestPoint = target.position.clone().add(_vec3_4.set(0, 1.2, 0));
+          }
+        }
+      }
     }
+
+    if (closestTarget && closestPoint) {
+      this.applyDamage(shooter, closestTarget, closestZone, closestDist);
+      this.spawnSparks(closestPoint);
+    }
+  }
+
+  public fireBullet(shooter: BotCombatant, dir: THREE.Vector3): void {
+    if (shooter.weapon.isMelee) {
+      this.fireMeleeSlash(shooter, dir);
+      return;
+    }
+
+    soundEngine.playGunshot(shooter.weapon.category);
 
     const origin = shooter.isHuman
       ? _vec3_1.copy(this.camera.position)
       : _vec3_1.copy(shooter.position).add(_vec3_4.set(0, 1.38, 0));
 
-    _raycaster.set(origin, dir);
-    _raycaster.far = 110;
+    if (shooter.isHuman && this.customRoom) {
+      multiplayerClient.sendPlayerShoot(
+        [origin.x, origin.y, origin.z],
+        [dir.x, dir.y, dir.z],
+        shooter.weapon.id
+      );
+    }
 
-    let closestHit: { combatant: BotCombatant; hitZone: 'head' | 'body' | 'leg'; point: THREE.Vector3 } | null = null;
-    let closestDist = Infinity;
+    const pellets = Math.max(1, shooter.weapon.pellets ?? 1);
+    const pelletSpread = pellets > 1 ? shooter.weapon.spreadBase * 1.15 : 0;
 
-    for (const target of this.combatants) {
-      if (!target.alive || target.team === shooter.team) continue;
+    if (shooter.isHuman) {
+      this.getWeaponEntry(shooter.weapon.id).shotsFired++;
+    }
 
-      // Sync world matrices immediately so animated/moving targets register 100% accurately
-      target.modelPackage.root.updateMatrixWorld(true);
-      const hits = _raycaster.intersectObjects(target.modelPackage.hitboxMeshes, false);
+    for (let pIdx = 0; pIdx < pellets; pIdx++) {
+      const pelletDir = _vec3_5.copy(dir);
+      if (pelletSpread > 0) {
+        pelletDir.x += (Math.random() - 0.5) * pelletSpread;
+        pelletDir.y += (Math.random() - 0.5) * pelletSpread * 0.85;
+        pelletDir.z += (Math.random() - 0.5) * pelletSpread;
+        pelletDir.normalize();
+      }
 
-      if (hits.length > 0) {
-        const hit = hits[0];
-        if (hit.distance < closestDist) {
-          closestDist = hit.distance;
-          const hitZone = (hit.object.userData?.hitZone as 'head' | 'body' | 'leg') || 'body';
-          closestHit = { combatant: target, hitZone, point: hit.point };
+      _raycaster.set(origin, pelletDir);
+      _raycaster.far = shooter.weapon.range && shooter.weapon.category === 'SHOTGUN' ? 42 : 110;
+
+      let closestHit: { combatant: BotCombatant; hitZone: 'head' | 'body' | 'leg'; point: THREE.Vector3 } | null = null;
+      let closestDist = Infinity;
+
+      for (const target of this.combatants) {
+        if (!target.alive || target.team === shooter.team) continue;
+
+        target.modelPackage.root.updateMatrixWorld(true);
+        const hits = _raycaster.intersectObjects(target.modelPackage.hitboxMeshes, false);
+
+        if (hits.length > 0) {
+          const hit = hits[0];
+          if (hit.distance < closestDist) {
+            closestDist = hit.distance;
+            const hitZone = (hit.object.userData?.hitZone as 'head' | 'body' | 'leg') || 'body';
+            closestHit = { combatant: target, hitZone, point: hit.point };
+          }
         }
       }
-    }
 
-    // Check Bastion tactical energy barriers too
-    const barrierMeshes = this.abilityMgr.getBarrierMeshes();
-    let barrierDist = Infinity;
-    let barrierPoint: THREE.Vector3 | null = null;
-    let hitBarrierIdx = -1;
-    if (barrierMeshes.length > 0) {
-      const bHits = _raycaster.intersectObjects(barrierMeshes, false);
-      if (bHits.length > 0) {
-        barrierDist = bHits[0].distance;
-        barrierPoint = bHits[0].point;
-        hitBarrierIdx = this.abilityMgr.barriers.findIndex((b) => b.mesh === bHits[0].object);
+      const barrierMeshes = this.abilityMgr.getBarrierMeshes();
+      let barrierDist = Infinity;
+      let barrierPoint: THREE.Vector3 | null = null;
+      let hitBarrierIdx = -1;
+      if (barrierMeshes.length > 0) {
+        const bHits = _raycaster.intersectObjects(barrierMeshes, false);
+        if (bHits.length > 0) {
+          barrierDist = bHits[0].distance;
+          barrierPoint = bHits[0].point;
+          hitBarrierIdx = this.abilityMgr.barriers.findIndex((b) => b.mesh === bHits[0].object);
+        }
       }
-    }
 
-    const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-    let worldDist = Infinity;
-    let worldPoint: THREE.Vector3 | null = null;
-    if (worldHits.length > 0) {
-      worldDist = worldHits[0].distance;
-      worldPoint = worldHits[0].point;
-    }
-
-    if (closestHit && closestDist < worldDist && closestDist < barrierDist) {
-      _vec3_3.copy(closestHit.point);
-      this.applyDamage(shooter, closestHit.combatant, closestHit.hitZone, closestDist);
-      this.spawnSparks(closestHit.point);
-    } else if (barrierPoint && barrierDist < worldDist) {
-      _vec3_3.copy(barrierPoint);
-      this.spawnSparks(barrierPoint);
-      if (hitBarrierIdx >= 0) {
-        this.abilityMgr.barriers[hitBarrierIdx].hp -= shooter.weapon.damageBody;
+      const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
+      let worldDist = Infinity;
+      let worldPoint: THREE.Vector3 | null = null;
+      if (worldHits.length > 0) {
+        worldDist = worldHits[0].distance;
+        worldPoint = worldHits[0].point;
       }
-    } else if (worldPoint) {
-      _vec3_3.copy(worldPoint);
-      this.spawnSparks(worldPoint);
-    } else {
-      _vec3_3.copy(origin).addScaledVector(dir, 80);
-    }
 
-    this.spawnTracer(origin, _vec3_3);
+      if (closestHit && closestDist < worldDist && closestDist < barrierDist) {
+        _vec3_3.copy(closestHit.point);
+        this.applyDamage(shooter, closestHit.combatant, closestHit.hitZone, closestDist);
+        this.spawnSparks(closestHit.point);
+      } else if (barrierPoint && barrierDist < worldDist) {
+        _vec3_3.copy(barrierPoint);
+        this.spawnSparks(barrierPoint);
+        if (hitBarrierIdx >= 0) {
+          this.abilityMgr.barriers[hitBarrierIdx].hp -= shooter.weapon.damageBody;
+        }
+      } else if (worldPoint) {
+        _vec3_3.copy(worldPoint);
+        this.spawnSparks(worldPoint);
+      } else {
+        _vec3_3.copy(origin).addScaledVector(pelletDir, 80);
+      }
+
+      this.spawnTracer(origin, _vec3_3);
+    }
   }
 
   private applyDamage(
@@ -1994,6 +2237,10 @@ export class GameEngine {
     }
 
     const totalDmg = dmg.healthDamage + dmg.armorDamage;
+
+    if (shooter.isHuman && victim.isRemoteHuman && this.customRoom) {
+      multiplayerClient.sendPlayerHit(victim.name, totalDmg, dmg.isHeadshot, shooter.weapon.name);
+    }
 
     if (shooter.isHuman) {
       this.playerDamageDealt += totalDmg;
@@ -2288,22 +2535,23 @@ export class GameEngine {
         dt
       );
 
-      // Sync arms smoothly with weapon offsets & animations
+      // Sync arms smoothly with weapon grip offsets & animations
+      const basePos = isADS ? profile.adsPos : profile.hipPos;
       this.viewmodelArms.position.x = THREE.MathUtils.damp(
         this.viewmodelArms.position.x,
-        (isADS ? -0.22 : profile.hipPos[0] - 0.25) + this.vmSwayX * 0.65 + inspectShiftX * 0.5,
+        basePos[0] - 0.03 + this.vmSwayX * 0.65 + inspectShiftX * 0.5,
         16,
         dt
       );
       this.viewmodelArms.position.y = THREE.MathUtils.damp(
         this.viewmodelArms.position.y,
-        this.vmEquipOffset * 0.65 + reloadDip * 0.55 + this.vmLandOffset * 0.75 + crouchShiftY * 0.7,
+        basePos[1] + 0.03 + this.vmEquipOffset * 0.65 + reloadDip * 0.55 + this.vmLandOffset * 0.75 + crouchShiftY * 0.7,
         16,
         dt
       );
       this.viewmodelArms.position.z = THREE.MathUtils.damp(
         this.viewmodelArms.position.z,
-        this.vmRecoilZ * 0.65 + boltRackPull * 0.8,
+        basePos[2] + 0.16 + this.vmRecoilZ * 0.65 + boltRackPull * 0.8,
         18,
         dt
       );
@@ -2376,6 +2624,15 @@ export class GameEngine {
       this.roundPhase = 'MATCH_OVER';
       this.callbacks.onMatchOver(winnerTeam, this.getMatchSummary(winnerTeam === this.playerTeam));
     }
+
+    if (this.customRoom && multiplayerClient.username === this.customRoom.hostUsername) {
+      multiplayerClient.sendRoundSync(
+        this.roundPhase,
+        this.attackerRoundsWon,
+        this.defenderRoundsWon,
+        this.roundNumber
+      );
+    }
   }
 
   public startNextRound(): void {
@@ -2426,10 +2683,18 @@ export class GameEngine {
     this.playerOverdriveTimer = 0;
     this.emitAbilityStates();
 
-    const attSpawn = SPAWN_ATTACKERS;
-    const defSpawn = SPAWN_DEFENDERS;
+    const roundSlotOrder: Record<TeamSide, number[]> = {
+      ATTACKERS: [0, 1, 3, 4],
+      DEFENDERS: [0, 1, 3, 4],
+    };
+    const roundSlotCursor: Record<TeamSide, number> = {
+      ATTACKERS: 0,
+      DEFENDERS: 0,
+    };
 
-    this.combatants.forEach((c, idx) => {
+    const firstAttackerId = this.combatants.find((x) => x.team === 'ATTACKERS')?.id ?? null;
+
+    this.combatants.forEach((c) => {
       c.alive = true;
       c.deathTimer = 0;
       c.hp = 100;
@@ -2443,32 +2708,41 @@ export class GameEngine {
       });
 
       const isAttacker = c.team === 'ATTACKERS';
-      const spawnBase = isAttacker ? attSpawn : defSpawn;
-      const offsetX = ((idx % 5) - 2) * 3.0;
+      const slotIdx = c.isHuman
+        ? 2
+        : roundSlotOrder[c.team][roundSlotCursor[c.team]++ % roundSlotOrder[c.team].length];
+      const spawnPos = this.getSpawnSlotPosition(c.team, slotIdx);
       const spawnYaw = isAttacker ? 0 : Math.PI;
 
-      c.position.set(spawnBase.x + offsetX, 0, spawnBase.z);
+      c.position.copy(spawnPos);
       c.yaw = spawnYaw;
       c.pitch = 0;
 
-      // Bots upgrade to SMG/Rifle when rounds progress and credits allow
-      if (!c.isHuman) {
+      // Smart AI bots dynamically buy from the full 18-weapon arsenal based on economy & agent role
+      if (!c.isHuman && !c.isRemoteHuman) {
         c.armor = this.roundNumber >= 2 ? 25 : 0;
         const botStats = this.playerStats.find((s) => s.id === c.id);
-        if (botStats && botStats.credits >= 2900) {
-          botStats.credits -= 2900;
-          c.primaryWeapon = WEAPON_REGISTRY.PHANTOM_V;
-          c.primaryAmmoInMag = WEAPON_REGISTRY.PHANTOM_V.magazineSize;
-          c.primaryReserveAmmo = WEAPON_REGISTRY.PHANTOM_V.reserveAmmo;
-          c.weapon = c.primaryWeapon;
-          c.activeSlot = 1;
-        } else if (botStats && botStats.credits >= 1600 && !c.primaryWeapon) {
-          botStats.credits -= 1600;
-          c.primaryWeapon = WEAPON_REGISTRY.VIPER_9;
-          c.primaryAmmoInMag = WEAPON_REGISTRY.VIPER_9.magazineSize;
-          c.primaryReserveAmmo = WEAPON_REGISTRY.VIPER_9.reserveAmmo;
-          c.weapon = c.primaryWeapon;
-          c.activeSlot = 1;
+        if (botStats) {
+          const buy = pickBotPurchase(botStats.credits, this.roundNumber, this.botDifficulty, c.agentId);
+          if (buy && WEAPON_REGISTRY[buy.weaponId]) {
+            const w = WEAPON_REGISTRY[buy.weaponId];
+            botStats.credits -= buy.cost;
+            if (buy.isSidearm) {
+              c.sidearmWeapon = w;
+              c.sidearmAmmoInMag = w.magazineSize;
+              c.sidearmReserveAmmo = w.reserveAmmo;
+              if (!c.primaryWeapon) {
+                c.weapon = w;
+                c.activeSlot = 2;
+              }
+            } else {
+              c.primaryWeapon = w;
+              c.primaryAmmoInMag = w.magazineSize;
+              c.primaryReserveAmmo = w.reserveAmmo;
+              c.weapon = w;
+              c.activeSlot = 1;
+            }
+          }
         }
         c.modelPackage.setWeapon(c.weapon.id);
       }
@@ -2489,7 +2763,7 @@ export class GameEngine {
       c.modelPackage.root.rotation.y = c.yaw;
       c.modelPackage.root.updateMatrixWorld(true);
 
-      c.hasSpike = isAttacker && (idx === 0 || (idx === 5 && !this.playerCombatant.hasSpike));
+      c.hasSpike = isAttacker && c.id === firstAttackerId;
       if (c.hasSpike) this.spikeCarrierId = c.id;
 
       const stats = this.playerStats.find((s) => s.id === c.id);
@@ -2517,6 +2791,15 @@ export class GameEngine {
     this.camera.rotation.y = this.playerCombatant.yaw;
     this.camera.rotation.x = 0;
     this.camera.updateMatrixWorld(true);
+
+    if (this.customRoom && multiplayerClient.username === this.customRoom.hostUsername) {
+      multiplayerClient.sendRoundSync(
+        this.roundPhase,
+        this.attackerRoundsWon,
+        this.defenderRoundsWon,
+        this.roundNumber
+      );
+    }
   }
 
   public buyItem(itemId: string): boolean {
@@ -2568,6 +2851,99 @@ export class GameEngine {
     return false;
   }
 
+  private handleIncomingMultiplayerMessage(msg: Record<string, unknown>): void {
+    const type = String(msg.type ?? '');
+    const fromUsername = String(msg.fromUsername ?? '');
+    if (!fromUsername) return;
+
+    const remote = this.combatants.find(
+      (c) => c.isRemoteHuman && c.name.toLowerCase() === fromUsername.toLowerCase()
+    );
+
+    if (type === 'PLAYER_SYNC' && remote && msg.payload) {
+      const payload = msg.payload as RemotePlayerSync;
+      remote.position.set(payload.x, payload.y, payload.z);
+      remote.yaw = payload.yaw;
+      remote.pitch = payload.pitch;
+      remote.isCrouching = payload.crouch;
+      remote.hp = payload.hp;
+      remote.armor = payload.armor;
+      remote.alive = payload.alive;
+      if (remote.weapon.id !== payload.weaponId && WEAPON_REGISTRY[payload.weaponId]) {
+        remote.weapon = WEAPON_REGISTRY[payload.weaponId];
+        remote.modelPackage.setWeapon(payload.weaponId);
+      }
+      remote.modelPackage.root.visible = payload.alive;
+      remote.modelPackage.root.position.copy(remote.position);
+      remote.modelPackage.root.rotation.y = remote.yaw;
+      remote.modelPackage.updateAnimation(0.05, true, 4.5, payload.crouch, !payload.alive, payload.pitch, false);
+
+      const st = this.playerStats.find((s) => s.id === remote.id);
+      if (st) {
+        st.hp = payload.hp;
+        st.armor = payload.armor;
+        st.alive = payload.alive;
+      }
+    } else if (type === 'PLAYER_SHOOT' && remote) {
+      const origin = (msg.origin as [number, number, number]) ?? [remote.position.x, 1.4, remote.position.z];
+      const dir = (msg.dir as [number, number, number]) ?? [0, 0, -1];
+      remote.modelPackage.triggerMuzzleFlash();
+      const s = new THREE.Vector3(...origin);
+      const e = s.clone().add(new THREE.Vector3(...dir).multiplyScalar(32));
+      this.spawnTracer(s, e);
+    } else if (type === 'PLAYER_HIT') {
+      const targetName = String(msg.targetUsername ?? '');
+      const myName = multiplayerClient.getCachedUsername();
+      if (myName && targetName.toLowerCase() === myName.toLowerCase() && this.playerCombatant.alive) {
+        const dmgAmt = Math.max(1, Number(msg.damage ?? 20));
+        this.applyExternalDamage(this.playerCombatant, dmgAmt, String(msg.weaponName ?? 'Rifle'));
+      }
+    } else if (type === 'SPIKE_EVENT') {
+      const ev = String(msg.event ?? '');
+      if (ev === 'PLANTED' && this.spikeState === 'not_planted') {
+        const pos = (msg.pos as [number, number, number]) ?? [BOMB_SITE_A.x, 0, BOMB_SITE_A.z];
+        this.spikeState = 'planted';
+        this.plantedSite = (msg.site as 'A' | 'B') ?? 'A';
+        this.spikePosition = new THREE.Vector3(...pos);
+        if (!this.spikeMesh) {
+          this.spikeMesh = createSpikeModel();
+          this.scene.add(this.spikeMesh);
+        }
+        this.spikeMesh.position.copy(this.spikePosition);
+        soundEngine.playSpikePlant();
+      } else if (ev === 'DEFUSED' && this.spikeState === 'planted') {
+        this.spikeState = 'defused';
+        soundEngine.playSpikeDefused();
+        this.endRound('DEFENDERS', 'SPIKE_DEFUSED');
+      }
+    } else if (type === 'ROUND_SYNC') {
+      const hostName = this.customRoom?.hostUsername ?? '';
+      if (hostName && fromUsername.toLowerCase() === hostName.toLowerCase()) {
+        const syncedRound = Number(msg.roundNumber ?? this.roundNumber);
+        const att = Number(msg.attackerRounds ?? this.attackerRoundsWon);
+        const def = Number(msg.defenderRounds ?? this.defenderRoundsWon);
+        this.attackerRoundsWon = att;
+        this.defenderRoundsWon = def;
+        this.callbacks.onRoundScoreChange(att, def, syncedRound);
+        if (syncedRound > this.roundNumber && String(msg.roundPhase) === 'BUY_PHASE') {
+          this.roundNumber = syncedRound - 1;
+          this.startNextRound();
+        }
+      }
+    }
+  }
+
+  private handleContextLost = (e: Event): void => {
+    e.preventDefault();
+    this.contextLost = true;
+  };
+
+  private handleContextRestored = (): void => {
+    this.contextLost = false;
+    this.lastTime = performance.now();
+    this.tick();
+  };
+
   private handleResize = (): void => {
     if (!this.renderer || !this.camera) return;
     const w = window.innerWidth;
@@ -2581,7 +2957,13 @@ export class GameEngine {
   public dispose(): void {
     this.isDestroyed = true;
     cancelAnimationFrame(this.frameId);
+    this.unsubInMatch?.();
+    if (this.customRoom) {
+      multiplayerClient.notifyMatchEnded();
+    }
     window.removeEventListener('resize', this.handleResize);
+    this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
+    this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
     this.input.detach();
     this.abilityMgr.dispose();
     this.mapData.dispose();

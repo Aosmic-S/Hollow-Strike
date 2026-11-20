@@ -3,6 +3,8 @@
  * 100% procedural sound synthesis using the Web Audio API. Zero external audio downloads.
  */
 
+import { WeaponCategory } from './types';
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -46,7 +48,7 @@ class SoundEngine {
 
   // --- Weapon Synthesizers ---
 
-  public playGunshot(category: 'SIDEARM' | 'SMG' | 'RIFLE' | 'SNIPER'): void {
+  public playGunshot(category: WeaponCategory): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
@@ -180,6 +182,89 @@ class SoundEngine {
 
         osc.start(now);
         osc.stop(now + 0.46);
+        noiseNode.start(now);
+        break;
+      }
+      case 'SHOTGUN': {
+        // Booming scatter blast + wide mid-low punch
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(34, now + 0.30);
+        gain.gain.setValueAtTime(0.95, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+
+        const noise = this.createNoiseBuffer(0.28);
+        const noiseNode = this.ctx.createBufferSource();
+        noiseNode.buffer = noise;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(1900, now);
+        filter.frequency.exponentialRampToValueAtTime(200, now + 0.28);
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.8, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        noiseNode.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(this.masterGain);
+
+        osc.start(now);
+        osc.stop(now + 0.31);
+        noiseNode.start(now);
+        break;
+      }
+
+      case 'MACHINE_GUN': {
+        // Punchy mechanical heavy LMG thump
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(155, now);
+        osc.frequency.exponentialRampToValueAtTime(42, now + 0.16);
+        gain.gain.setValueAtTime(0.65, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+        const noise = this.createNoiseBuffer(0.14);
+        const noiseNode = this.ctx.createBufferSource();
+        noiseNode.buffer = noise;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(1100, now);
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.55, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        noiseNode.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(this.masterGain);
+
+        osc.start(now);
+        osc.stop(now + 0.17);
+        noiseNode.start(now);
+        break;
+      }
+
+      case 'MELEE': {
+        // Crisp metallic blade slash whoosh
+        const noise = this.createNoiseBuffer(0.16);
+        const noiseNode = this.ctx.createBufferSource();
+        noiseNode.buffer = noise;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(3200, now);
+        filter.frequency.exponentialRampToValueAtTime(650, now + 0.16);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.55, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+        noiseNode.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
         noiseNode.start(now);
         break;
       }

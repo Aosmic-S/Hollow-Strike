@@ -1,11 +1,19 @@
 /**
  * Hollow Strike - Fullscreen Tactical Map Overview Modal
- * Displays complete 2D map layout, site A & B zones, chokepoints, player position, and spike.
+ * Displays real-time 2D projection synced from extracted 3D map geometry, site A & B zones, spawns, players, and spike.
  */
 
 import React, { useEffect, useState } from 'react';
 import { TeamSide } from '../game/types';
-import { BOMB_SITE_A, BOMB_SITE_B, MAP_COLLIDERS } from '../game/mapData';
+import {
+  BOMB_SITE_A,
+  BOMB_SITE_B,
+  SPAWN_ATTACKERS,
+  SPAWN_DEFENDERS,
+  getActiveMapColliders,
+  getExtractedWallColliders,
+  subscribeMapColliders,
+} from '../game/mapData';
 import { BotCombatant } from '../game/botAI';
 
 interface TacticalMapModalProps {
@@ -31,10 +39,14 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 120);
-    return () => window.clearInterval(id);
+    const unsub = subscribeMapColliders(() => setTick((t) => t + 1));
+    return () => {
+      window.clearInterval(id);
+      unsub();
+    };
   }, []);
 
-  const mapSize = 92;
+  const mapSize = 128;
   const canvasSize = 420;
   const scale = canvasSize / mapSize;
   const center = canvasSize / 2;
@@ -42,27 +54,40 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
   const toCanvasX = (wx: number) => center + wx * scale;
   const toCanvasY = (wz: number) => center + wz * scale;
 
+  const activeColliders = getActiveMapColliders();
+  const extractedCount = getExtractedWallColliders().length;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/88 backdrop-blur-sm p-4 select-none">
-      <div className="relative flex flex-col items-center border border-[#ECE8E1]/20 bg-[#18232E] p-6 shadow-2xl max-h-[95dvh] overflow-y-auto clip-val-panel">
+    <div
+      data-testid="tactical-map-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/88 backdrop-blur-sm p-4 select-none"
+    >
+      <div className="relative flex flex-col items-center border border-[#ECE8E1]/20 bg-[#18232E] p-5 sm:p-6 shadow-2xl max-h-[95dvh] overflow-y-auto clip-val-panel">
         <div className="flex w-full items-center justify-between border-b border-[#ECE8E1]/15 pb-3 mb-4 gap-6">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="h-2.5 w-2.5 rotate-45 bg-[#17E5B8]" />
-            <h2 className="font-display text-xl font-extrabold uppercase tracking-wider text-[#ECE8E1]">
-              TACTICAL MAP OVERVIEW
-            </h2>
+            <div>
+              <h2 className="font-display text-xl font-extrabold uppercase tracking-wider text-[#ECE8E1]">
+                TACTICAL MAP OVERVIEW
+              </h2>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-[#8B978F]">
+                Live Geometry Sync · {extractedCount > 0 ? `${extractedCount} 3D Wall Solids` : 'Arena Layout'}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={onClose}
               className="bg-[#FF4655] px-4 py-2 font-display text-xs font-extrabold uppercase tracking-widest text-[#ECE8E1] hover:bg-[#ff5a68] transition cursor-pointer clip-val-btn"
             >
               ← BACK
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
+              className="hidden sm:block border border-[#ECE8E1]/20 bg-[#0F1923] px-3 py-1.5 font-mono text-xs font-bold uppercase text-[#ECE8E1] hover:border-[#FF4655] hover:text-[#FF4655] transition cursor-pointer clip-val-card"
             >
               Close [M / Esc]
             </button>
@@ -71,7 +96,12 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
 
         {/* Tactical Map SVG Projection */}
         <div className="relative overflow-hidden border border-[#ECE8E1]/15 bg-[#0F1923] p-2 shadow-2xl clip-val-card">
-          <svg width={canvasSize} height={canvasSize} viewBox={`0 0 ${canvasSize} ${canvasSize}`} className="block max-w-full h-auto">
+          <svg
+            width={canvasSize}
+            height={canvasSize}
+            viewBox={`0 0 ${canvasSize} ${canvasSize}`}
+            className="block max-w-full h-auto"
+          >
             <defs>
               <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
                 <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#18232E" strokeWidth="0.75" />
@@ -79,12 +109,13 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
             </defs>
             <rect width={canvasSize} height={canvasSize} fill="url(#grid)" />
 
-            {/* Map Colliders / Structures */}
-            {MAP_COLLIDERS.map((c, i) => {
+            {/* Live Map Colliders / Structures */}
+            {activeColliders.map((c, i) => {
               const x = toCanvasX(c.minX);
               const y = toCanvasY(c.minZ);
-              const w = (c.maxX - c.minX) * scale;
-              const h = (c.maxZ - c.minZ) * scale;
+              const w = Math.max(2, (c.maxX - c.minX) * scale);
+              const h = Math.max(2, (c.maxZ - c.minZ) * scale);
+              const isTallWall = c.maxY >= 2.2;
               return (
                 <rect
                   key={i}
@@ -92,13 +123,58 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                   y={y}
                   width={w}
                   height={h}
-                  fill="#18232E"
-                  stroke="#3b4b5c"
+                  fill={isTallWall ? '#243343' : '#18232E'}
+                  stroke={isTallWall ? '#5a6d80' : '#2a4d54'}
                   strokeWidth="1"
                   rx="1"
                 />
               );
             })}
+
+            {/* Attacker & Defender Spawns */}
+            <g>
+              <circle
+                cx={toCanvasX(SPAWN_ATTACKERS.x)}
+                cy={toCanvasY(SPAWN_ATTACKERS.z)}
+                r={12}
+                fill="rgba(255, 70, 85, 0.14)"
+                stroke="#FF4655"
+                strokeWidth="1"
+              />
+              <text
+                x={toCanvasX(SPAWN_ATTACKERS.x)}
+                y={toCanvasY(SPAWN_ATTACKERS.z) + 18}
+                fill="#FF4655"
+                fontSize="8"
+                fontWeight="bold"
+                fontFamily="monospace"
+                textAnchor="middle"
+              >
+                ATT SPAWN
+              </text>
+            </g>
+
+            <g>
+              <circle
+                cx={toCanvasX(SPAWN_DEFENDERS.x)}
+                cy={toCanvasY(SPAWN_DEFENDERS.z)}
+                r={12}
+                fill="rgba(23, 229, 184, 0.14)"
+                stroke="#17E5B8"
+                strokeWidth="1"
+              />
+              <text
+                x={toCanvasX(SPAWN_DEFENDERS.x)}
+                y={toCanvasY(SPAWN_DEFENDERS.z) - 13}
+                fill="#17E5B8"
+                fontSize="8"
+                fontWeight="bold"
+                fontFamily="monospace"
+                textAnchor="middle"
+              >
+                DEF SPAWN
+              </text>
+            </g>
 
             {/* Bomb Site A */}
             <circle
@@ -199,7 +275,7 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
                   fontWeight="bold"
                   textAnchor="middle"
                 >
-                  ⚡
+                  !
                 </text>
               </g>
             )}
@@ -207,7 +283,7 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
         </div>
 
         {/* Legend */}
-        <div className="mt-4 flex items-center gap-6 font-mono text-xs text-[#ECE8E1]">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-5 font-mono text-xs text-[#ECE8E1]">
           <div className="flex items-center gap-1.5">
             <span className="h-3 w-3 rounded-full bg-[#ECE8E1]" />
             <span>You</span>
@@ -219,6 +295,10 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
           <div className="flex items-center gap-1.5">
             <span className="h-3 w-3 rounded-full bg-[#FF4655]" />
             <span>Spotted Hostile</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-3 w-3 border border-[#5a6d80] bg-[#243343]" />
+            <span>Building Wall</span>
           </div>
         </div>
       </div>

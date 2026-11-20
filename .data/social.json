@@ -1,0 +1,14 @@
+{
+  "friends": {
+    "bravofox": [
+      "AlphaWolf"
+    ],
+    "alphawolf": [
+      "BravoFox"
+    ]
+  },
+  "pendingIncoming": {
+    "bravofox": [],
+    "alphawolf": []
+  }
+}

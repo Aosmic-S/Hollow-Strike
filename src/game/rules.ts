@@ -18,7 +18,18 @@ import {
   DEFAULT_TOUCH_LAYOUT,
   TOUCH_LAYOUT_PRESETS,
   TouchLayoutPresetId,
+  BotDifficulty,
+  WEAPON_REGISTRY,
 } from './types';
+
+export interface GridWallBox {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+}
 
 export interface DamageResult {
   rawDamage: number;
@@ -41,6 +52,7 @@ export interface RoundWinCheck {
 /**
  * Calculates damage dealt by a weapon to a target.
  * Armor absorbs 66% of incoming damage until broken; remaining damage flows to health.
+ * Shotguns/short-range weapons apply steeper range falloff; Snipers & Melee do not.
  */
 export function calculateDamage(
   weapon: WeaponDef,
@@ -58,8 +70,16 @@ export function calculateDamage(
     baseDmg = weapon.damageLeg;
   }
 
-  // Slight falloff beyond 35 meters (except sniper)
-  if (weapon.category !== 'SNIPER' && distance > 35) {
+  if (weapon.isMelee) {
+    // Melee ignores range falloff within strike reach
+    baseDmg = Math.round(baseDmg);
+  } else if (weapon.category === 'SHOTGUN' || (weapon.range && weapon.range <= 24)) {
+    const effRange = weapon.range ?? 20;
+    if (distance > 8) {
+      const falloff = Math.max(0.2, 1 - (distance - 8) / Math.max(4, effRange - 4));
+      baseDmg = Math.max(2, Math.round(baseDmg * falloff));
+    }
+  } else if (weapon.category !== 'SNIPER' && distance > 35) {
     const falloffFactor = Math.max(0.75, 1 - (distance - 35) * 0.008);
     baseDmg = Math.round(baseDmg * falloffFactor);
   }
@@ -75,8 +95,8 @@ export function calculateDamage(
       healthDmg = Math.round(rawDamage - absorbPortion);
     } else {
       armorDmg = targetArmor;
-      const unabsorbedDamage = rawDamage - (targetArmor / 0.66);
-      healthDmg = Math.round(unabsorbedDamage + (rawDamage * 0.34));
+      const unabsorbedDamage = rawDamage - targetArmor / 0.66;
+      healthDmg = Math.round(unabsorbedDamage + rawDamage * 0.34);
     }
   } else {
     healthDmg = rawDamage;
@@ -99,11 +119,6 @@ export function calculateDamage(
 
 /**
  * Tactical Economy calculation per round.
- * Win: +3000
- * Loss: 1900 + min(streak, 3) * 500 (1900, 2400, 2900 max)
- * Plant bonus for attackers: +300
- * Kill reward: +200 per kill
- * Max bank: 9000
  */
 export function calculateEconomy(
   currentCredits: number,
@@ -137,64 +152,113 @@ export function calculateEconomy(
 }
 
 /**
+ * Picks optimal weapon upgrade for a bot based on remaining credits, round, and difficulty.
+ */
+export function pickBotPurchase(
+  credits: number,
+  roundNumber: number,
+  difficulty: BotDifficulty,
+  agentId: string
+): { weaponId: string; cost: number; isSidearm: boolean } | null {
+  if (roundNumber === 1) {
+    if (credits >= 800 && difficulty === 'HARD' && Math.random() < 0.35) {
+      return { weaponId: 'HANGMAN', cost: WEAPON_REGISTRY.HANGMAN.cost, isSidearm: true };
+    }
+    if (credits >= 450 && Math.random() < 0.55) {
+      return { weaponId: 'FURY', cost: WEAPON_REGISTRY.FURY.cost, isSidearm: true };
+    }
+    if (credits >= 400 && Math.random() < 0.5) {
+      return { weaponId: 'THORN', cost: WEAPON_REGISTRY.THORN.cost, isSidearm: true };
+    }
+    return null;
+  }
+
+  if (credits >= 4700 && (agentId === 'LUMEN' || difficulty === 'HARD') && Math.random() < 0.22) {
+    return { weaponId: 'ORACLE', cost: WEAPON_REGISTRY.ORACLE.cost, isSidearm: false };
+  }
+  if (credits >= 3200 && agentId === 'BASTION' && Math.random() < 0.25) {
+    return { weaponId: 'THOR', cost: WEAPON_REGISTRY.THOR.cost, isSidearm: false };
+  }
+  if (credits >= 2900) {
+    const pick = Math.random() < 0.5 ? 'REAPER' : 'ECLIPSE';
+    return { weaponId: pick, cost: WEAPON_REGISTRY[pick].cost, isSidearm: false };
+  }
+  if (credits >= 2250) {
+    return { weaponId: 'TUSK', cost: WEAPON_REGISTRY.TUSK.cost, isSidearm: false };
+  }
+  if (credits >= 2050) {
+    return { weaponId: 'VEIL', cost: WEAPON_REGISTRY.VEIL.cost, isSidearm: false };
+  }
+  if (credits >= 1850 && agentId === 'BLITZ' && Math.random() < 0.45) {
+    return { weaponId: 'JACKAL', cost: WEAPON_REGISTRY.JACKAL.cost, isSidearm: false };
+  }
+  if (credits >= 1600) {
+    const pick = Math.random() < 0.65 ? 'MANTIS' : 'STORM';
+    return { weaponId: pick, cost: WEAPON_REGISTRY[pick].cost, isSidearm: false };
+  }
+  if (credits >= 1500 && Math.random() < 0.35) {
+    return { weaponId: 'BOLT', cost: WEAPON_REGISTRY.BOLT.cost, isSidearm: false };
+  }
+  if (credits >= 1100) {
+    return { weaponId: 'STINGRAY', cost: WEAPON_REGISTRY.STINGRAY.cost, isSidearm: false };
+  }
+  if (credits >= 850) {
+    return { weaponId: 'SLUG', cost: WEAPON_REGISTRY.SLUG.cost, isSidearm: false };
+  }
+  if (credits >= 800) {
+    return { weaponId: 'HANGMAN', cost: WEAPON_REGISTRY.HANGMAN.cost, isSidearm: true };
+  }
+  return null;
+}
+
+/**
  * Evaluates whether the round has ended and which team won.
  */
 export function checkRoundWin(
   aliveAttackers: number,
   aliveDefenders: number,
   spikeState: SpikeState,
-  roundTimeRemaining: number
+  roundTimeRemaining: number,
+  totalAttackers = 5,
+  totalDefenders = 5
 ): RoundWinCheck {
-  // 1. Spike detonated -> Attackers win unconditionally
   if (spikeState === 'detonated') {
     return { winner: 'ATTACKERS', reason: 'SPIKE_DETONATED', roundOver: true };
   }
-
-  // 2. Spike defused -> Defenders win unconditionally
   if (spikeState === 'defused') {
     return { winner: 'DEFENDERS', reason: 'SPIKE_DEFUSED', roundOver: true };
   }
 
-  // 3. Spike is currently planted -> timer pauses for round and 45s bomb ticking starts.
-  // Even if all attackers die, defenders MUST defuse the spike before it blows!
+  const hasBothTeams = totalAttackers > 0 && totalDefenders > 0;
+
   if (spikeState === 'planted') {
-    if (aliveDefenders <= 0) {
-      // All defenders eliminated while bomb is active -> Attackers win
+    if (hasBothTeams && aliveDefenders <= 0) {
       return { winner: 'ATTACKERS', reason: 'ELIMINATION', roundOver: true };
     }
-    // Still defusable, round continues
     return { winner: null, reason: null, roundOver: false };
   }
 
-  // 4. Spike is NOT planted
-  if (aliveAttackers <= 0) {
-    return { winner: 'DEFENDERS', reason: 'ELIMINATION', roundOver: true };
+  if (hasBothTeams) {
+    if (aliveAttackers <= 0) {
+      return { winner: 'DEFENDERS', reason: 'ELIMINATION', roundOver: true };
+    }
+    if (aliveDefenders <= 0) {
+      return { winner: 'ATTACKERS', reason: 'ELIMINATION', roundOver: true };
+    }
   }
-
-  if (aliveDefenders <= 0) {
-    return { winner: 'ATTACKERS', reason: 'ELIMINATION', roundOver: true };
-  }
-
   if (roundTimeRemaining <= 0) {
-    // Time expired without spike planted -> Defenders hold successfully
     return { winner: 'DEFENDERS', reason: 'TIME_EXPIRED', roundOver: true };
   }
 
   return { winner: null, reason: null, roundOver: false };
 }
 
-/**
- * Checks if a team has reached the match target (13 rounds).
- */
 export function checkMatchWin(attackerRounds: number, defenderRounds: number): TeamSide | null {
   if (attackerRounds >= ROUNDS_TO_WIN) return 'ATTACKERS';
   if (defenderRounds >= ROUNDS_TO_WIN) return 'DEFENDERS';
   return null;
 }
 
-/**
- * Checks if sides should swap (Half time is after round 12).
- */
 export function shouldSwapSides(completedRounds: number): boolean {
   return completedRounds === HALF_TIME_ROUND;
 }
@@ -209,6 +273,8 @@ export function calculateSpread(
   isCrouching: boolean,
   isADS: boolean
 ): number {
+  if (weapon.isMelee) return 0;
+
   let spread = weapon.spreadBase;
 
   if (isJumping) {
@@ -225,7 +291,65 @@ export function calculateSpread(
     spread *= 0.65;
   }
 
-  return Math.max(0.0005, spread);
+  return Math.max(0.0004, spread);
+}
+
+/**
+ * Merges a 2D boolean occupancy grid into minimal axis-aligned wall AABBs.
+ * Used for real-time 3D-mesh-to-collision extraction and 2D Radar synchronization.
+ */
+export function extractGridWallAABBs(
+  occupied: boolean[][], // indexed [zIdx][xIdx]
+  originX: number,
+  originZ: number,
+  cellSize: number,
+  minY = 0,
+  maxY = 4.5
+): GridWallBox[] {
+  const rows = occupied.length;
+  const cols = rows > 0 ? occupied[0].length : 0;
+  const visited: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const boxes: GridWallBox[] = [];
+
+  for (let z = 0; z < rows; z++) {
+    for (let x = 0; x < cols; x++) {
+      if (!occupied[z][x] || visited[z][x]) continue;
+
+      // Expand maximally along +X
+      let maxW = 1;
+      while (x + maxW < cols && occupied[z][x + maxW] && !visited[z][x + maxW]) {
+        maxW++;
+      }
+
+      // Expand downward along +Z while full row of width `maxW` is solid & unvisited
+      let maxH = 1;
+      outer: while (z + maxH < rows) {
+        for (let dx = 0; dx < maxW; dx++) {
+          if (!occupied[z + maxH][x + dx] || visited[z + maxH][x + dx]) {
+            break outer;
+          }
+        }
+        maxH++;
+      }
+
+      for (let dz = 0; dz < maxH; dz++) {
+        for (let dx = 0; dx < maxW; dx++) {
+          visited[z + dz][x + dx] = true;
+        }
+      }
+
+      boxes.push({
+        minX: originX + x * cellSize,
+        maxX: originX + (x + maxW) * cellSize,
+        minY,
+        maxY,
+        minZ: originZ + z * cellSize,
+        maxZ: originZ + (z + maxH) * cellSize,
+      });
+    }
+  }
+
+  return boxes;
 }
 
 export interface SpectateCandidate {
@@ -235,9 +359,6 @@ export interface SpectateCandidate {
   isHuman: boolean;
 }
 
-/**
- * Selects the next or previous alive teammate to spectate.
- */
 export function selectNextSpectateTargetId(
   candidates: SpectateCandidate[],
   playerTeam: TeamSide,
@@ -273,10 +394,6 @@ export interface AimAssistParams {
   dt: number;
 }
 
-/**
- * Computes non-resistive mobile aim assist nudges.
- * Suppresses pull when player swipes away, fast-flicks, or already aims inside head/chest band.
- */
 export function computeGentleAimAssist(params: AimAssistParams): {
   yawStep: number;
   pitchStep: number;
@@ -287,7 +404,6 @@ export function computeGentleAimAssist(params: AimAssistParams): {
     return { yawStep: 0, pitchStep: 0 };
   }
 
-  // Note: yaw -= userDeltaX, pitch -= userDeltaY
   const userYawIntent = -userDeltaX;
   const userPitchIntent = -userDeltaY;
 
@@ -329,43 +445,42 @@ export interface BotAimSolution {
 }
 
 /**
- * Computes human-like bot aim parameters:
- * - Aims naturally at center-mass/torso (adjusted down when target crouches/plants)
- * - Scales angular spread with distance, burst count, and moving target speed
- * - Caps upward vertical scatter beyond close range so bots never laser-headshot across the map
+ * Sharper, smarter tactical Bot Aim model:
+ * HARD bots hold tighter crisp precision and head/upper-chest focus up to 24m;
+ * long-range bots discipline controlled bursts without unfair laser beams across 45m.
  */
 export function computeBotAimSolution(params: BotAimParams): BotAimSolution {
   const { difficulty, distance, burstShotIndex, targetSpeed, isTargetCrouching } = params;
 
-  // Standing torso center is ~1.12m (head is 1.54..1.90m); crouched torso is ~0.78m (head is 1.19..1.55m)
-  const targetAimYOffset = isTargetCrouching ? 0.78 : 1.12;
+  // Standing chest/collar is ~1.22m (HARD creeps higher at mid-close for sharp head-clip threat); crouched ~0.82m
+  const headBias = difficulty === 'HARD' && distance < 22 ? 0.14 : 0;
+  const targetAimYOffset = (isTargetCrouching ? 0.80 : 1.18) + headBias;
 
-  const baseSpread = difficulty === 'HARD' ? 0.026 : difficulty === 'MEDIUM' ? 0.048 : 0.082;
-  const distSlope = difficulty === 'HARD' ? 0.0014 : difficulty === 'MEDIUM' ? 0.0022 : 0.0032;
+  const baseSpread = difficulty === 'HARD' ? 0.014 : difficulty === 'MEDIUM' ? 0.032 : 0.068;
+  const distSlope = difficulty === 'HARD' ? 0.00095 : difficulty === 'MEDIUM' ? 0.0017 : 0.0028;
   const distBeyondClose = Math.max(0, distance - 10);
-  const burstBloom = Math.min(0.05, burstShotIndex * 0.011);
-  const speedPenalty = targetSpeed > 1.5 ? 0.018 : 0;
+  const burstBloom = Math.min(0.042, burstShotIndex * (difficulty === 'HARD' ? 0.008 : 0.011));
+  const speedPenalty = targetSpeed > 1.5 ? (difficulty === 'HARD' ? 0.009 : 0.015) : 0;
 
   const spreadYaw = baseSpread + distBeyondClose * distSlope + burstBloom + speedPenalty;
-  const spreadPitchDown = spreadYaw * 0.65;
+  const spreadPitchDown = spreadYaw * 0.55;
 
-  // Beyond 18m, cap upward vertical jitter tightly so shots hit body/legs or miss rather than headshotting at long range
-  const maxUpFactor = distance > 18 ? 0.14 : 0.38;
-  const spreadPitchUp = Math.min(distance > 18 ? 0.0055 : 0.016, spreadYaw * maxUpFactor);
+  const maxUpFactor = distance > 24 ? 0.18 : 0.42;
+  const spreadPitchUp = Math.min(distance > 24 ? 0.006 : 0.016, spreadYaw * maxUpFactor);
 
   const maxBurstShots =
-    distance > 22
+    distance > 24
       ? difficulty === 'HARD'
         ? 3
         : 2
       : difficulty === 'HARD'
-        ? 5
+        ? 6
         : difficulty === 'MEDIUM'
           ? 4
           : 3;
 
   const burstResetSeconds =
-    difficulty === 'HARD' ? 0.28 : difficulty === 'MEDIUM' ? 0.42 : 0.62;
+    difficulty === 'HARD' ? 0.20 : difficulty === 'MEDIUM' ? 0.34 : 0.56;
 
   return {
     targetAimYOffset,
@@ -377,9 +492,6 @@ export function computeBotAimSolution(params: BotAimParams): BotAimSolution {
   };
 }
 
-/**
- * Remaps a single action to `newCode` cleanly, swapping with any conflicting action so keys stay unique.
- */
 export function remapKeyBinding<T extends { [K in keyof T]: string }>(
   bindings: T,
   action: keyof T,
@@ -396,9 +508,6 @@ export function remapKeyBinding<T extends { [K in keyof T]: string }>(
   return next;
 }
 
-/**
- * Formats a browser KeyboardEvent.code into a clean short HUD/Settings label.
- */
 export function formatKeyCode(code: string): string {
   if (!code) return '?';
   if (code.startsWith('Key')) return code.slice(3).toUpperCase();

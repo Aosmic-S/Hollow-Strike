@@ -4,7 +4,7 @@
 
 export type TeamSide = 'ATTACKERS' | 'DEFENDERS';
 
-export type MatchMode = 'COMPETITIVE' | 'SKIRMISH' | 'PRACTICE';
+export type MatchMode = 'COMPETITIVE' | 'SKIRMISH' | 'PRACTICE' | 'CUSTOM';
 
 export type RoundPhase =
   | 'BUY_PHASE'       // Buy time, barrier up
@@ -19,24 +19,36 @@ export type GraphicsPreset = 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
 
 export type ControlMode = 'AUTO' | 'TOUCH' | 'DESKTOP';
 
+export type WeaponCategory =
+  | 'SIDEARM'
+  | 'SMG'
+  | 'SHOTGUN'
+  | 'RIFLE'
+  | 'SNIPER'
+  | 'MACHINE_GUN'
+  | 'MELEE';
+
 export interface WeaponDef {
   id: string;
   name: string;
-  category: 'SIDEARM' | 'SMG' | 'RIFLE' | 'SNIPER';
+  category: WeaponCategory;
   cost: number;
   damageHead: number;
   damageBody: number;
   damageLeg: number;
-  fireRate: number;      // rounds per second
+  fireRate: number;      // rounds per second (or swings per second for melee)
   magazineSize: number;
   reserveAmmo: number;
   reloadTime: number;    // seconds
-  spreadBase: number;    // radians/degrees
+  spreadBase: number;    // radians
   spreadRun: number;
   recoilPerShot: number;
   firstShotAccurate: boolean;
   canADS: boolean;
-  adsZoom: number;       // FOV multiplier (e.g. 0.65 or 0.35 for sniper)
+  adsZoom: number;       // FOV multiplier (e.g. 0.72 or 0.32 for sniper)
+  pellets?: number;      // Multi-pellet burst per trigger pull (Shotguns / Frenky)
+  isMelee?: boolean;
+  range?: number;        // Effective max range in meters (melee or short falloff)
   description: string;
 }
 
@@ -130,6 +142,7 @@ export interface PlayerStats {
   agentId: string;
   team: TeamSide;
   isHuman: boolean;
+  isRemoteHuman?: boolean;
   kills: number;
   deaths: number;
   assists: number;
@@ -348,6 +361,7 @@ export interface KeyBindings {
   abilityX: string;
   primaryWeapon: string;
   sidearmWeapon: string;
+  meleeWeapon: string;
   buyMenu: string;
   tacticalMap: string;
   scoreboard: string;
@@ -371,6 +385,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   abilityX: 'KeyX',
   primaryWeapon: 'Digit1',
   sidearmWeapon: 'Digit2',
+  meleeWeapon: 'Digit3',
   buyMenu: 'KeyB',
   tacticalMap: 'KeyM',
   scoreboard: 'Tab',
@@ -449,70 +464,309 @@ export interface PlayerProfile {
   matchHistory: MatchRecord[];
 }
 
+export const STARTER_SIDEARM_ID = 'KADENCE';
+export const DEFAULT_PRIMARY_ID = 'REAPER';
+export const MELEE_WEAPON_ID = 'HOLLOW_BLADE';
+
 export const WEAPON_REGISTRY: Record<string, WeaponDef> = {
-  APEX_9: {
-    id: 'APEX_9',
-    name: 'Apex-9',
+  // === SIDEARMS ===
+  KADENCE: {
+    id: 'KADENCE',
+    name: 'Kadence',
     category: 'SIDEARM',
     cost: 0,
     damageHead: 105,
-    damageBody: 38,
-    damageLeg: 28,
-    fireRate: 5.0,
+    damageBody: 34,
+    damageLeg: 26,
+    fireRate: 6.5,
     magazineSize: 12,
     reserveAmmo: 36,
     reloadTime: 1.4,
-    spreadBase: 0.008,
-    spreadRun: 0.045,
+    spreadBase: 0.007,
+    spreadRun: 0.042,
     recoilPerShot: 0.015,
     firstShotAccurate: true,
     canADS: false,
     adsZoom: 1.0,
-    description: 'High mobility semi-automatic tactical sidearm.',
+    description: 'Standard-issue balanced semi-auto service pistol with crisp first-shot precision.',
   },
-  VIPER_9: {
-    id: 'VIPER_9',
-    name: 'Viper-9',
+  THORN: {
+    id: 'THORN',
+    name: 'Thorn',
+    category: 'SIDEARM',
+    cost: 400,
+    damageHead: 96,
+    damageBody: 32,
+    damageLeg: 25,
+    fireRate: 8.0,
+    magazineSize: 13,
+    reserveAmmo: 39,
+    reloadTime: 1.45,
+    spreadBase: 0.008,
+    spreadRun: 0.045,
+    recoilPerShot: 0.016,
+    firstShotAccurate: true,
+    canADS: false,
+    adsZoom: 1.0,
+    description: 'Nimble high-capacity tactical pistol tuned for close-quarters bursts.',
+  },
+  FURY: {
+    id: 'FURY',
+    name: 'Fury',
+    category: 'SIDEARM',
+    cost: 450,
+    damageHead: 66,
+    damageBody: 26,
+    damageLeg: 21,
+    fireRate: 10.5,
+    magazineSize: 15,
+    reserveAmmo: 45,
+    reloadTime: 1.55,
+    spreadBase: 0.014,
+    spreadRun: 0.05,
+    recoilPerShot: 0.019,
+    firstShotAccurate: false,
+    canADS: false,
+    adsZoom: 1.0,
+    description: 'Full-automatic machine pistol built to overwhelm opponents in pistol rounds.',
+  },
+  FRENKY: {
+    id: 'FRENKY',
+    name: 'Frenky',
+    category: 'SIDEARM',
+    cost: 300,
+    damageHead: 22,
+    damageBody: 12,
+    damageLeg: 9,
+    fireRate: 3.3,
+    magazineSize: 2,
+    reserveAmmo: 10,
+    reloadTime: 1.7,
+    spreadBase: 0.065,
+    spreadRun: 0.095,
+    recoilPerShot: 0.045,
+    firstShotAccurate: false,
+    canADS: false,
+    adsZoom: 1.0,
+    pellets: 6,
+    range: 16,
+    description: 'Double-barrel pocket scattergun pistol. Devastating at point-blank corners.',
+  },
+  HANGMAN: {
+    id: 'HANGMAN',
+    name: 'Hangman',
+    category: 'SIDEARM',
+    cost: 800,
+    damageHead: 159,
+    damageBody: 55,
+    damageLeg: 46,
+    fireRate: 3.4,
+    magazineSize: 6,
+    reserveAmmo: 24,
+    reloadTime: 1.85,
+    spreadBase: 0.004,
+    spreadRun: 0.058,
+    recoilPerShot: 0.055,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.88,
+    description: 'Heavy-caliber revolver delivering lethal 1-tap headshots at eco prices.',
+  },
+
+  // === SMGs ===
+  MANTIS: {
+    id: 'MANTIS',
+    name: 'Mantis',
     category: 'SMG',
     cost: 1600,
     damageHead: 78,
-    damageBody: 27,
-    damageLeg: 20,
-    fireRate: 14.0,
+    damageBody: 26,
+    damageLeg: 22,
+    fireRate: 13.5,
     magazineSize: 30,
     reserveAmmo: 90,
-    reloadTime: 1.9,
-    spreadBase: 0.02,
-    spreadRun: 0.06,
-    recoilPerShot: 0.022,
+    reloadTime: 1.85,
+    spreadBase: 0.014,
+    spreadRun: 0.048,
+    recoilPerShot: 0.02,
+    firstShotAccurate: false,
+    canADS: true,
+    adsZoom: 0.82,
+    description: 'Integrally suppressed tactical SMG with laser-tight mid-close control.',
+  },
+  STINGRAY: {
+    id: 'STINGRAY',
+    name: 'Stingray',
+    category: 'SMG',
+    cost: 1100,
+    damageHead: 67,
+    damageBody: 27,
+    damageLeg: 22,
+    fireRate: 15.0,
+    magazineSize: 24,
+    reserveAmmo: 72,
+    reloadTime: 1.75,
+    spreadBase: 0.018,
+    spreadRun: 0.045,
+    recoilPerShot: 0.024,
     firstShotAccurate: false,
     canADS: true,
     adsZoom: 0.85,
-    description: 'Rapid-cycling submachine gun optimized for entry sweeps.',
+    description: 'Blistering rate-of-fire rush SMG built for aggressive entry speed.',
   },
-  PHANTOM_V: {
-    id: 'PHANTOM_V',
-    name: 'Phantom-V',
+
+  // === SHOTGUNS ===
+  SLUG: {
+    id: 'SLUG',
+    name: 'Slug',
+    category: 'SHOTGUN',
+    cost: 850,
+    damageHead: 40,
+    damageBody: 20,
+    damageLeg: 16,
+    fireRate: 1.3,
+    magazineSize: 5,
+    reserveAmmo: 15,
+    reloadTime: 2.3,
+    spreadBase: 0.048,
+    spreadRun: 0.08,
+    recoilPerShot: 0.065,
+    firstShotAccurate: false,
+    canADS: false,
+    adsZoom: 1.0,
+    pellets: 8,
+    range: 22,
+    description: 'Heavy pump-action combat shotgun launching an 8-pellet lethal spread.',
+  },
+  JACKAL: {
+    id: 'JACKAL',
+    name: 'Jackal',
+    category: 'SHOTGUN',
+    cost: 1850,
+    damageHead: 32,
+    damageBody: 16,
+    damageLeg: 13,
+    fireRate: 3.5,
+    magazineSize: 7,
+    reserveAmmo: 21,
+    reloadTime: 2.4,
+    spreadBase: 0.056,
+    spreadRun: 0.085,
+    recoilPerShot: 0.05,
+    firstShotAccurate: false,
+    canADS: false,
+    adsZoom: 1.0,
+    pellets: 7,
+    range: 20,
+    description: 'Rapid semi-automatic drum shotgun built for clearing cramped site pockets.',
+  },
+
+  // === RIFLES ===
+  REAPER: {
+    id: 'REAPER',
+    name: 'Reaper',
     category: 'RIFLE',
     cost: 2900,
-    damageHead: 156,
+    damageHead: 160,
     damageBody: 40,
-    damageLeg: 32,
-    fireRate: 9.5,
+    damageLeg: 34,
+    fireRate: 9.75,
     magazineSize: 25,
     reserveAmmo: 75,
     reloadTime: 2.2,
-    spreadBase: 0.005,
+    spreadBase: 0.0045,
     spreadRun: 0.08,
-    recoilPerShot: 0.035,
+    recoilPerShot: 0.036,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.76,
+    description: 'Premier high-caliber assault rifle. Uncompromising 1-tap headshots at any range.',
+  },
+  ECLIPSE: {
+    id: 'ECLIPSE',
+    name: 'Eclipse',
+    category: 'RIFLE',
+    cost: 2900,
+    damageHead: 156,
+    damageBody: 39,
+    damageLeg: 33,
+    fireRate: 11.0,
+    magazineSize: 30,
+    reserveAmmo: 90,
+    reloadTime: 2.05,
+    spreadBase: 0.004,
+    spreadRun: 0.072,
+    recoilPerShot: 0.028,
     firstShotAccurate: true,
     canADS: true,
     adsZoom: 0.75,
-    description: 'Premier assault rifle with 1-tap lethal headshot potential.',
+    description: 'Suppressed phantom-grade rifle offering razor spray control and 30-round mags.',
   },
-  VOID_LANCE: {
-    id: 'VOID_LANCE',
-    name: 'Void-Lance',
+  VEIL: {
+    id: 'VEIL',
+    name: 'Veil',
+    category: 'RIFLE',
+    cost: 2050,
+    damageHead: 138,
+    damageBody: 34,
+    damageLeg: 29,
+    fireRate: 8.5,
+    magazineSize: 24,
+    reserveAmmo: 72,
+    reloadTime: 2.0,
+    spreadBase: 0.0055,
+    spreadRun: 0.074,
+    recoilPerShot: 0.029,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.68,
+    description: 'Versatile scoped tactical carbine with tight zoomed accuracy.',
+  },
+  TUSK: {
+    id: 'TUSK',
+    name: 'Tusk',
+    category: 'RIFLE',
+    cost: 2250,
+    damageHead: 120,
+    damageBody: 35,
+    damageLeg: 29,
+    fireRate: 9.2,
+    magazineSize: 20,
+    reserveAmmo: 60,
+    reloadTime: 2.1,
+    spreadBase: 0.005,
+    spreadRun: 0.076,
+    recoilPerShot: 0.032,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.7,
+    description: 'Heavy-hitting armored carbine engineered for force-buy rifle duels.',
+  },
+
+  // === SNIPERS ===
+  BOLT: {
+    id: 'BOLT',
+    name: 'Bolt',
+    category: 'SNIPER',
+    cost: 1500,
+    damageHead: 202,
+    damageBody: 101,
+    damageLeg: 85,
+    fireRate: 1.5,
+    magazineSize: 5,
+    reserveAmmo: 15,
+    reloadTime: 2.5,
+    spreadBase: 0.001,
+    spreadRun: 0.16,
+    recoilPerShot: 0.08,
+    firstShotAccurate: true,
+    canADS: true,
+    adsZoom: 0.42,
+    description: 'Lightweight agile scout sniper capable of snappy flicks and one-shot headshots.',
+  },
+  ORACLE: {
+    id: 'ORACLE',
+    name: 'Oracle',
     category: 'SNIPER',
     cost: 4700,
     damageHead: 255,
@@ -521,74 +775,80 @@ export const WEAPON_REGISTRY: Record<string, WeaponDef> = {
     fireRate: 0.75,
     magazineSize: 5,
     reserveAmmo: 15,
-    reloadTime: 3.2,
-    spreadBase: 0.001,
+    reloadTime: 3.1,
+    spreadBase: 0.0008,
     spreadRun: 0.22,
     recoilPerShot: 0.12,
     firstShotAccurate: true,
     canADS: true,
-    adsZoom: 0.35,
-    description: 'High-caliber anti-material cannon with devastating kinetic punch.',
+    adsZoom: 0.30,
+    description: 'Apex dual-zoom anti-materiel sniper rifle. One lethal center-mass elimination.',
   },
-  ION_PISTOL: {
-    id: 'ION_PISTOL',
-    name: 'Ion-X',
-    category: 'SIDEARM',
-    cost: 500,
-    damageHead: 125,
-    damageBody: 46,
-    damageLeg: 34,
-    fireRate: 3.8,
-    magazineSize: 8,
-    reserveAmmo: 32,
-    reloadTime: 1.5,
-    spreadBase: 0.006,
-    spreadRun: 0.04,
-    recoilPerShot: 0.022,
-    firstShotAccurate: true,
-    canADS: true,
-    adsZoom: 0.9,
-    description: 'High-caliber sci-fi energy sidearm from the Ion Armory pack.',
-  },
-  VALKYRIE_RIFLE: {
-    id: 'VALKYRIE_RIFLE',
-    name: 'Valkyrie-R',
-    category: 'RIFLE',
-    cost: 2400,
-    damageHead: 132,
-    damageBody: 36,
-    damageLeg: 28,
-    fireRate: 10.5,
-    magazineSize: 28,
-    reserveAmmo: 84,
-    reloadTime: 2.0,
-    spreadBase: 0.007,
-    spreadRun: 0.07,
-    recoilPerShot: 0.028,
-    firstShotAccurate: true,
+
+  // === MACHINE GUNS ===
+  STORM: {
+    id: 'STORM',
+    name: 'Storm',
+    category: 'MACHINE_GUN',
+    cost: 1600,
+    damageHead: 68,
+    damageBody: 28,
+    damageLeg: 23,
+    fireRate: 11.5,
+    magazineSize: 50,
+    reserveAmmo: 100,
+    reloadTime: 3.0,
+    spreadBase: 0.015,
+    spreadRun: 0.095,
+    recoilPerShot: 0.025,
+    firstShotAccurate: false,
     canADS: true,
     adsZoom: 0.78,
-    description: 'Lightweight sci-fi pulse carbine tuned for rapid accurate bursts.',
+    description: 'Rapid-fire tactical squad LMG for locking down corridors with sustained lead.',
   },
-  HONEY_BADGER: {
-    id: 'HONEY_BADGER',
-    name: 'Badger-300',
-    category: 'RIFLE',
-    cost: 2700,
-    damageHead: 144,
+  THOR: {
+    id: 'THOR',
+    name: 'Thor',
+    category: 'MACHINE_GUN',
+    cost: 3200,
+    damageHead: 95,
     damageBody: 38,
-    damageLeg: 30,
-    fireRate: 10.0,
-    magazineSize: 30,
-    reserveAmmo: 90,
-    reloadTime: 2.1,
-    spreadBase: 0.006,
-    spreadRun: 0.065,
+    damageLeg: 32,
+    fireRate: 13.0,
+    magazineSize: 100,
+    reserveAmmo: 200,
+    reloadTime: 3.8,
+    spreadBase: 0.013,
+    spreadRun: 0.11,
     recoilPerShot: 0.026,
-    firstShotAccurate: true,
+    firstShotAccurate: false,
     canADS: true,
-    adsZoom: 0.75,
-    description: 'Integrally suppressed tactical carbine with tight close-to-mid grouping.',
+    adsZoom: 0.74,
+    description: '100-round belt-fed heavy siege gun built to shred barriers and rushes.',
+  },
+
+  // === MELEE ===
+  HOLLOW_BLADE: {
+    id: 'HOLLOW_BLADE',
+    name: 'Hollow Blade',
+    category: 'MELEE',
+    cost: 0,
+    damageHead: 110,
+    damageBody: 55,
+    damageLeg: 50,
+    fireRate: 2.2,
+    magazineSize: 1,
+    reserveAmmo: 0,
+    reloadTime: 0.5,
+    spreadBase: 0,
+    spreadRun: 0,
+    recoilPerShot: 0,
+    firstShotAccurate: true,
+    canADS: false,
+    adsZoom: 1.0,
+    isMelee: true,
+    range: 2.8,
+    description: 'Razor-edged Void-forged tactical blade. Highest sprint speed and silent close slashes.',
   },
 };
 
@@ -840,3 +1100,59 @@ export const SPIKE_DETONATION_TIME = 45.0; // seconds fuse
 export const ROUND_END_DURATION = 5.0; // seconds post-round
 export const ROUNDS_TO_WIN = 13;
 export const HALF_TIME_ROUND = 12; // Swap sides after round 12
+
+// === REAL-TIME MULTIPLAYER & SOCIAL TYPES ===
+
+export type OnlinePresenceStatus = 'ONLINE' | 'IN_LOBBY' | 'IN_MATCH' | 'OFFLINE';
+
+export interface FriendEntry {
+  username: string;
+  status: OnlinePresenceStatus;
+  roomCode?: string | null;
+  agentId?: string;
+}
+
+export interface RoomInviteEntry {
+  id: string;
+  fromUsername: string;
+  roomCode: string;
+  mode: MatchMode;
+  timestamp: number;
+}
+
+export interface RoomMember {
+  username: string;
+  team: TeamSide;
+  agentId: string;
+  ready: boolean;
+  isHost: boolean;
+  online: boolean;
+}
+
+export interface CustomRoomState {
+  code: string;
+  name: string;
+  hostUsername: string;
+  mode: MatchMode;
+  botDifficulty: BotDifficulty;
+  fillBots: boolean;
+  isPublic: boolean;
+  inMatch: boolean;
+  members: RoomMember[];
+}
+
+export interface RemotePlayerSync {
+  username: string;
+  team: TeamSide;
+  agentId: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  crouch: boolean;
+  weaponId: string;
+  hp: number;
+  armor: number;
+  alive: boolean;
+}

@@ -1,11 +1,11 @@
 /**
  * Hollow Strike - Main Application Entry
  * Full-viewport tactical Game Shell with Three.js engine lifecycle,
- * mobile landscape lock, cross-platform controls, and live combat feedback.
+ * mobile landscape lock, cross-platform controls, 3-slot weapons, and live WebSocket multiplayer matches.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { GameEngine, isSoftwareGl } from './game/gameEngine';
+import { GameEngine } from './game/gameEngine';
 import { isMobileDevice } from './game/device';
 import { soundEngine } from './game/audio';
 import {
@@ -16,10 +16,12 @@ import {
   saveProfile,
   saveSettingsToStorage,
 } from './game/profileStore';
+import { multiplayerClient } from './game/multiplayerClient';
 import {
   AbilitySlotState,
   AGENT_REGISTRY,
   BotDifficulty,
+  CustomRoomState,
   DEFAULT_KEY_BINDINGS,
   GameSettings,
   HitFeedback,
@@ -44,8 +46,9 @@ import { PauseModal } from './components/PauseModal';
 import { OrientationGuard } from './components/OrientationGuard';
 import { TacticalMapModal } from './components/TacticalMapModal';
 import { LoadingSplash } from './components/LoadingSplash';
+import { PreMatchPlayer, PreMatchScreen } from './components/PreMatchScreen';
 
-type AppState = 'title' | 'playing' | 'paused' | 'gameover';
+type AppState = 'title' | 'prematch' | 'playing' | 'paused' | 'gameover';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -56,9 +59,8 @@ export default function App() {
 
   // Persistent Player Profile & Settings
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile());
-  const [settings, setSettings] = useState<GameSettings>(() => {
-    const mobile = isMobileDevice('AUTO');
-    return loadSavedSettings({
+  const [settings, setSettings] = useState<GameSettings>(() =>
+    loadSavedSettings({
       graphics: 'HIGH',
       fpsCap: 60,
       showFps: false,
@@ -77,8 +79,8 @@ export default function App() {
       touchOpacity: 0.85,
       controlMode: 'AUTO',
       keyBindings: { ...DEFAULT_KEY_BINDINGS },
-    });
-  });
+    })
+  );
 
   // App Shell State
   const [isBootLoading, setIsBootLoading] = useState<boolean>(() => {
@@ -88,7 +90,15 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>('title');
   const [selectedAgentId, setSelectedAgentId] = useState<string>(() => profile.favoriteAgentId || 'ZEPHYR');
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('MEDIUM');
-  const [lastMatchMode, setLastMatchMode] = useState<MatchMode>('COMPETITIVE');
+  const [lastMatchMode, setLastMatchMode] = useState<MatchMode>('CUSTOM');
+  const [lastAllyBotIds, setLastAllyBotIds] = useState<string[]>([]);
+  const [activeRoom, setActiveRoom] = useState<CustomRoomState | null>(null);
+  const [prematchRoster, setPrematchRoster] = useState<{
+    mode: MatchMode;
+    playerTeam: TeamSide;
+    defenders: PreMatchPlayer[];
+    attackers: PreMatchPlayer[];
+  } | null>(null);
 
   // Modals
   const [showBuyMenu, setShowBuyMenu] = useState<boolean>(false);
@@ -99,11 +109,11 @@ export default function App() {
   // Live HUD States
   const [hp, setHp] = useState<number>(100);
   const [armor, setArmor] = useState<number>(0);
-  const [currentWeapon, setCurrentWeapon] = useState<WeaponDef>(WEAPON_REGISTRY.APEX_9);
+  const [currentWeapon, setCurrentWeapon] = useState<WeaponDef>(WEAPON_REGISTRY.KADENCE);
   const [ammoInMag, setAmmoInMag] = useState<number>(12);
   const [reserveAmmo, setReserveAmmo] = useState<number>(36);
   const [isReloading, setIsReloading] = useState<boolean>(false);
-  const [activeSlot, setActiveSlot] = useState<1 | 2>(2);
+  const [activeSlot, setActiveSlot] = useState<1 | 2 | 3>(2);
   const [roundPhase, setRoundPhase] = useState<RoundPhase>('BUY_PHASE');
   const [roundTimeRemaining, setRoundTimeRemaining] = useState<number>(15);
   const [attackerRoundsWon, setAttackerRoundsWon] = useState<number>(0);
@@ -130,10 +140,15 @@ export default function App() {
 
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobileDevice(settings.controlMode));
 
-  // Sync device mode whenever controlMode changes
   useEffect(() => {
     setIsMobile(isMobileDevice(settings.controlMode));
   }, [settings.controlMode]);
+
+  // Keep server agent in sync & listen for multiplayer room match launches
+  useEffect(() => {
+    multiplayerClient.connect();
+    multiplayerClient.setAgent(selectedAgentId);
+  }, [selectedAgentId]);
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
     setSettings(newSettings);
@@ -149,22 +164,20 @@ export default function App() {
     }
   };
 
-  // Mirror app state to document.body.dataset.state
   useEffect(() => {
     document.body.dataset.state = appState;
   }, [appState]);
 
-  // Sync UI modal blocking with InputManager
   useEffect(() => {
     const blocked = appState !== 'playing' || showBuyMenu || showMapModal || showScoreboard || showSettings;
     engineRef.current?.setUiBlocking(blocked);
   }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings]);
 
-  // Check ?autostart=1 on mount
+  // Check ?autostart=1 on mount + clean up engine
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('autostart') === '1') {
-      startGame('COMPETITIVE');
+      startGame('CUSTOM', null, [], true);
     }
     return () => {
       if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
@@ -175,10 +188,21 @@ export default function App() {
     };
   }, []);
 
-  // Pause engine when tab is hidden
+  // Listen for WebSocket MATCH_LAUNCH from server when Host starts a Custom Room match
+  useEffect(() => {
+    return multiplayerClient.subscribeMatchLaunch((launchedRoom) => {
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
+      startGame(launchedRoom.mode || 'CUSTOM', launchedRoom);
+    });
+  }, [settings, selectedAgentId, botDifficulty]);
+
+  // Pause engine when tab is hidden in solo modes
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden && appState === 'playing') {
+      if (document.hidden && appState === 'playing' && !activeRoom) {
         setAppState('paused');
         engineRef.current?.setPaused(true);
       }
@@ -188,7 +212,7 @@ export default function App() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [appState]);
+  }, [appState, activeRoom]);
 
   const triggerHitmarker = (isHeadshot: boolean) => {
     if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
@@ -208,10 +232,16 @@ export default function App() {
     damageFlashTimeoutRef.current = setTimeout(() => setDamageFlash(false), 200);
   };
 
-  const startGame = (mode: MatchMode = lastMatchMode) => {
+  const startGame = (
+    mode: MatchMode = lastMatchMode,
+    customRoom: CustomRoomState | null = null,
+    allyBotAgentIds: string[] = lastAllyBotIds,
+    skipPrematch = false
+  ) => {
     soundEngine.init();
     setLastMatchMode(mode);
-    setAppState('playing');
+    setLastAllyBotIds(allyBotAgentIds);
+    setActiveRoom(customRoom);
     setShowBuyMenu(false);
     setShowMapModal(false);
     setShowScoreboard(false);
@@ -225,7 +255,7 @@ export default function App() {
         canvasMountRef.current,
         settings,
         selectedAgentId,
-        botDifficulty,
+        customRoom?.botDifficulty ?? botDifficulty,
         {
           onStatsUpdate: (stats) => setPlayerStats(stats),
           onRoundPhaseChange: (phase, time) => {
@@ -285,10 +315,49 @@ export default function App() {
             setMatchWinner(winner);
             setAppState('gameover');
             setProfile((prev) => recordMatchToProfile(prev, summary));
+            multiplayerClient.notifyMatchEnded();
           },
         },
-        mode
+        mode,
+        customRoom,
+        allyBotAgentIds
       );
+    }
+
+    if (skipPrematch || !engineRef.current) {
+      setPrematchRoster(null);
+      setAppState('playing');
+      engineRef.current?.setPaused(false);
+    } else {
+      engineRef.current.setPaused(true);
+      const roster: PreMatchPlayer[] = engineRef.current.combatants.map((c) => ({
+        id: c.id,
+        name:
+          c.isHuman && c.id === 'player'
+            ? multiplayerClient.usernameClaimed
+              ? `@${multiplayerClient.username}`
+              : profile.callsign || 'Operative'
+            : c.name,
+        agentId: c.agentId,
+        team: c.team,
+        isLocalPlayer: c.id === 'player',
+        isHuman: c.isHuman,
+      }));
+      setPrematchRoster({
+        mode,
+        playerTeam: engineRef.current.playerTeam,
+        defenders: roster.filter((p) => p.team === 'DEFENDERS'),
+        attackers: roster.filter((p) => p.team === 'ATTACKERS'),
+      });
+      setAppState('prematch');
+    }
+  };
+
+  const handleFinishPreMatch = (fromUserClick = false) => {
+    setAppState((prev) => (prev === 'prematch' ? 'playing' : prev));
+    engineRef.current?.setPaused(false);
+    if (fromUserClick && !isMobile) {
+      engineRef.current?.input.requestPointerLock();
     }
   };
 
@@ -356,6 +425,8 @@ export default function App() {
   const handleReturnToTitle = () => {
     engineRef.current?.dispose();
     engineRef.current = null;
+    multiplayerClient.notifyMatchEnded();
+    setActiveRoom(null);
     setAppState('title');
     setAttackerRoundsWon(0);
     setDefenderRoundsWon(0);
@@ -380,7 +451,7 @@ export default function App() {
     setKillFeed([]);
     setMatchWinner(null);
     setSpectateState(null);
-    startGame(lastMatchMode);
+    startGame(lastMatchMode, activeRoom);
   };
 
   const handleBuyWeapon = (weaponId: string) => {
@@ -431,6 +502,17 @@ export default function App() {
             onStartGame={startGame}
           />
         </div>
+      )}
+
+      {/* Screen 1.5: Pre-Match 5v5 Versus Loading Screen */}
+      {appState === 'prematch' && prematchRoster && (
+        <PreMatchScreen
+          mode={prematchRoster.mode}
+          playerTeam={prematchRoster.playerTeam}
+          defenders={prematchRoster.defenders}
+          attackers={prematchRoster.attackers}
+          onDeployNow={() => handleFinishPreMatch(true)}
+        />
       )}
 
       {/* Screen 2: Active Gameplay HUD */}

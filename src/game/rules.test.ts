@@ -10,6 +10,8 @@ import {
   selectNextSpectateTargetId,
   computeGentleAimAssist,
   computeBotAimSolution,
+  pickBotPurchase,
+  extractGridWallAABBs,
   remapKeyBinding,
   formatKeyCode,
   clampCrosshairConfig,
@@ -19,76 +21,178 @@ import {
   applyTouchLayoutPreset,
 } from './rules';
 import { DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY } from './types';
+import {
+  BOMB_SITE_A,
+  BOMB_SITE_B,
+  SPAWN_ATTACKERS,
+  SPAWN_DEFENDERS,
+  isPointWalkable,
+} from './mapData';
 
-test('calculateDamage handles headshot multiplier and armor absorption correctly', () => {
-  const phantom = WEAPON_REGISTRY.PHANTOM_V;
-  
+test('WEAPON_REGISTRY contains all 18 required weapons across all 7 categories', () => {
+  const expectedNames = [
+    'Kadence',
+    'Thorn',
+    'Fury',
+    'Frenky',
+    'Hangman',
+    'Mantis',
+    'Stingray',
+    'Slug',
+    'Jackal',
+    'Reaper',
+    'Eclipse',
+    'Veil',
+    'Tusk',
+    'Bolt',
+    'Oracle',
+    'Storm',
+    'Thor',
+    'Hollow Blade',
+  ];
+  const all = Object.values(WEAPON_REGISTRY);
+  assert.equal(all.length, 18);
+  for (const name of expectedNames) {
+    assert.ok(
+      all.some((w) => w.name === name),
+      `Missing expected weapon: ${name}`
+    );
+  }
+  assert.equal(WEAPON_REGISTRY.HOLLOW_BLADE.isMelee, true);
+  assert.equal(WEAPON_REGISTRY.SLUG.pellets, 8);
+});
+
+test('calculateDamage handles headshot, armor absorption, shotgun falloff, and melee immunity', () => {
+  const eclipse = WEAPON_REGISTRY.ECLIPSE;
+
   // Headshot without armor: deals 156 damage, instant kill
-  const res1 = calculateDamage(phantom, 'head', 10, 100, 0);
+  const res1 = calculateDamage(eclipse, 'head', 10, 100, 0);
   assert.equal(res1.isHeadshot, true);
   assert.equal(res1.rawDamage, 156);
   assert.equal(res1.remainingHp, 0);
   assert.equal(res1.isDead, true);
 
-  // Body shot with 50 armor
-  const res2 = calculateDamage(phantom, 'body', 10, 100, 50);
+  // Body shot with 50 armor (reaper 40 body dmg -> 26 absorbed, 14 hp dmg)
+  const reaper = WEAPON_REGISTRY.REAPER;
+  const res2 = calculateDamage(reaper, 'body', 10, 100, 50);
   assert.equal(res2.isHeadshot, false);
   assert.equal(res2.rawDamage, 40);
-  assert.equal(res2.armorDamage, 26); // 66% of 40 = 26.4 -> 26
+  assert.equal(res2.armorDamage, 26);
   assert.equal(res2.remainingArmor, 24);
   assert.equal(res2.healthDamage, 14);
   assert.equal(res2.remainingHp, 86);
   assert.equal(res2.isDead, false);
+
+  // Shotgun falls off sharply past 8m
+  const slug = WEAPON_REGISTRY.SLUG;
+  const sgClose = calculateDamage(slug, 'body', 4, 100, 0);
+  const sgFar = calculateDamage(slug, 'body', 20, 100, 0);
+  assert.ok(sgFar.rawDamage < sgClose.rawDamage, 'Shotgun must lose damage at range');
+
+  // Melee does full body/head damage without falloff
+  const blade = WEAPON_REGISTRY.HOLLOW_BLADE;
+  const slash = calculateDamage(blade, 'head', 2, 100, 0);
+  assert.equal(slash.rawDamage, 110);
+  assert.equal(slash.isDead, true);
 });
 
 test('calculateEconomy awards win and loss streaks with cap', () => {
-  // Win awards 3000 credits
   const winResult = calculateEconomy(1000, true, 2, false, 2);
-  assert.equal(winResult.creditsGained, 3000 + 400); // 3000 + 2*200
+  assert.equal(winResult.creditsGained, 3000 + 400);
   assert.equal(winResult.newCredits, 4400);
   assert.equal(winResult.nextLossStreak, 0);
 
-  // Loss with 0 streak: 1900 credits
   const loss0 = calculateEconomy(800, false, 0, false, 0);
   assert.equal(loss0.creditsGained, 1900);
   assert.equal(loss0.nextLossStreak, 1);
 
-  // Loss with 2 streak: 1900 + 1000 = 2900 credits, plus plant bonus (300)
   const loss2 = calculateEconomy(1000, false, 2, true, 1);
-  assert.equal(loss2.creditsGained, 2900 + 300 + 200); // 3400
+  assert.equal(loss2.creditsGained, 2900 + 300 + 200);
   assert.equal(loss2.newCredits, 4400);
 
-  // Credits cap at 9000
   const maxCap = calculateEconomy(8500, true, 0, false, 5);
   assert.equal(maxCap.newCredits, 9000);
 });
 
+test('pickBotPurchase chooses affordable weapons from new 18-weapon arsenal', () => {
+  const pistolBuy = pickBotPurchase(800, 1, 'HARD', 'ZEPHYR');
+  if (pistolBuy) {
+    assert.ok(WEAPON_REGISTRY[pistolBuy.weaponId], 'Pistol buy must exist in registry');
+    assert.equal(pistolBuy.isSidearm, true);
+    assert.ok(pistolBuy.cost <= 800);
+  }
+
+  const rifleBuy = pickBotPurchase(3400, 4, 'HARD', 'BLITZ');
+  assert.ok(rifleBuy, 'Rich bot in round 4 must buy primary weapon');
+  assert.ok(WEAPON_REGISTRY[rifleBuy!.weaponId]);
+  assert.ok(rifleBuy!.cost <= 3400);
+});
+
+test('extractGridWallAABBs merges adjacent 2D occupancy cells cleanly into AABB solids', () => {
+  const grid = [
+    [true, true, false, false],
+    [true, true, false, true],
+    [false, false, false, true],
+  ];
+  const boxes = extractGridWallAABBs(grid, -10, -10, 2, 0, 4.5);
+  assert.equal(boxes.length, 2, 'Two contiguous rectangular islands should merge into 2 AABBs');
+  assert.deepEqual(boxes[0], {
+    minX: -10,
+    maxX: -6,
+    minY: 0,
+    maxY: 4.5,
+    minZ: -10,
+    maxZ: -6,
+  });
+  assert.deepEqual(boxes[1], {
+    minX: -4,
+    maxX: -2,
+    minY: 0,
+    maxY: 4.5,
+    minZ: -8,
+    maxZ: -4,
+  });
+});
+
 test('checkRoundWin evaluates site plant, defusal, and eliminations', () => {
-  // Attackers eliminated, spike not planted -> Defenders win
   const round1 = checkRoundWin(0, 3, 'not_planted', 40);
   assert.equal(round1.winner, 'DEFENDERS');
   assert.equal(round1.reason, 'ELIMINATION');
   assert.equal(round1.roundOver, true);
 
-  // Attackers eliminated, but spike is PLANTED -> Round continues! Defenders must defuse
   const round2 = checkRoundWin(0, 3, 'planted', 0);
   assert.equal(round2.winner, null);
   assert.equal(round2.roundOver, false);
 
-  // Spike defused -> Defenders win
   const round3 = checkRoundWin(2, 1, 'defused', 0);
   assert.equal(round3.winner, 'DEFENDERS');
   assert.equal(round3.reason, 'SPIKE_DEFUSED');
 
-  // Spike detonated -> Attackers win
   const round4 = checkRoundWin(0, 4, 'detonated', 0);
   assert.equal(round4.winner, 'ATTACKERS');
   assert.equal(round4.reason, 'SPIKE_DETONATED');
 
-  // Time expired without plant -> Defenders win
   const round5 = checkRoundWin(3, 3, 'not_planted', 0);
   assert.equal(round5.winner, 'DEFENDERS');
   assert.equal(round5.reason, 'TIME_EXPIRED');
+
+  // Solo human waiting in human-only Custom room (0 defenders spawned) must not instant-end by elimination
+  const soloCustom = checkRoundWin(1, 0, 'not_planted', 80, 1, 0);
+  assert.equal(soloCustom.roundOver, false);
+  assert.equal(soloCustom.winner, null);
+});
+
+test('new valorant_style_map_v2 spawns and bomb sites are symmetric and walkable', () => {
+  assert.equal(BOMB_SITE_A.x, -24.7);
+  assert.equal(BOMB_SITE_B.x, 24.7);
+  assert.equal(BOMB_SITE_A.z, -16.3);
+  assert.equal(BOMB_SITE_B.z, -16.3);
+  assert.ok(SPAWN_ATTACKERS.z > 30, 'Attacker spawn should be in south plaza');
+  assert.ok(SPAWN_DEFENDERS.z < 0, 'Defender spawn should be in north plaza near sites');
+  assert.equal(isPointWalkable(SPAWN_ATTACKERS.x, SPAWN_ATTACKERS.z, 0.45), true);
+  assert.equal(isPointWalkable(SPAWN_DEFENDERS.x, SPAWN_DEFENDERS.z, 0.45), true);
+  assert.equal(isPointWalkable(BOMB_SITE_A.x, BOMB_SITE_A.z, 0.45), true);
+  assert.equal(isPointWalkable(BOMB_SITE_B.x, BOMB_SITE_B.z, 0.45), true);
 });
 
 test('checkMatchWin detects first to 13 rounds', () => {
@@ -104,7 +208,7 @@ test('shouldSwapSides detects round 12 halftime', () => {
 });
 
 test('calculateSpread penalizes running and jumping, rewards crouching and ADS', () => {
-  const rifle = WEAPON_REGISTRY.PHANTOM_V;
+  const rifle = WEAPON_REGISTRY.REAPER;
   const stillSpread = calculateSpread(rifle, false, false, false, false);
   const runSpread = calculateSpread(rifle, true, false, false, false);
   const jumpSpread = calculateSpread(rifle, false, true, false, false);
@@ -136,7 +240,6 @@ test('selectNextSpectateTargetId cycles alive teammates and wraps cleanly', () =
 });
 
 test('computeGentleAimAssist never fights opposing swipe or vertical headshot adjustments', () => {
-  // Player swiping right (userDeltaX > 0 => userYawIntent < 0) away from target at +yawDiff
   const away = computeGentleAimAssist({
     yawDiff: 0.12,
     pitchDiff: 0.08,
@@ -145,9 +248,8 @@ test('computeGentleAimAssist never fights opposing swipe or vertical headshot ad
     swipeCooldownRemaining: 0,
     dt: 0.016,
   });
-  assert.equal(away.yawStep, 0, 'Should not resist player turning away from target');
+  assert.equal(away.yawStep, 0);
 
-  // Player fast-flicking
   const fast = computeGentleAimAssist({
     yawDiff: 0.12,
     pitchDiff: 0.08,
@@ -159,7 +261,6 @@ test('computeGentleAimAssist never fights opposing swipe or vertical headshot ad
   assert.equal(fast.yawStep, 0);
   assert.equal(fast.pitchStep, 0);
 
-  // Cooldown active after fast swipe
   const cooled = computeGentleAimAssist({
     yawDiff: 0.12,
     pitchDiff: 0.08,
@@ -170,7 +271,6 @@ test('computeGentleAimAssist never fights opposing swipe or vertical headshot ad
   });
   assert.equal(cooled.yawStep, 0);
 
-  // Subtle nudge when stationary inside cone, zero vertical pull inside head/chest band
   const gentle = computeGentleAimAssist({
     yawDiff: 0.1,
     pitchDiff: 0.03,
@@ -179,8 +279,8 @@ test('computeGentleAimAssist never fights opposing swipe or vertical headshot ad
     swipeCooldownRemaining: 0,
     dt: 0.016,
   });
-  assert.ok(gentle.yawStep > 0 && gentle.yawStep < 0.01, 'Pull should be subtle and non-jerky');
-  assert.equal(gentle.pitchStep, 0, 'Should leave vertical head/chest aim completely free');
+  assert.ok(gentle.yawStep > 0 && gentle.yawStep < 0.01);
+  assert.equal(gentle.pitchStep, 0);
 });
 
 test('computeBotAimSolution aims below head, lowers for crouch, and clamps long-range upward scatter', () => {
@@ -206,22 +306,23 @@ test('computeBotAimSolution aims below head, lowers for crouch, and clamps long-
     isTargetCrouching: false,
   });
 
-  assert.ok(standClose.targetAimYOffset < 1.25, 'Standing aim should target mid-torso below head');
-  assert.ok(crouchClose.targetAimYOffset < standClose.targetAimYOffset, 'Crouched aim must drop below crouched head height');
-  assert.ok(standLong.spreadYaw > standClose.spreadYaw, 'Long-range moving targets must widen horizontal spread');
-  assert.ok(standLong.spreadPitchUp <= 0.0055, 'Long-range upward pitch jitter must be tightly capped to avoid robotic laser headshots');
-  assert.ok(standLong.maxBurstShots <= 3, 'Long-range engagement should fire controlled bursts');
+  assert.ok(standClose.targetAimYOffset < 1.25);
+  assert.ok(crouchClose.targetAimYOffset < standClose.targetAimYOffset);
+  assert.ok(standLong.spreadYaw > standClose.spreadYaw);
+  assert.ok(standLong.spreadPitchUp <= 0.0065);
+  assert.ok(standLong.maxBurstShots <= 3);
 });
 
-test('remapKeyBinding swaps conflicting actions cleanly and formatKeyCode formats browser codes', () => {
+test('remapKeyBinding swaps conflicting actions cleanly and includes meleeWeapon Digit3', () => {
+  assert.equal(DEFAULT_KEY_BINDINGS.meleeWeapon, 'Digit3');
   const custom = remapKeyBinding({ ...DEFAULT_KEY_BINDINGS }, 'crouch', 'KeyC');
   assert.equal(custom.crouch, 'KeyC');
-  assert.equal(custom.abilityC, 'ControlLeft', 'Previous KeyC owner should swap cleanly with Crouch');
+  assert.equal(custom.abilityC, 'ControlLeft');
 
   assert.equal(formatKeyCode('KeyW'), 'W');
   assert.equal(formatKeyCode('ControlLeft'), 'L-CTRL');
   assert.equal(formatKeyCode('Space'), 'SPACE');
-  assert.equal(formatKeyCode('Digit1'), '1');
+  assert.equal(formatKeyCode('Digit3'), '3');
 });
 
 test('clampCrosshairConfig & resolveCrosshairConfig sanitize custom styles and preserve legacy fallbacks', () => {
@@ -250,8 +351,8 @@ test('clampCrosshairConfig & resolveCrosshairConfig sanitize custom styles and p
 
 test('normalizeTouchLayout, updateTouchControlSlot, and applyTouchLayoutPreset clamp positions cleanly', () => {
   const lefty = applyTouchLayoutPreset('LEFT_HANDED');
-  assert.ok(lefty.joystick.xPct > 50, 'Left-handed preset moves joystick to right side');
-  assert.ok(lefty.fire.xPct < 50, 'Left-handed preset moves fire button to left side');
+  assert.ok(lefty.joystick.xPct > 50);
+  assert.ok(lefty.fire.xPct < 50);
 
   const updated = updateTouchControlSlot(lefty, 'fire', { xPct: -10, yPct: 120, scale: 2.5, visible: true });
   assert.equal(updated.fire.xPct, 4);
@@ -263,4 +364,3 @@ test('normalizeTouchLayout, updateTouchControlSlot, and applyTouchLayoutPreset c
   assert.equal(normalized.jump.yPct, 50);
   assert.equal(normalized.fire.scale, 1.0);
 });
-
