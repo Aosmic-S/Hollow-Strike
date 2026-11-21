@@ -173,10 +173,10 @@ export function pickBotPurchase(
     return null;
   }
 
-  if (credits >= 4700 && (agentId === 'LUMEN' || difficulty === 'HARD') && Math.random() < 0.22) {
+  if (credits >= 4700 && (agentId === 'SOREN' || agentId === 'PULSE' || difficulty === 'HARD') && Math.random() < 0.22) {
     return { weaponId: 'ORACLE', cost: WEAPON_REGISTRY.ORACLE.cost, isSidearm: false };
   }
-  if (credits >= 3200 && agentId === 'BASTION' && Math.random() < 0.25) {
+  if (credits >= 3200 && (agentId === 'AEGIS' || agentId === 'ROOK') && Math.random() < 0.25) {
     return { weaponId: 'THOR', cost: WEAPON_REGISTRY.THOR.cost, isSidearm: false };
   }
   if (credits >= 2900) {
@@ -189,7 +189,7 @@ export function pickBotPurchase(
   if (credits >= 2050) {
     return { weaponId: 'VEIL', cost: WEAPON_REGISTRY.VEIL.cost, isSidearm: false };
   }
-  if (credits >= 1850 && agentId === 'BLITZ' && Math.random() < 0.45) {
+  if (credits >= 1850 && (agentId === 'KAEL' || agentId === 'ZED') && Math.random() < 0.45) {
     return { weaponId: 'JACKAL', cost: WEAPON_REGISTRY.JACKAL.cost, isSidearm: false };
   }
   if (credits >= 1600) {
@@ -636,3 +636,196 @@ export function applyTouchLayoutPreset(presetId: TouchLayoutPresetId): TouchCont
   const preset = TOUCH_LAYOUT_PRESETS[presetId] ?? TOUCH_LAYOUT_PRESETS.DEFAULT;
   return normalizeTouchLayout(preset.layout);
 }
+
+export interface RaycastAABBHit {
+  distance: number;
+  x: number;
+  y: number;
+  z: number;
+  nx: number;
+  ny: number;
+  nz: number;
+}
+
+/**
+ * Fast zero-allocation 3D Ray-vs-AABB slab intersection across map colliders.
+ * Replaces multi-hundred-thousand triangle THREE.Raycaster checks with O(N_boxes) math.
+ */
+export function raycastAABBs(
+  ox: number,
+  oy: number,
+  oz: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  maxDistance: number,
+  boxes: readonly GridWallBox[],
+  includeFloor = false
+): RaycastAABBHit | null {
+  let closestDist = maxDistance;
+  let hitNx = 0;
+  let hitNy = 0;
+  let hitNz = 0;
+  let hit = false;
+
+  const invDx = Math.abs(dx) > 1e-8 ? 1 / dx : Infinity;
+  const invDy = Math.abs(dy) > 1e-8 ? 1 / dy : Infinity;
+  const invDz = Math.abs(dz) > 1e-8 ? 1 / dz : Infinity;
+
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    if (b.maxY <= 0.1) continue;
+
+    let tmin = 0;
+    let tmax = closestDist;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+
+    // X slab
+    if (invDx === Infinity) {
+      if (ox < b.minX || ox > b.maxX) continue;
+    } else {
+      const t1 = (b.minX - ox) * invDx;
+      const t2 = (b.maxX - ox) * invDx;
+      const tNear = t1 < t2 ? t1 : t2;
+      const tFar = t1 < t2 ? t2 : t1;
+      if (tNear > tmin) {
+        tmin = tNear;
+        nx = t1 < t2 ? -1 : 1;
+        ny = 0;
+        nz = 0;
+      }
+      if (tFar < tmax) tmax = tFar;
+      if (tmin > tmax) continue;
+    }
+
+    // Y slab
+    if (invDy === Infinity) {
+      if (oy < b.minY || oy > b.maxY) continue;
+    } else {
+      const t1 = (b.minY - oy) * invDy;
+      const t2 = (b.maxY - oy) * invDy;
+      const tNear = t1 < t2 ? t1 : t2;
+      const tFar = t1 < t2 ? t2 : t1;
+      if (tNear > tmin) {
+        tmin = tNear;
+        nx = 0;
+        ny = t1 < t2 ? -1 : 1;
+        nz = 0;
+      }
+      if (tFar < tmax) tmax = tFar;
+      if (tmin > tmax) continue;
+    }
+
+    // Z slab
+    if (invDz === Infinity) {
+      if (oz < b.minZ || oz > b.maxZ) continue;
+    } else {
+      const t1 = (b.minZ - oz) * invDz;
+      const t2 = (b.maxZ - oz) * invDz;
+      const tNear = t1 < t2 ? t1 : t2;
+      const tFar = t1 < t2 ? t2 : t1;
+      if (tNear > tmin) {
+        tmin = tNear;
+        nx = 0;
+        ny = 0;
+        nz = t1 < t2 ? -1 : 1;
+      }
+      if (tFar < tmax) tmax = tFar;
+      if (tmin > tmax) continue;
+    }
+
+    if (tmin > 0 && tmin < closestDist) {
+      closestDist = tmin;
+      hitNx = nx;
+      hitNy = ny;
+      hitNz = nz;
+      hit = true;
+    }
+  }
+
+  if (includeFloor && dy < -1e-4 && oy > 0.01) {
+    const tFloor = -oy / dy;
+    if (tFloor > 0 && tFloor < closestDist) {
+      closestDist = tFloor;
+      hitNx = 0;
+      hitNy = 1;
+      hitNz = 0;
+      hit = true;
+    }
+  }
+
+  if (!hit) return null;
+
+  return {
+    distance: closestDist,
+    x: ox + dx * closestDist,
+    y: oy + dy * closestDist,
+    z: oz + dz * closestDist,
+    nx: hitNx,
+    ny: hitNy,
+    nz: hitNz,
+  };
+}
+
+export interface RadarCoord {
+  cx: number;
+  cy: number;
+  clamped: boolean;
+}
+
+/**
+ * Projects world (x, z) onto a player-centered rotating Valorant-style radar
+ * where player forward direction always points straight UP (-Y).
+ */
+export function worldToRadarCoord(
+  worldX: number,
+  worldZ: number,
+  playerX: number,
+  playerZ: number,
+  playerYaw: number,
+  radarSize: number,
+  worldViewRadius = 24,
+  clampRadiusPx = 0
+): RadarCoord {
+  const center = radarSize * 0.5;
+  const dx = worldX - playerX;
+  const dz = worldZ - playerZ;
+  const sinY = Math.sin(playerYaw);
+  const cosY = Math.cos(playerYaw);
+
+  // Three.js camera forward = (-sin(yaw), -cos(yaw)), right = (cos(yaw), -sin(yaw))
+  const rightProj = dx * cosY - dz * sinY;
+  const fwdProj = -dx * sinY - dz * cosY;
+
+  const scale = center / Math.max(4, worldViewRadius);
+  let rx = rightProj * scale;
+  let ry = -fwdProj * scale;
+  let clamped = false;
+
+  if (clampRadiusPx > 0) {
+    const dist = Math.hypot(rx, ry);
+    if (dist > clampRadiusPx) {
+      const k = clampRadiusPx / dist;
+      rx *= k;
+      ry *= k;
+      clamped = true;
+    }
+  }
+
+  return {
+    cx: center + rx,
+    cy: center + ry,
+    clamped,
+  };
+}
+
+export function sanitizeChatText(raw: string, maxLength = 220): string {
+  return raw
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+

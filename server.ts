@@ -1,5 +1,5 @@
 /**
- * Hollow Strike - Railway-Compatible Authoritative WebSocket & HTTP Server
+ * Hollow Strike - Render-Compatible Authoritative WebSocket & HTTP Server
  * Uses erasable TypeScript syntax so Node v22+ executes `node server.ts` natively without extra flags.
  */
 
@@ -13,6 +13,23 @@ type TeamSide = 'ATTACKERS' | 'DEFENDERS';
 type MatchMode = 'COMPETITIVE' | 'SKIRMISH' | 'PRACTICE' | 'CUSTOM';
 type BotDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
 type OnlinePresenceStatus = 'ONLINE' | 'IN_LOBBY' | 'IN_MATCH' | 'OFFLINE';
+type ChatChannel = 'ROOM' | 'TEAM' | 'GLOBAL';
+
+interface ChatMessage {
+  id: string;
+  channel: ChatChannel;
+  fromUsername: string;
+  team?: TeamSide;
+  text: string;
+  timestamp: number;
+}
+
+interface VoicePeerState {
+  username: string;
+  active: boolean;
+  muted: boolean;
+  speaking: boolean;
+}
 
 interface RoomMember {
   username: string;
@@ -28,6 +45,7 @@ interface CustomRoom {
   name: string;
   hostUsername: string;
   mode: MatchMode;
+  mapId: string;
   botDifficulty: BotDifficulty;
   fillBots: boolean;
   isPublic: boolean;
@@ -42,8 +60,10 @@ interface SocialRecord {
 
 const DEFAULT_CUSTOM_MAP_URL =
   process.env.CUSTOM_MAP_URL ||
+  'https://raw.githubusercontent.com/Aosmic-S/Hollow-Strike/b8fdc2d84131569747a1fa9db1b516e1a4dd136b/public/models/Map/Warehouse.glb';
+const COURTYARD_CUSTOM_MAP_URL =
   'https://raw.githubusercontent.com/Aosmic-S/Hollow-Strike/7cf95c8ed1f2f06632311cdf8e967e58dd01f944/public/models/Map/valorant_style_map_v2_heavy-compressed.glb';
-const PREFERRED_MAP_FILENAME = 'valorant_style_map_v2_heavy-compressed.glb';
+const PREFERRED_MAP_FILENAME = 'Warehouse.glb';
 
 interface ClientSession {
   ws: WebSocket;
@@ -103,7 +123,10 @@ async function ensureActiveMapFile(): Promise<string | null> {
   pendingMapDownload = (async () => {
     try {
       fs.mkdirSync(MAP_CACHE_DIR, { recursive: true });
-      const res = await fetch(DEFAULT_CUSTOM_MAP_URL, { redirect: 'follow' });
+      const res = await fetch(DEFAULT_CUSTOM_MAP_URL, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(25000),
+      });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} downloading custom map`);
       }
@@ -154,6 +177,23 @@ loadSocialData();
 const sessionsByWs = new Map<WebSocket, ClientSession>();
 const sessionsByUsername = new Map<string, ClientSession>(); // keyed lowercase username
 const roomsByCode = new Map<string, CustomRoom>();
+const roomChatHistory = new Map<string, ChatMessage[]>();
+const roomVoiceStates = new Map<string, Record<string, VoicePeerState>>();
+const globalChatHistory: ChatMessage[] = [];
+
+function sanitizeChatMessageText(raw: string): string {
+  return raw.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 220);
+}
+
+function broadcastVoicePeers(room: CustomRoom): void {
+  const peers = roomVoiceStates.get(room.code) ?? {};
+  for (const member of room.members) {
+    const sess = sessionsByUsername.get(normUser(member.username));
+    if (sess) {
+      sendJson(sess.ws, { type: 'VOICE_PEERS', peers });
+    }
+  }
+}
 
 function normUser(name: string): string {
   return name.trim().toLowerCase();
@@ -180,6 +220,7 @@ function getPublicRoomsSummary() {
       name: r.name,
       hostUsername: r.hostUsername,
       mode: r.mode,
+      mapId: r.mapId,
       memberCount: r.members.length,
       fillBots: r.fillBots,
     }));
@@ -271,8 +312,15 @@ function leaveCurrentRoom(sess: ClientSession): void {
   }
 
   room.members = room.members.filter((m) => normUser(m.username) !== normUser(sess.username!));
+  const vMap = roomVoiceStates.get(room.code);
+  if (vMap && vMap[sess.username]) {
+    delete vMap[sess.username];
+    broadcastVoicePeers(room);
+  }
   if (room.members.length === 0) {
     roomsByCode.delete(room.code);
+    roomChatHistory.delete(room.code);
+    roomVoiceStates.delete(room.code);
   } else {
     if (normUser(room.hostUsername) === normUser(sess.username)) {
       room.hostUsername = room.members[0].username;
@@ -282,6 +330,7 @@ function leaveCurrentRoom(sess: ClientSession): void {
   }
 
   sendJson(sess.ws, { type: 'ROOM_STATE', room: null });
+  sendJson(sess.ws, { type: 'VOICE_PEERS', peers: {} });
   notifyFriendsPresence(sess.username);
   broadcastPublicRooms();
 }
@@ -315,6 +364,8 @@ function addMemberToRoom(sess: ClientSession, room: CustomRoom, desiredTeam?: Te
   sess.roomCode = room.code;
   sess.status = room.inMatch ? 'IN_MATCH' : 'IN_LOBBY';
   broadcastRoomState(room);
+  sendJson(sess.ws, { type: 'CHAT_HISTORY', messages: roomChatHistory.get(room.code) ?? [] });
+  sendJson(sess.ws, { type: 'VOICE_PEERS', peers: roomVoiceStates.get(room.code) ?? {} });
   notifyFriendsPresence(sess.username);
   broadcastPublicRooms();
 }
@@ -329,9 +380,14 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
 
   const type = typeof msg.type === 'string' ? msg.type : '';
 
+  if (type === 'PING') {
+    sendJson(sess.ws, { type: 'PONG', ts: Date.now() });
+    return;
+  }
+
   if (type === 'CLAIM_USERNAME') {
     const clean = sanitizeUsername(String(msg.username ?? ''));
-    const agentId = typeof msg.agentId === 'string' ? msg.agentId : 'ZEPHYR';
+    const agentId = typeof msg.agentId === 'string' ? msg.agentId : 'KAEL';
     sess.agentId = agentId;
 
     if (clean.length < 3) {
@@ -365,6 +421,10 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
       type: 'USERNAME_CLAIMED',
       username: clean,
     });
+    sendJson(sess.ws, {
+      type: 'CHAT_HISTORY',
+      messages: sess.roomCode ? (roomChatHistory.get(sess.roomCode) ?? []) : globalChatHistory,
+    });
     pushFriendsToUser(clean);
     notifyFriendsPresence(clean);
     broadcastPublicRooms();
@@ -380,7 +440,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
 
   switch (type) {
     case 'UPDATE_AGENT': {
-      const agentId = typeof msg.agentId === 'string' ? msg.agentId : 'ZEPHYR';
+      const agentId = typeof msg.agentId === 'string' ? msg.agentId : 'KAEL';
       sess.agentId = agentId;
       if (sess.roomCode) {
         const room = roomsByCode.get(sess.roomCode);
@@ -483,6 +543,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         : 'MEDIUM') as BotDifficulty;
       const fillBots = typeof msg.fillBots === 'boolean' ? msg.fillBots : false;
       const isPublic = typeof msg.isPublic === 'boolean' ? msg.isPublic : true;
+      const mapId = typeof msg.mapId === 'string' && msg.mapId.trim() ? msg.mapId.trim().slice(0, 40) : 'WAREHOUSE';
       const roomName =
         typeof msg.name === 'string' && msg.name.trim().length > 0
           ? msg.name.trim().slice(0, 26)
@@ -494,6 +555,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         name: roomName,
         hostUsername: sess.username,
         mode,
+        mapId,
         botDifficulty,
         fillBots,
         isPublic,
@@ -528,6 +590,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         ? String(msg.botDifficulty)
         : 'MEDIUM') as BotDifficulty;
       const fillBots = typeof msg.fillBots === 'boolean' ? msg.fillBots : false;
+      const mapId = typeof msg.mapId === 'string' && msg.mapId.trim() ? msg.mapId.trim().slice(0, 40) : 'WAREHOUSE';
 
       const openRoom = Array.from(roomsByCode.values()).find(
         (r) =>
@@ -547,6 +610,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
           name: `${targetMode === 'SKIRMISH' ? 'Skirmish' : targetMode === 'CUSTOM' ? 'Multiplayer 5v5' : 'Competitive'} Match`,
           hostUsername: sess.username,
           mode: targetMode,
+          mapId,
           botDifficulty,
           fillBots,
           isPublic: true,
@@ -602,6 +666,9 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
       if (!room || normUser(room.hostUsername) !== myKey) return;
       if (typeof msg.fillBots === 'boolean') room.fillBots = msg.fillBots;
       if (typeof msg.isPublic === 'boolean') room.isPublic = msg.isPublic;
+      if (typeof msg.mapId === 'string' && msg.mapId.trim()) {
+        room.mapId = msg.mapId.trim().slice(0, 40);
+      }
       if (['COMPETITIVE', 'SKIRMISH', 'PRACTICE', 'CUSTOM'].includes(String(msg.mode))) {
         room.mode = String(msg.mode) as MatchMode;
       }
@@ -628,6 +695,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
           name: `${sess.username}'s Lobby`,
           hostUsername: sess.username,
           mode: 'CUSTOM',
+          mapId: 'WAREHOUSE',
           botDifficulty: 'MEDIUM',
           fillBots: false,
           isPublic: false,
@@ -710,11 +778,124 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
       }
       break;
     }
+
+    case 'CHAT_SEND': {
+      const cleanText = sanitizeChatMessageText(String(msg.text ?? ''));
+      if (!cleanText) return;
+      const requestedChan = String(msg.channel ?? 'ROOM').toUpperCase();
+      const channel: ChatChannel =
+        requestedChan === 'TEAM' ? 'TEAM' : requestedChan === 'GLOBAL' ? 'GLOBAL' : 'ROOM';
+
+      if (sess.roomCode && channel !== 'GLOBAL') {
+        const room = roomsByCode.get(sess.roomCode);
+        if (!room) return;
+        const senderMember = room.members.find((m) => normUser(m.username) === myKey);
+        const entry: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          channel,
+          fromUsername: sess.username,
+          team: senderMember?.team,
+          text: cleanText,
+          timestamp: Date.now(),
+        };
+        const history = roomChatHistory.get(room.code) ?? [];
+        history.push(entry);
+        if (history.length > 60) history.splice(0, history.length - 60);
+        roomChatHistory.set(room.code, history);
+
+        for (const member of room.members) {
+          if (channel === 'TEAM' && senderMember && member.team !== senderMember.team) continue;
+          const targetSess = sessionsByUsername.get(normUser(member.username));
+          if (targetSess) {
+            sendJson(targetSess.ws, { type: 'CHAT_MESSAGE', message: entry });
+          }
+        }
+      } else {
+        const entry: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          channel: 'GLOBAL',
+          fromUsername: sess.username,
+          text: cleanText,
+          timestamp: Date.now(),
+        };
+        globalChatHistory.push(entry);
+        if (globalChatHistory.length > 40) globalChatHistory.splice(0, globalChatHistory.length - 40);
+        for (const targetSess of sessionsByWs.values()) {
+          if (targetSess.username && !targetSess.roomCode) {
+            sendJson(targetSess.ws, { type: 'CHAT_MESSAGE', message: entry });
+          }
+        }
+      }
+      break;
+    }
+
+    case 'VOICE_STATE': {
+      if (!sess.roomCode) return;
+      const room = roomsByCode.get(sess.roomCode);
+      if (!room) return;
+      const vMap = roomVoiceStates.get(room.code) ?? {};
+      const active = Boolean(msg.active);
+      if (!active) {
+        delete vMap[sess.username];
+      } else {
+        vMap[sess.username] = {
+          username: sess.username,
+          active: true,
+          muted: Boolean(msg.muted),
+          speaking: Boolean(msg.speaking),
+        };
+      }
+      roomVoiceStates.set(room.code, vMap);
+      broadcastVoicePeers(room);
+      break;
+    }
+
+    case 'VOICE_SIGNAL': {
+      if (!sess.roomCode) return;
+      const room = roomsByCode.get(sess.roomCode);
+      if (!room) return;
+      const targetUser = String(msg.targetUsername ?? '');
+      const targetKey = normUser(targetUser);
+      if (!targetKey || targetKey === myKey) return;
+      const isTargetInRoom = room.members.some((m) => normUser(m.username) === targetKey);
+      if (!isTargetInRoom) return;
+      const targetSess = sessionsByUsername.get(targetKey);
+      if (targetSess) {
+        sendJson(targetSess.ws, {
+          type: 'VOICE_SIGNAL',
+          signal: {
+            kind: msg.kind,
+            fromUsername: sess.username,
+            targetUsername: targetSess.username,
+            sdp: msg.sdp,
+            candidate: msg.candidate,
+          },
+        });
+      }
+      break;
+    }
   }
 }
 
 async function startServer(): Promise<void> {
   const app = express();
+  app.set('trust proxy', 1);
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
   app.use(express.json());
 
   app.get('/api/health', (_req, res) => {
@@ -760,6 +941,40 @@ async function startServer(): Promise<void> {
     res.sendFile(filePath);
   });
 
+  app.get('/api/maps/courtyard.glb', async (_req, res) => {
+    const courtyardCache = path.join(MAP_CACHE_DIR, 'courtyard.glb');
+    if (fs.existsSync(courtyardCache) && fs.statSync(courtyardCache).size > 1024) {
+      res.setHeader('Content-Type', 'model/gltf-binary');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(courtyardCache);
+      return;
+    }
+    try {
+      fs.mkdirSync(MAP_CACHE_DIR, { recursive: true });
+      const upstream = await fetch(COURTYARD_CUSTOM_MAP_URL, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!upstream.ok) {
+        res.status(502).json({ ok: false, error: 'Courtyard GLB upstream unavailable.' });
+        return;
+      }
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      if (buffer.length < 1024) {
+        res.status(502).json({ ok: false, error: 'Courtyard GLB response invalid.' });
+        return;
+      }
+      const tmp = `${courtyardCache}.tmp`;
+      fs.writeFileSync(tmp, buffer);
+      fs.renameSync(tmp, courtyardCache);
+      res.setHeader('Content-Type', 'model/gltf-binary');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(courtyardCache);
+    } catch {
+      res.status(502).json({ ok: false, error: 'Unable to load courtyard GLB.' });
+    }
+  });
+
   if (IS_PROD) {
     const distDir = path.join(ROOT_DIR, 'dist');
     app.use(express.static(distDir));
@@ -769,7 +984,7 @@ async function startServer(): Promise<void> {
   } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'custom',
     });
     app.use(vite.middlewares);
@@ -815,13 +1030,17 @@ async function startServer(): Promise<void> {
       username: null,
       status: 'ONLINE',
       roomCode: null,
-      agentId: 'ZEPHYR',
+      agentId: 'KAEL',
       isAlive: true,
     };
     sessionsByWs.set(ws, sess);
 
     ws.on('pong', () => {
       sess.isAlive = true;
+    });
+
+    ws.on('error', (err) => {
+      console.warn('[Hollow Strike Server] Client WebSocket error:', err.message);
     });
 
     ws.on('message', (data) => {

@@ -1,15 +1,20 @@
 /**
  * Hollow Strike - Real-Time WebSocket Multiplayer & Social Client
+ * Connects cleanly to same-origin `/ws` or external Render backend via `VITE_WS_URL` / `VITE_BACKEND_URL`.
  * Caches unique username locally, maintains live Friend List presence, Custom Rooms, and In-Match relays.
  */
 
 import {
   BotDifficulty,
+  ChatChannel,
+  ChatMessage,
   CustomRoomState,
   FriendEntry,
   MatchMode,
   RemotePlayerSync,
   RoomInviteEntry,
+  VoicePeerState,
+  VoiceSignalPayload,
 } from './types';
 
 const USERNAME_KEY = 'hollow_strike_username_v1';
@@ -19,6 +24,7 @@ export interface PublicRoomSummary {
   name: string;
   hostUsername: string;
   mode: MatchMode;
+  mapId?: string;
   memberCount: number;
   fillBots: boolean;
 }
@@ -26,13 +32,39 @@ export interface PublicRoomSummary {
 export type SocialEventListener = () => void;
 export type MatchLaunchListener = (room: CustomRoomState) => void;
 export type InMatchMessageListener = (msg: Record<string, unknown>) => void;
+export type VoiceSignalListener = (signal: VoiceSignalPayload) => void;
+
+export function resolveBackendHttpUrl(): string {
+  const configured = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, '');
+  }
+  return '';
+}
+
+export function resolveBackendWsUrl(): string {
+  const explicitWs = (import.meta.env.VITE_WS_URL as string | undefined)?.trim();
+  if (explicitWs) {
+    return explicitWs.replace(/\/+$/, '');
+  }
+  const backendHttp = resolveBackendHttpUrl();
+  if (backendHttp) {
+    const wsBase = backendHttp.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+    return wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
+  }
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws`;
+}
 
 class MultiplayerClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
+  private heartbeatTimer: number | null = null;
+  private pendingMessages: unknown[] = [];
   private listeners = new Set<SocialEventListener>();
   private launchListeners = new Set<MatchLaunchListener>();
   private matchListeners = new Set<InMatchMessageListener>();
+  private voiceSignalListeners = new Set<VoiceSignalListener>();
 
   public connected: boolean = false;
   public username: string = '';
@@ -44,7 +76,9 @@ class MultiplayerClient {
   public invites: RoomInviteEntry[] = [];
   public currentRoom: CustomRoomState | null = null;
   public publicRooms: PublicRoomSummary[] = [];
-  public activeAgentId: string = 'ZEPHYR';
+  public activeAgentId: string = 'KAEL';
+  public chatMessages: ChatMessage[] = [];
+  public voicePeers: Record<string, VoicePeerState> = {};
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -67,23 +101,29 @@ class MultiplayerClient {
       return;
     }
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${window.location.host}/ws`;
+    const url = resolveBackendWsUrl();
 
     try {
       const ws = new WebSocket(url);
       this.ws = ws;
 
       ws.onopen = () => {
+        if (this.ws !== ws) return;
         this.connected = true;
         this.usernameError = null;
         if (this.username.length >= 3) {
           this.send({ type: 'CLAIM_USERNAME', username: this.username, agentId: this.activeAgentId });
         }
+        while (this.pendingMessages.length > 0) {
+          const next = this.pendingMessages.shift();
+          this.send(next);
+        }
+        this.startHeartbeat();
         this.emit();
       };
 
       ws.onmessage = (event) => {
+        if (this.ws !== ws) return;
         try {
           const msg = JSON.parse(event.data as string) as Record<string, unknown>;
           this.handleMessage(msg);
@@ -93,6 +133,8 @@ class MultiplayerClient {
       };
 
       ws.onclose = () => {
+        if (this.ws !== ws) return;
+        this.stopHeartbeat();
         this.connected = false;
         this.usernameClaimed = false;
         this.ws = null;
@@ -101,10 +143,27 @@ class MultiplayerClient {
       };
 
       ws.onerror = () => {
-        // Error is followed by onclose
+        // Error is followed cleanly by onclose
       };
     } catch {
       this.scheduleReconnect();
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (typeof window === 'undefined') return;
+    this.heartbeatTimer = window.setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'PING' }));
+      }
+    }, 15000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer !== null && typeof window !== 'undefined') {
+      window.clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
   }
 
@@ -120,12 +179,19 @@ class MultiplayerClient {
   private send(payload: unknown): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(payload));
+    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      if (this.pendingMessages.length < 16) {
+        this.pendingMessages.push(payload);
+      }
     }
   }
 
   private handleMessage(msg: Record<string, unknown>): void {
     const type = String(msg.type ?? '');
     switch (type) {
+      case 'PONG':
+        break;
+
       case 'USERNAME_CLAIMED':
         this.username = String(msg.username ?? this.username);
         this.usernameClaimed = true;
@@ -190,6 +256,32 @@ class MultiplayerClient {
       case 'ROUND_SYNC':
         this.matchListeners.forEach((cb) => cb(msg));
         break;
+
+      case 'CHAT_HISTORY': {
+        const list = (msg.messages as ChatMessage[]) ?? [];
+        this.chatMessages = list.slice(-60);
+        this.emit();
+        break;
+      }
+
+      case 'CHAT_MESSAGE':
+        if (msg.message) {
+          this.chatMessages = [...this.chatMessages, msg.message as ChatMessage].slice(-60);
+          this.emit();
+        }
+        break;
+
+      case 'VOICE_PEERS':
+        this.voicePeers = (msg.peers as Record<string, VoicePeerState>) ?? {};
+        this.emit();
+        break;
+
+      case 'VOICE_SIGNAL':
+        if (msg.signal) {
+          const sig = msg.signal as VoiceSignalPayload;
+          this.voiceSignalListeners.forEach((cb) => cb(sig));
+        }
+        break;
     }
   }
 
@@ -239,6 +331,7 @@ class MultiplayerClient {
   public createRoom(opts: {
     name?: string;
     mode: MatchMode;
+    mapId?: string;
     botDifficulty: BotDifficulty;
     fillBots: boolean;
     isPublic: boolean;
@@ -252,9 +345,9 @@ class MultiplayerClient {
     this.send({ type: 'JOIN_ROOM', code: code.trim().toUpperCase() });
   }
 
-  public quickMatch(mode: MatchMode, botDifficulty: BotDifficulty): void {
+  public quickMatch(mode: MatchMode, botDifficulty: BotDifficulty, mapId?: string): void {
     this.notice = null;
-    this.send({ type: 'QUICK_MATCH', mode, botDifficulty });
+    this.send({ type: 'QUICK_MATCH', mode, botDifficulty, mapId });
   }
 
   public leaveRoom(): void {
@@ -271,7 +364,9 @@ class MultiplayerClient {
     this.send({ type: 'TOGGLE_READY' });
   }
 
-  public updateRoomConfig(patch: Partial<Pick<CustomRoomState, 'mode' | 'botDifficulty' | 'fillBots' | 'isPublic'>>): void {
+  public updateRoomConfig(
+    patch: Partial<Pick<CustomRoomState, 'mode' | 'mapId' | 'botDifficulty' | 'fillBots' | 'isPublic'>>
+  ): void {
     this.send({ type: 'UPDATE_ROOM_CONFIG', ...patch });
   }
 
@@ -308,6 +403,20 @@ class MultiplayerClient {
     this.send({ type: 'ROUND_SYNC', roundPhase, attackerRounds, defenderRounds, roundNumber });
   }
 
+  public sendChat(text: string, channel: ChatChannel = 'ROOM'): void {
+    const clean = text.trim();
+    if (!clean) return;
+    this.send({ type: 'CHAT_SEND', text: clean, channel });
+  }
+
+  public sendVoiceState(active: boolean, muted: boolean, speaking: boolean): void {
+    this.send({ type: 'VOICE_STATE', active, muted, speaking });
+  }
+
+  public sendVoiceSignal(payload: Omit<VoiceSignalPayload, 'fromUsername'>): void {
+    this.send({ type: 'VOICE_SIGNAL', ...payload });
+  }
+
   public subscribe(listener: SocialEventListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -329,9 +438,17 @@ class MultiplayerClient {
     };
   }
 
+  public subscribeVoiceSignal(listener: VoiceSignalListener): () => void {
+    this.voiceSignalListeners.add(listener);
+    return () => {
+      this.voiceSignalListeners.delete(listener);
+    };
+  }
+
   private emit(): void {
     this.listeners.forEach((cb) => cb());
   }
 }
 
 export const multiplayerClient = new MultiplayerClient();
+

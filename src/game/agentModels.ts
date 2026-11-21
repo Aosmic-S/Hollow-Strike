@@ -141,6 +141,37 @@ export function createAgentModel(agent: AgentDef, team: TeamSide): AgentMeshPack
   visorMesh.position.set(0, 0.85, -0.15);
   upperBody.add(visorMesh);
 
+  // Role-specific tactical silhouette accents (crest / cloak collar / heavy pauldrons)
+  if (agent.id === 'KAEL' || agent.id === 'KORA') {
+    // Astral / Gravity Collar Halo
+    const collarGeo = new THREE.BoxGeometry(0.46, 0.12, 0.10);
+    const collar = new THREE.Mesh(collarGeo, visorMat);
+    collar.position.set(0, 0.64, 0.16);
+    upperBody.add(collar);
+  } else if (agent.id === 'ZED') {
+    // Twin cyber-blade sheaths on back
+    const sheathGeo = new THREE.BoxGeometry(0.07, 0.56, 0.05);
+    const sheathL = new THREE.Mesh(sheathGeo, visorMat);
+    sheathL.position.set(-0.14, 0.44, 0.21);
+    sheathL.rotation.z = -0.35;
+    const sheathR = new THREE.Mesh(sheathGeo, visorMat);
+    sheathR.position.set(0.14, 0.44, 0.21);
+    sheathR.rotation.z = 0.35;
+    upperBody.add(sheathL, sheathR);
+  } else if (agent.id === 'AEGIS' || agent.id === 'ROOK') {
+    // Heavy Sentinel Dorsal Pack
+    const packGeo = new THREE.BoxGeometry(0.34, 0.34, 0.14);
+    const pack = new THREE.Mesh(packGeo, vestMat);
+    pack.position.set(0, 0.42, 0.22);
+    upperBody.add(pack);
+  } else if (agent.id === 'SOREN' || agent.id === 'PULSE') {
+    // Recon Antenna / Solar Fin
+    const finGeo = new THREE.BoxGeometry(0.04, 0.28, 0.04);
+    const fin = new THREE.Mesh(finGeo, visorMat);
+    fin.position.set(0.22, 0.78, 0.14);
+    upperBody.add(fin);
+  }
+
   // Left & Right Arms (articulated from shoulder height)
   const armGeo = new THREE.BoxGeometry(0.16, 0.54, 0.18);
   const leftArmPivot = new THREE.Group();

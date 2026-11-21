@@ -23,7 +23,7 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   onReturnToTitle,
 }) => {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/85 backdrop-blur-sm p-4 select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/92 p-4 select-none">
       <div className="relative w-full max-w-sm border border-[#ECE8E1]/20 bg-[#18232E] p-6 text-center shadow-2xl clip-val-panel">
         <div className="mx-auto mb-3 h-12 w-12 overflow-hidden border border-[#FF4655]/60 bg-[#0F1923] clip-val-card">
           <img

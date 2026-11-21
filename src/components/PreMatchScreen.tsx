@@ -4,13 +4,14 @@
  * centered VS diamond emblem, atmospheric Courtyard map backdrop, and live deploy countdown.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { resolveMapDef } from '../game/mapData';
 import { AGENT_REGISTRY, MatchMode, TeamSide } from '../game/types';
 import {
   AgentEmblemMark,
   AgentPortraitTile,
-  COURTYARD_MAP_ART,
   getAgentTitleLabel,
+  getMapArtwork,
   getPlayerCardArt,
 } from './AgentAvatar';
 
@@ -26,6 +27,7 @@ export interface PreMatchPlayer {
 
 interface PreMatchScreenProps {
   mode: MatchMode;
+  mapId?: string;
   playerTeam: TeamSide;
   defenders: PreMatchPlayer[];
   attackers: PreMatchPlayer[];
@@ -42,13 +44,17 @@ const MODE_SUBTITLE: Record<MatchMode, string> = {
 
 export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
   mode,
+  mapId,
   playerTeam,
   defenders,
   attackers,
   durationSeconds = 3.2,
   onDeployNow,
 }) => {
+  const activeMap = resolveMapDef(mapId);
   const [remainingMs, setRemainingMs] = useState<number>(Math.round(durationSeconds * 1000));
+  const deployRef = useRef(onDeployNow);
+  deployRef.current = onDeployNow;
 
   useEffect(() => {
     const totalMs = Math.round(durationSeconds * 1000);
@@ -60,12 +66,12 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
       setRemainingMs(next);
       if (next <= 0) {
         window.clearInterval(interval);
-        onDeployNow();
+        deployRef.current();
       }
     }, 50);
 
     return () => window.clearInterval(interval);
-  }, [durationSeconds, onDeployNow]);
+  }, [durationSeconds]);
 
   const progressPct = Math.min(
     100,
@@ -83,8 +89,8 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
     >
       {/* Full-bleed Atmospheric Map Backdrop */}
       <img
-        src={COURTYARD_MAP_ART}
-        alt="Courtyard Arena"
+        src={getMapArtwork(activeMap.id)}
+        alt={`${activeMap.name} Arena`}
         className="pointer-events-none fixed inset-0 h-full w-full object-cover object-center opacity-55 scale-[1.02]"
       />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(15,25,35,0.42)_0%,_rgba(8,13,20,0.88)_75%,_rgba(6,10,16,0.96)_100%)]" />
@@ -104,13 +110,13 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
       {/* TOP CENTER HEADER: MAP NAME + MODE + DEPLOY PROGRESS */}
       <header className="relative z-10 flex flex-col items-center pt-4 sm:pt-6 pb-2 px-4 text-center shrink-0">
         <span className="font-mono text-[10px] tracking-[0.28em] text-[#8B978F] uppercase">
-          ARENA // SECTOR 04 · YOUR SIDE:{' '}
+          {activeMap.sector} · YOUR SIDE:{' '}
           <span className={playerTeam === 'DEFENDERS' ? 'text-[#17E5B8]' : 'text-[#FF4655]'}>
             {playerTeam}
           </span>
         </span>
         <h1 className="mt-0.5 font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold uppercase tracking-[0.14em] text-[#ECE8E1] leading-none drop-shadow-[0_4px_18px_rgba(0,0,0,0.75)]">
-          COURTYARD
+          {activeMap.name.toUpperCase()}
         </h1>
         <div className="mt-1 font-display text-xs sm:text-sm font-bold uppercase tracking-[0.26em] text-[#ECE8E1]/75">
           {MODE_SUBTITLE[mode]}
@@ -175,7 +181,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                   );
                 }
 
-                const agent = AGENT_REGISTRY[player.agentId] || AGENT_REGISTRY.ZEPHYR;
+                const agent = AGENT_REGISTRY[player.agentId] || AGENT_REGISTRY.KAEL;
                 const artUrl = getPlayerCardArt(agent.id, idx);
                 const titleText =
                   player.titleLabel || getAgentTitleLabel(agent.id, player.isLocalPlayer, !player.isHuman);
@@ -284,7 +290,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                   );
                 }
 
-                const agent = AGENT_REGISTRY[player.agentId] || AGENT_REGISTRY.ZEPHYR;
+                const agent = AGENT_REGISTRY[player.agentId] || AGENT_REGISTRY.KAEL;
                 const artUrl = getPlayerCardArt(agent.id, idx + 1);
                 const titleText =
                   player.titleLabel || getAgentTitleLabel(agent.id, player.isLocalPlayer, !player.isHuman);
@@ -355,7 +361,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
       <footer className="relative z-10 flex items-center justify-between px-5 sm:px-8 pb-3 pt-1 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-6 w-6 items-center justify-center border border-[#FF4655]/60 bg-[#FF4655]/15">
-            <AgentEmblemMark agentId="BLITZ" accentColor="#FF4655" className="h-4 w-4" />
+            <AgentEmblemMark agentId="KAEL" accentColor="#FF4655" className="h-4 w-4" />
           </div>
           <span className="font-display text-sm font-extrabold uppercase tracking-[0.22em] text-[#ECE8E1]">
             HOLLOW STRIKE

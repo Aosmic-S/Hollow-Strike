@@ -30,7 +30,7 @@ export const MatchEndModal: React.FC<MatchEndModalProps> = ({
   const mvp = sortedStats[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/90 backdrop-blur-sm p-4 select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/94 p-4 select-none">
       <div className="relative w-full max-w-2xl border border-[#ECE8E1]/20 bg-[#18232E] p-8 text-center shadow-2xl clip-val-panel">
         <div className="mx-auto mb-3 inline-block border border-[#ECE8E1]/15 bg-[#0F1923] px-3 py-1.5 clip-val-card">
           <img

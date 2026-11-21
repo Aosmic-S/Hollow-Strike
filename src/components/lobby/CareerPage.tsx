@@ -101,7 +101,7 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
             </h3>
             <div className="space-y-2 overflow-y-auto max-h-[380px] pr-1 font-mono text-xs">
               {profile.matchHistory.map((m) => {
-                const ag = AGENT_REGISTRY[m.agentId] || AGENT_REGISTRY.ZEPHYR;
+                const ag = AGENT_REGISTRY[m.agentId] || AGENT_REGISTRY.KAEL;
                 return (
                   <div
                     key={m.id}

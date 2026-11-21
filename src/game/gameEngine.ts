@@ -46,10 +46,22 @@ import {
   pickBotPurchase,
 } from './rules';
 import { buildTacticalMap, BuiltMap } from './mapBuilder';
-import { BOMB_SITE_A, BOMB_SITE_B, SPAWN_ATTACKERS, SPAWN_DEFENDERS, checkCollision, isPointWalkable } from './mapData';
+import {
+  BOMB_SITE_A,
+  BOMB_SITE_B,
+  BUY_BARRIER_ATTACKERS_Z,
+  BUY_BARRIER_DEFENDERS_Z,
+  SPAWN_ATTACKERS,
+  SPAWN_DEFENDERS,
+  checkCollision,
+  getActiveMapDef,
+  isPointWalkable,
+  raycastMapAABBs,
+  setActiveMap,
+} from './mapData';
 import { createAgentModel } from './agentModels';
 import { createWeaponModel, getWeaponViewmodelProfile, createSpikeModel } from './weaponModels';
-import { soundEngine } from './audio';
+import { soundEngine, AnnouncerEvent } from './audio';
 import { AbilityManager } from './abilities';
 import { BotCombatant, BotController } from './botAI';
 import { InputManager } from './inputManager';
@@ -162,6 +174,9 @@ export class GameEngine {
   private abilitySlots: Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState> = {} as Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState>;
   private abilitySyncTimer: number = 0;
   private wasBlinded: boolean = false;
+  private roundPlayerKills: number = 0;
+  private playedTenSecondsAudio: boolean = false;
+  private phaseAnchor: { pos: THREE.Vector3; timer: number } | null = null;
 
   // Real Match Combat Telemetry
   private playerHeadshots: number = 0;
@@ -209,6 +224,7 @@ export class GameEngine {
   private unsubInMatch: (() => void) | null = null;
   private contextLost: boolean = false;
   private meleeSlashTimer: number = 0;
+  private glSyncTimer: number | null = null;
 
   constructor(
     mountElement: HTMLElement,
@@ -218,7 +234,8 @@ export class GameEngine {
     callbacks: EngineCallbacks,
     matchMode: MatchMode = 'CUSTOM',
     customRoom: CustomRoomState | null = null,
-    allyBotAgentIds: string[] = []
+    allyBotAgentIds: string[] = [],
+    mapId?: string
   ) {
     this.settings = settings;
     this.callbacks = callbacks;
@@ -226,23 +243,26 @@ export class GameEngine {
     this.customRoom = customRoom;
     this.input = new InputManager(settings.controlMode, settings.keyBindings);
 
-    // 1. Scene & Atmosphere Setup (Extended far clipping plane + gentle fog for japan_map architecture)
+    const activeMap = setActiveMap(customRoom?.mapId ?? mapId ?? getActiveMapDef().id);
+
+    // 1. Scene & Atmosphere Setup for active tactical map
+    const lowDetail = isSoftwareGl || settings.graphics === 'LOW';
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0d1526);
-    this.scene.fog = new THREE.FogExp2(0x10192d, 0.0046);
+    this.scene.background = new THREE.Color(activeMap.skyColor);
+    this.scene.fog = new THREE.FogExp2(activeMap.fogColor, 0.0046);
 
     // 2. Camera Setup (Tactical First-Person FOV)
     this.camera = new THREE.PerspectiveCamera(
       settings.fov,
       Math.max(1, mountElement.clientWidth) / Math.max(1, mountElement.clientHeight),
       0.08,
-      700
+      450
     );
-    this.camera.position.set(0, 1.65, 36);
+    this.camera.position.set(SPAWN_ATTACKERS.x, 1.65, SPAWN_ATTACKERS.z);
 
-    // 3. Renderer with Software GL Guard
+    // 3. Renderer with Software GL & Low Preset Guard
     this.renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl && settings.graphics !== 'LOW',
+      antialias: !lowDetail,
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -255,15 +275,19 @@ export class GameEngine {
     this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored, false);
     mountElement.appendChild(this.renderer.domElement);
 
-    // 4. Studio Environment Lighting via RoomEnvironment
+    // 4. Studio Environment Lighting (lightweight procedural PMREM on all presets so metallic/GLB guns never turn black)
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     pmremGenerator.dispose();
 
+    // Ambient fill ensures procedural arenas & guns remain clearly lit across presets
+    const ambientLight = new THREE.AmbientLight(0xe2e8f0, lowDetail ? 0.85 : 0.45);
+    this.scene.add(ambientLight);
+
     // Warm Directional Key + Cool Hemisphere Fill
-    this.dirLight = new THREE.DirectionalLight(0xffedd5, 1.45);
+    this.dirLight = new THREE.DirectionalLight(0xffedd5, lowDetail ? 1.75 : 1.55);
     this.dirLight.position.set(28, 45, 24);
-    this.dirLight.castShadow = !isSoftwareGl && settings.graphics !== 'LOW';
+    this.dirLight.castShadow = !lowDetail;
     this.dirLight.shadow.mapSize.width = 1024;
     this.dirLight.shadow.mapSize.height = 1024;
     this.dirLight.shadow.camera.near = 0.5;
@@ -275,18 +299,21 @@ export class GameEngine {
     this.dirLight.shadow.bias = -0.0005;
     this.scene.add(this.dirLight);
 
-    this.hemiLight = new THREE.HemisphereLight(0x7dd3fc, 0x1e293b, 0.65);
+    this.hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x334155, lowDetail ? 1.15 : 0.75);
     this.scene.add(this.hemiLight);
 
-    // 5. Abilities & Procedural Map
-    this.abilityMgr = new AbilityManager(this.scene);
-    this.mapData = buildTacticalMap(this.scene);
+    // 5. Abilities & Warehouse Map
+    this.abilityMgr = new AbilityManager(this.scene, lowDetail);
+    this.mapData = buildTacticalMap(this.scene, { lowDetail, isSoftwareGl });
 
-    // 6. Viewmodel Rig, Tactical Hands, and Barrel Muzzle Flash
+    // 6. Viewmodel Rig, Tactical Hands, Subtle Viewmodel Fill Light, and Barrel Muzzle Flash
     this.viewmodelRig = new THREE.Group();
     this.viewmodelArms = this.createViewmodelHands(playerAgentId);
     this.viewmodelFlash = this.createViewmodelFlash();
     this.viewmodelRig.add(this.viewmodelArms);
+    const vmKeyLight = new THREE.PointLight(0xe2e8f0, 0.85, 2.4);
+    vmKeyLight.position.set(0.22, 0.28, 0.15);
+    this.camera.add(vmKeyLight);
     this.camera.add(this.viewmodelRig);
     this.scene.add(this.camera);
 
@@ -328,32 +355,42 @@ export class GameEngine {
   }
 
   private createViewmodelHands(agentId: string): THREE.Group {
-    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.KAEL;
     const handsGroup = new THREE.Group();
 
-    const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.75, metalness: 0.2 });
-    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, metalness: 0.35 });
+    const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x162032, roughness: 0.72, metalness: 0.2 });
+    const gloveMat = new THREE.MeshStandardMaterial({ color: 0x263447, roughness: 0.56, metalness: 0.32 });
     const accentMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(agent.primaryColor),
       emissive: new THREE.Color(agent.primaryColor),
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.55,
     });
 
-    // Right Forearm + Glove (holding grip)
-    const rForearm = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.068, 0.28), sleeveMat);
-    rForearm.position.set(0.04, -0.09, 0.14);
-    rForearm.rotation.set(0.25, -0.15, 0);
-    const rGlove = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.062, 0.11), gloveMat);
-    rGlove.position.set(0.01, -0.055, 0.01);
-    const rBand = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.018, 0.04), accentMat);
-    rBand.position.set(0.025, -0.07, 0.06);
+    // Sleek tapered Right Forearm + Glove cupped under the grip
+    const rForearmGeo = new THREE.CylinderGeometry(0.024, 0.032, 0.25, 10);
+    rForearmGeo.rotateX(Math.PI / 2);
+    const rForearm = new THREE.Mesh(rForearmGeo, sleeveMat);
+    rForearm.position.set(0.038, -0.115, 0.145);
+    rForearm.rotation.set(0.28, -0.16, 0);
 
-    // Left Support Forearm + Glove (under forend)
-    const lForearm = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.062, 0.28), sleeveMat);
-    lForearm.position.set(-0.14, -0.11, 0.02);
-    lForearm.rotation.set(0.32, 0.55, 0);
-    const lGlove = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.056, 0.10), gloveMat);
-    lGlove.position.set(-0.04, -0.04, -0.11);
+    const rGlove = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.046, 0.078), gloveMat);
+    rGlove.position.set(0.012, -0.072, 0.005);
+
+    const rBandGeo = new THREE.CylinderGeometry(0.027, 0.028, 0.022, 10);
+    rBandGeo.rotateX(Math.PI / 2);
+    const rBand = new THREE.Mesh(rBandGeo, accentMat);
+    rBand.position.set(0.026, -0.092, 0.068);
+    rBand.rotation.set(0.28, -0.16, 0);
+
+    // Sleek tapered Left Support Forearm + Glove tucked underneath trigger guard / forend
+    const lForearmGeo = new THREE.CylinderGeometry(0.022, 0.029, 0.26, 10);
+    lForearmGeo.rotateX(Math.PI / 2);
+    const lForearm = new THREE.Mesh(lForearmGeo, sleeveMat);
+    lForearm.position.set(-0.125, -0.135, 0.03);
+    lForearm.rotation.set(0.32, 0.58, 0);
+
+    const lGlove = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.034, 0.076), gloveMat);
+    lGlove.position.set(-0.028, -0.076, -0.078);
 
     handsGroup.add(rForearm, rGlove, rBand, lForearm, lGlove);
     return handsGroup;
@@ -404,7 +441,7 @@ export class GameEngine {
   }
 
   private initAbilitySlots(agentId: string): void {
-    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+    const agent = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.KAEL;
     const slots = {} as Record<'Q' | 'E' | 'C' | 'X', AbilitySlotState>;
     for (const ab of agent.abilities) {
       const ultReq = ab.ultPointsRequired ?? 5;
@@ -539,10 +576,10 @@ export class GameEngine {
 
   private getSpawnSlotPosition(team: TeamSide, indexWithinTeam: number): THREE.Vector3 {
     const base = team === 'ATTACKERS' ? SPAWN_ATTACKERS : SPAWN_DEFENDERS;
-    const offsetX = (indexWithinTeam - 2) * 2.4;
+    const offsetX = (indexWithinTeam - 2) * 2.0;
     const tx = base.x + offsetX;
     const tz = base.z;
-    if (isPointWalkable(tx, tz, 0.5)) {
+    if (isPointWalkable(tx, tz, 0.45)) {
       return new THREE.Vector3(tx, 0, tz);
     }
     return new THREE.Vector3(base.x, 0, base.z);
@@ -566,7 +603,7 @@ export class GameEngine {
     const skirmishGun = WEAPON_REGISTRY.MANTIS || starterSidearm;
 
     const agentKeys = Object.keys(AGENT_REGISTRY);
-    const playerAgent = AGENT_REGISTRY[playerAgentId] || AGENT_REGISTRY.ZEPHYR;
+    const playerAgent = AGENT_REGISTRY[playerAgentId] || AGENT_REGISTRY.KAEL;
     const playerMesh = createAgentModel(playerAgent, this.playerTeam);
     playerMesh.root.visible = true;
     playerMesh.root.traverse((obj) => {
@@ -575,7 +612,7 @@ export class GameEngine {
     this.scene.add(playerMesh.root);
 
     const playerStartPos = this.getSpawnSlotPosition(this.playerTeam, 2);
-    const playerStartYaw = this.playerTeam === 'ATTACKERS' ? 0 : Math.PI;
+    const playerStartYaw = this.playerTeam === 'ATTACKERS' ? Math.PI : 0;
     const playerStartWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
 
     this.playerCombatant = {
@@ -661,13 +698,13 @@ export class GameEngine {
     };
 
     for (const remote of remoteMembers) {
-      const rAgent = AGENT_REGISTRY[remote.agentId] || AGENT_REGISTRY.BLITZ;
+      const rAgent = AGENT_REGISTRY[remote.agentId] || AGENT_REGISTRY.KAEL;
       const rMesh = createAgentModel(rAgent, remote.team);
       this.scene.add(rMesh.root);
 
       const slotIdx = takeNextSlot(remote.team);
       const rPos = this.getSpawnSlotPosition(remote.team, slotIdx);
-      const rYaw = remote.team === 'ATTACKERS' ? 0 : Math.PI;
+      const rYaw = remote.team === 'ATTACKERS' ? Math.PI : 0;
       const rStartWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
 
       const remoteCombatant: BotCombatant = {
@@ -744,13 +781,13 @@ export class GameEngine {
     const spawnBotTeam = (team: TeamSide, agentQueue: string[], isAlly: boolean) => {
       for (let i = 0; i < agentQueue.length; i++) {
         const agentKey = agentQueue[i];
-        const agent = AGENT_REGISTRY[agentKey] || AGENT_REGISTRY.ZEPHYR;
+        const agent = AGENT_REGISTRY[agentKey] || AGENT_REGISTRY.KAEL;
         const mesh = createAgentModel(agent, team);
         this.scene.add(mesh.root);
 
         const slotIdx = takeNextSlot(team);
         const botPos = this.getSpawnSlotPosition(team, slotIdx);
-        const startYaw = team === 'ATTACKERS' ? 0 : Math.PI;
+        const startYaw = team === 'ATTACKERS' ? Math.PI : 0;
         const startWeapon = this.matchMode === 'SKIRMISH' ? skirmishGun : starterSidearm;
         const carrySpike = team === 'ATTACKERS' && !this.spikeCarrierId && i === 0;
 
@@ -879,11 +916,16 @@ export class GameEngine {
     this.viewmodelFlash.position.set(...profile.flashPos);
 
     this.viewmodelWeapon.position.set(...profile.hipPos);
+    this.viewmodelArms.position.set(
+      profile.hipPos[0] - 0.03,
+      profile.hipPos[1] + 0.03,
+      profile.hipPos[2] + 0.16
+    );
     this.viewmodelWeapon.add(this.viewmodelFlash);
     this.viewmodelRig.add(this.viewmodelWeapon);
 
-    this.vmEquipOffset = -0.24; // Trigger crisp draw/equip animation
-    this.vmEquipRoll = -0.45;
+    this.vmEquipOffset = -0.18; // Crisp draw/equip rise without near-plane clipping
+    this.vmEquipRoll = -0.32;
     this.vmInspectTimer = 0;
   }
 
@@ -920,7 +962,7 @@ export class GameEngine {
 
     this.input.setMobileADS(false);
     this.updateViewmodelWeapon(p.weapon.id);
-    soundEngine.playReload();
+    soundEngine.playWeaponReload(p.weapon.id);
     this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
     return true;
   }
@@ -956,16 +998,57 @@ export class GameEngine {
     }
 
     this.renderer.render(this.scene, this.camera);
+
     if (isSoftwareGl) {
-      window.setTimeout(() => {
-        if (!this.isDestroyed) {
+      this.afterDraw(() => {
+        if (!this.isDestroyed && !this.contextLost) {
           this.frameId = requestAnimationFrame(this.tick);
         }
-      }, 45);
+      });
     } else {
       this.frameId = requestAnimationFrame(this.tick);
     }
   };
+
+  private afterDraw(cb: () => void): void {
+    if (this.glSyncTimer !== null) {
+      window.clearTimeout(this.glSyncTimer);
+      this.glSyncTimer = null;
+    }
+    const gl = this.renderer.getContext() as WebGL2RenderingContext | null;
+    if (!gl || typeof gl.fenceSync !== 'function') {
+      this.glSyncTimer = window.setTimeout(cb, 80);
+      return;
+    }
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!sync) {
+      this.glSyncTimer = window.setTimeout(cb, 80);
+      return;
+    }
+    gl.flush();
+    const poll = () => {
+      if (this.isDestroyed || this.contextLost) {
+        try {
+          gl.deleteSync(sync);
+        } catch {
+          // Ignore
+        }
+        return;
+      }
+      const status = gl.clientWaitSync(sync, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) {
+        this.glSyncTimer = window.setTimeout(poll, 35);
+      } else {
+        try {
+          gl.deleteSync(sync);
+        } catch {
+          // Ignore
+        }
+        this.glSyncTimer = window.setTimeout(cb, 65);
+      }
+    };
+    this.glSyncTimer = window.setTimeout(poll, 35);
+  }
 
   private updateSimulation(dt: number): void {
     this.input.update();
@@ -1009,7 +1092,19 @@ export class GameEngine {
       dt,
       this.combatants,
       (target, dmgAmount, label) => this.applyExternalDamage(target, dmgAmount, label),
-      (origin, dir, team) => this.fireTurretShot(origin, dir, team)
+      (origin, dir, team) => this.fireTurretShot(origin, dir, team),
+      (target, hpGain, armorGain) => {
+        target.hp = Math.min(100, target.hp + hpGain);
+        target.armor = Math.min(50, target.armor + armorGain);
+        const st = this.playerStats.find((s) => s.id === target.id);
+        if (st) {
+          st.hp = target.hp;
+          st.armor = target.armor;
+        }
+        if (target.isHuman) {
+          this.callbacks.onPlayerHealthUpdate(target.hp, target.armor, 100, 50);
+        }
+      }
     );
 
     // Notify HUD if player blind state changed
@@ -1042,6 +1137,7 @@ export class GameEngine {
     }
     this.spikeMesh.position.copy(this.spikePosition);
     soundEngine.playSpikePlant();
+    soundEngine.playAnnouncer('spikePlanted');
 
     const siteChoice: 'A' | 'B' = this.roundNumber % 2 === 1 ? 'A' : 'B';
     for (const ctrl of this.botControllers) {
@@ -1061,6 +1157,7 @@ export class GameEngine {
     if (this.spikeState !== 'planted') return;
     this.spikeState = 'defused';
     soundEngine.playSpikeDefused();
+    soundEngine.playAnnouncer('spikeDefused');
     if (this.customRoom) {
       multiplayerClient.sendSpikeEvent('DEFUSED', this.plantedSite, [0, 0, 0]);
     }
@@ -1089,16 +1186,27 @@ export class GameEngine {
     } else if (this.roundPhase === 'ROUND_LIVE') {
       if (this.spikeState === 'planted') {
         this.roundPhase = 'SPIKE_PLANTED';
-      } else if (this.roundTimer <= 0) {
-        if (this.matchMode === 'PRACTICE') {
-          this.roundTimer = 300;
-        } else {
-          this.endRound('DEFENDERS', 'TIME_EXPIRED');
+      } else {
+        if (!this.playedTenSecondsAudio && this.matchMode !== 'PRACTICE' && this.roundTimer <= 10 && this.roundTimer > 0) {
+          this.playedTenSecondsAudio = true;
+          soundEngine.playAnnouncer('tenSecondsLeft');
+        }
+        if (this.roundTimer <= 0) {
+          if (this.matchMode === 'PRACTICE') {
+            this.roundTimer = 300;
+          } else {
+            this.endRound('DEFENDERS', 'TIME_EXPIRED');
+          }
         }
       }
     } else if (this.roundPhase === 'SPIKE_PLANTED') {
       this.spikeTimer -= dt;
       this.spikeBeepTimer -= dt;
+
+      if (!this.playedTenSecondsAudio && this.matchMode !== 'PRACTICE' && this.spikeTimer <= 10 && this.spikeTimer > 0) {
+        this.playedTenSecondsAudio = true;
+        soundEngine.playAnnouncer('tenSecondsLeft');
+      }
 
       const urgencyFraction = 1 - this.spikeTimer / SPIKE_DETONATION_TIME;
       const beepInterval = Math.max(0.12, 1.0 - urgencyFraction * 0.88);
@@ -1223,20 +1331,20 @@ export class GameEngine {
     const nextX = p.position.x + p.velocity.x * dt;
     const nextZ = p.position.z + p.velocity.z * dt;
 
-    let blockedByBarrier = false;
-    if (this.roundPhase === 'BUY_PHASE') {
-      if (p.team === 'ATTACKERS' && nextZ < 25.8) blockedByBarrier = true;
-      if (p.team === 'DEFENDERS' && nextZ > -10.2) blockedByBarrier = true;
+    if (this.phaseAnchor) {
+      this.phaseAnchor.timer -= dt;
+      if (this.phaseAnchor.timer <= 0) this.phaseAnchor = null;
     }
 
-    // Check Bastion tactical energy barriers
-    if (!blockedByBarrier) {
-      for (const b of this.abilityMgr.barriers) {
-        if (Math.abs(nextX - b.position.x) < b.width * 0.52 && Math.abs(nextZ - b.position.z) < 0.75) {
-          blockedByBarrier = true;
-          break;
-        }
-      }
+    let blockedByBarrier = false;
+    if (this.roundPhase === 'BUY_PHASE') {
+      if (p.team === 'ATTACKERS' && nextZ > BUY_BARRIER_ATTACKERS_Z) blockedByBarrier = true;
+      if (p.team === 'DEFENDERS' && nextZ < BUY_BARRIER_DEFENDERS_Z) blockedByBarrier = true;
+    }
+
+    // Check tactical energy barriers (Bastion Wall / Cosmic Divide)
+    if (!blockedByBarrier && this.abilityMgr.isBlockedByBarrier(nextX, nextZ, 0.45)) {
+      blockedByBarrier = true;
     }
 
     if (!blockedByBarrier) {
@@ -1307,7 +1415,7 @@ export class GameEngine {
 
     if (this.input.state.reloadJustPressed && p.ammoInMag < p.weapon.magazineSize && p.reserveAmmo > 0 && p.reloadTimer <= 0) {
       p.reloadTimer = p.weapon.reloadTime / reloadSpeedMult;
-      soundEngine.playReload();
+      soundEngine.playWeaponReload(p.weapon.id);
       this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true, p.activeSlot);
     }
 
@@ -1375,7 +1483,7 @@ export class GameEngine {
         this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.14);
       } else if ((this.input.state.fireJustPressed || autoFireTrigger) && p.reserveAmmo > 0) {
         p.reloadTimer = p.weapon.reloadTime / reloadSpeedMult;
-        soundEngine.playReload();
+        soundEngine.playWeaponReload(p.weapon.id);
         this.callbacks.onWeaponUpdate(p.weapon, p.ammoInMag, p.reserveAmmo, true, p.activeSlot);
       }
     }
@@ -1504,11 +1612,18 @@ export class GameEngine {
         const desiredDist = _vec3_3.length();
         if (desiredDist > 0.01) {
           _vec3_3.divideScalar(desiredDist);
-          _raycaster.set(_vec3_1, _vec3_3);
-          _raycaster.far = desiredDist;
-          const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-          if (wallHits.length > 0 && wallHits[0].distance < desiredDist) {
-            const safeDist = Math.max(0.55, wallHits[0].distance - 0.3);
+          const wallHit = raycastMapAABBs(
+            _vec3_1.x,
+            _vec3_1.y,
+            _vec3_1.z,
+            _vec3_3.x,
+            _vec3_3.y,
+            _vec3_3.z,
+            desiredDist,
+            true
+          );
+          if (wallHit && wallHit.distance < desiredDist) {
+            const safeDist = Math.max(0.55, wallHit.distance - 0.3);
             _vec3_2.copy(_vec3_1).addScaledVector(_vec3_3, safeDist);
           }
         }
@@ -1533,11 +1648,18 @@ export class GameEngine {
       const dist = _vec3_3.length();
       if (dist > 0.01) {
         _vec3_3.divideScalar(dist);
-        _raycaster.set(_vec3_1, _vec3_3);
-        _raycaster.far = dist;
-        const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-        if (wallHits.length > 0 && wallHits[0].distance < dist) {
-          _vec3_2.copy(_vec3_1).addScaledVector(_vec3_3, Math.max(0.8, wallHits[0].distance - 0.35));
+        const wallHit = raycastMapAABBs(
+          _vec3_1.x,
+          _vec3_1.y,
+          _vec3_1.z,
+          _vec3_3.x,
+          _vec3_3.y,
+          _vec3_3.z,
+          dist,
+          true
+        );
+        if (wallHit && wallHit.distance < dist) {
+          _vec3_2.copy(_vec3_1).addScaledVector(_vec3_3, Math.max(0.8, wallHit.distance - 0.35));
         }
       }
       this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _vec3_2.x, 6, dt);
@@ -1557,7 +1679,7 @@ export class GameEngine {
     p.armor = 0;
     p.deathTimer = 0;
     p.position.set(spawnBase.x, 0, spawnBase.z);
-    p.yaw = p.team === 'ATTACKERS' ? 0 : Math.PI;
+    p.yaw = p.team === 'ATTACKERS' ? Math.PI : 0;
     p.pitch = 0;
     p.ammoInMag = p.weapon.magazineSize;
     p.reserveAmmo = p.weapon.reserveAmmo;
@@ -1656,10 +1778,17 @@ export class GameEngine {
         const dot = _vec3_2.dot(_vec3_3);
         if (dot > bestDot) {
           // Verify target is not behind a wall
-          _raycaster.set(this.camera.position, _vec3_3);
-          _raycaster.far = dist;
-          const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-          if (wallHits.length > 0 && wallHits[0].distance < dist - 0.35) {
+          const wallHit = raycastMapAABBs(
+            this.camera.position.x,
+            this.camera.position.y,
+            this.camera.position.z,
+            _vec3_3.x,
+            _vec3_3.y,
+            _vec3_3.z,
+            dist,
+            false
+          );
+          if (wallHit && wallHit.distance < dist - 0.35) {
             continue;
           }
           bestDot = dot;
@@ -1705,8 +1834,17 @@ export class GameEngine {
       }
 
       if (enemyDist < Infinity) {
-        const wallHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-        const wallDist = wallHits.length > 0 ? wallHits[0].distance : Infinity;
+        const wallHit = raycastMapAABBs(
+          this.camera.position.x,
+          this.camera.position.y,
+          this.camera.position.z,
+          _vec3_2.x,
+          _vec3_2.y,
+          _vec3_2.z,
+          enemyDist,
+          false
+        );
+        const wallDist = wallHit ? wallHit.distance : Infinity;
         if (enemyDist < wallDist) {
           return true;
         }
@@ -1789,6 +1927,7 @@ export class GameEngine {
           }
           this.spikeMesh.position.copy(this.spikePosition);
           soundEngine.playSpikePlant();
+          soundEngine.playAnnouncer('spikePlanted');
 
           // Plant grants +1 Ult point
           const ultSlot = this.abilitySlots.X;
@@ -1826,6 +1965,10 @@ export class GameEngine {
           p.isDefusing = false;
           p.actionProgress = 0;
           soundEngine.playSpikeDefused();
+          soundEngine.playAnnouncer('spikeDefused');
+          if (this.customRoom) {
+            multiplayerClient.sendSpikeEvent('DEFUSED', this.plantedSite, [0, 0, 0]);
+          }
           this.endRound('DEFENDERS', 'SPIKE_DEFUSED');
         }
       } else {
@@ -1851,144 +1994,231 @@ export class GameEngine {
 
   private findTargetPointAhead(maxRange: number): THREE.Vector3 {
     this.camera.getWorldDirection(_vec3_4);
-    _raycaster.set(this.camera.position, _vec3_4);
-    _raycaster.far = maxRange;
-    const hits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-    if (hits.length > 0 && hits[0].distance < maxRange) {
-      return _vec3_5.copy(hits[0].point);
+    const hit = raycastMapAABBs(
+      this.camera.position.x,
+      this.camera.position.y,
+      this.camera.position.z,
+      _vec3_4.x,
+      _vec3_4.y,
+      _vec3_4.z,
+      maxRange,
+      true
+    );
+    if (hit && hit.distance < maxRange) {
+      return _vec3_5.set(hit.x, hit.y, hit.z);
     }
     return _vec3_5.copy(this.playerCombatant.position).addScaledVector(_vec3_4, maxRange);
+  }
+
+  private performSteppedDash(distanceSteps: number, stepLength: number, lowGravityHang = false): void {
+    const p = this.playerCombatant;
+    this.camera.getWorldDirection(_vec3_2);
+    _vec3_2.y = 0;
+    if (_vec3_2.lengthSq() > 0.0001) _vec3_2.normalize();
+    else _vec3_2.set(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
+
+    for (let step = 0; step < distanceSteps; step++) {
+      const nx = p.position.x + _vec3_2.x * stepLength;
+      const nz = p.position.z + _vec3_2.z * stepLength;
+      if (checkCollision(nx, nz, 0.45).collided || this.abilityMgr.isBlockedByBarrier(nx, nz, 0.45)) {
+        break;
+      }
+      p.position.x = nx;
+      p.position.z = nz;
+    }
+    if (lowGravityHang) {
+      this.playerVelY = 4.6;
+      this.isGrounded = false;
+    }
+    soundEngine.playAbility('DASH');
+    this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.22);
   }
 
   private updatePlayerAbilities(): void {
     const p = this.playerCombatant;
     this.camera.getWorldDirection(_vec3_1);
 
-    // [E] Primary Signature Ability
+    // [E] Signature Ability
     if (this.input.state.abilityEJustPressed && this.tryConsumeAbility('E')) {
-      if (p.agentId === 'ZEPHYR') {
-        const pt = this.findTargetPointAhead(14);
-        this.abilityMgr.deploySmoke(pt.x, 0, pt.z, 14);
-      } else if (p.agentId === 'BLITZ') {
-        this.abilityMgr.throwFlashOrb(this.camera.position.x, this.camera.position.y - 0.1, this.camera.position.z, _vec3_1, p.team);
-        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.25);
-      } else if (p.agentId === 'BASTION') {
-        const pt = this.findTargetPointAhead(5);
-        this.abilityMgr.deployBarrier(pt.x, 0, pt.z, p.yaw, 20);
-      } else if (p.agentId === 'LUMEN') {
-        for (const ally of this.combatants) {
-          if (!ally.alive || ally.team !== p.team) continue;
-          const healAmt = ally.isHuman ? 60 : 40;
-          if (ally.isHuman || ally.position.distanceTo(p.position) < 15) {
-            ally.hp = Math.min(100, ally.hp + healAmt);
-            const st = this.playerStats.find((s) => s.id === ally.id);
-            if (st) st.hp = ally.hp;
-          }
-        }
-        soundEngine.playAbility('HEAL');
-        this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
-        this.callbacks.onStatsUpdate([...this.playerStats]);
-      }
-    }
-
-    // [Q] Secondary Tactical Ability
-    if (this.input.state.abilityQJustPressed && this.tryConsumeAbility('Q')) {
-      if (p.agentId === 'ZEPHYR') {
-        const pt = this.findTargetPointAhead(12);
-        this.abilityMgr.deployZone('TOXIN', pt.x, pt.z, 4.2, 8.0, p.team);
-      } else if (p.agentId === 'BLITZ') {
-        // Collision-safe stepped kinetic dash (prevents phasing through walls)
-        _vec3_2.set(_vec3_1.x, 0, _vec3_1.z).normalize();
-        for (let step = 0; step < 12; step++) {
-          const nx = p.position.x + _vec3_2.x * 0.65;
-          const nz = p.position.z + _vec3_2.z * 0.65;
-          if (checkCollision(nx, nz, 0.5).collided) break;
-          p.position.x = nx;
-          p.position.z = nz;
-        }
-        soundEngine.playAbility('DASH');
-        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.22);
-      } else if (p.agentId === 'BASTION') {
-        const pt = this.findTargetPointAhead(7);
-        this.abilityMgr.deployZone('LOCKDOWN', pt.x, pt.z, 3.8, 14.0, p.team);
-        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants);
-      } else if (p.agentId === 'LUMEN') {
-        this.abilityMgr.triggerReconPulse(p.position.x, 0, p.position.z, p.team, this.combatants);
-      }
-    }
-
-    // [C] Utility / Deployable Ability
-    if (this.input.state.abilityCJustPressed && this.tryConsumeAbility('C')) {
-      if (p.agentId === 'ZEPHYR') {
-        this.abilityMgr.deployZone('STIM', p.position.x, p.position.z, 5.5, 10.0, p.team);
-      } else if (p.agentId === 'BLITZ') {
-        const pt = this.findTargetPointAhead(10);
-        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.8, 4.5, p.team);
+      if (p.agentId === 'KAEL') {
+        this.performSteppedDash(12, 0.65, true);
+      } else if (p.agentId === 'ZED') {
+        this.performSteppedDash(13, 0.65, false);
         for (const c of this.combatants) {
-          if (c.alive && c.team !== p.team && c.position.distanceTo(pt) < 5.2) {
-            this.applyExternalDamage(c, 35, 'Concussion Mine');
-            this.abilityMgr.slowedCombatantIds.set(c.id, 3.0);
+          if (c.alive && c.team !== p.team && c.position.distanceTo(p.position) <= 2.6) {
+            this.applyExternalDamage(c, 35, 'Blink Slash');
+            this.vmEquipOffset = 0;
+            this.vmEquipRoll = 0;
           }
         }
-        soundEngine.playAbility('FLASH');
-      } else if (p.agentId === 'BASTION') {
-        const pt = this.findTargetPointAhead(4);
+      } else if (p.agentId === 'KORA') {
+        const pt = this.findTargetPointAhead(15);
+        this.abilityMgr.deploySmoke(pt.x, 0, pt.z, 14);
+      } else if (p.agentId === 'SOREN') {
+        const pt = this.findTargetPointAhead(16);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants, 18);
+        for (const c of this.combatants) {
+          if (!c.alive || c.team === p.team) continue;
+          const dist = c.position.distanceTo(p.position);
+          if (dist < 22) {
+            _vec3_3.subVectors(c.position, p.position).setY(0).normalize();
+            if (_vec3_3.dot(_vec3_1) > 0.72) {
+              this.abilityMgr.slowedCombatantIds.set(c.id, 3.0);
+              this.applyExternalDamage(c, 22, 'Prism Beam');
+            }
+          }
+        }
+        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.25);
+      } else if (p.agentId === 'PULSE') {
+        const pt = this.findTargetPointAhead(14);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants, 26);
+      } else if (p.agentId === 'AEGIS') {
+        const pt = this.findTargetPointAhead(5);
+        this.abilityMgr.deployBarrier(pt.x, 0, pt.z, p.yaw, 20, 5.6);
+      } else if (p.agentId === 'ROOK') {
+        const pt = this.findTargetPointAhead(4.5);
         this.abilityMgr.deployTurret(pt.x, pt.z, p.yaw, p.team);
-      } else if (p.agentId === 'LUMEN') {
+      }
+    }
+
+    // [Q] Basic Ability 1
+    if (this.input.state.abilityQJustPressed && this.tryConsumeAbility('Q')) {
+      if (p.agentId === 'KAEL') {
         const pt = this.findTargetPointAhead(12);
-        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.5, 6.0, p.team);
+        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.6, 5.5, p.team);
+      } else if (p.agentId === 'ZED') {
+        const pt = this.findTargetPointAhead(13);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants, 14);
+        for (const c of this.combatants) {
+          if (c.alive && c.team !== p.team && c.position.distanceTo(pt) < 4.5) {
+            this.applyExternalDamage(c, 30, 'Ricochet Shuriken');
+            break;
+          }
+        }
+      } else if (p.agentId === 'KORA') {
+        const pt = this.findTargetPointAhead(13);
+        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 4.8, 5.0, p.team);
+      } else if (p.agentId === 'SOREN' || p.agentId === 'PULSE') {
+        this.abilityMgr.throwFlashOrb(
+          this.camera.position.x,
+          this.camera.position.y - 0.1,
+          this.camera.position.z,
+          _vec3_1,
+          p.team
+        );
+      } else if (p.agentId === 'AEGIS') {
+        const pt = this.findTargetPointAhead(7);
+        this.abilityMgr.deployZone('LOCKDOWN', pt.x, pt.z, 4.0, 12.0, p.team);
+      } else if (p.agentId === 'ROOK') {
+        const pt = this.findTargetPointAhead(6.5);
+        this.abilityMgr.deployZone('LOCKDOWN', pt.x, pt.z, 3.8, 14.0, p.team);
+        this.abilityMgr.deployZone('TOXIN', pt.x, pt.z, 2.8, 5.0, p.team);
+      }
+    }
+
+    // [C] Basic Ability 2
+    if (this.input.state.abilityCJustPressed && this.tryConsumeAbility('C')) {
+      if (p.agentId === 'KAEL') {
+        if (this.phaseAnchor && !checkCollision(this.phaseAnchor.pos.x, this.phaseAnchor.pos.z, 0.45).collided) {
+          p.position.copy(this.phaseAnchor.pos);
+          this.phaseAnchor = null;
+          soundEngine.playAbility('DASH');
+        } else {
+          this.phaseAnchor = { pos: p.position.clone(), timer: 10.0 };
+          soundEngine.playAbility('HEAL');
+        }
+      } else if (p.agentId === 'ZED') {
+        const pt = this.findTargetPointAhead(10);
+        this.abilityMgr.deploySmoke(pt.x, 0, pt.z, 10);
+      } else if (p.agentId === 'KORA') {
+        this.abilityMgr.throwFlashOrb(
+          this.camera.position.x,
+          this.camera.position.y - 0.1,
+          this.camera.position.z,
+          _vec3_1,
+          p.team
+        );
+      } else if (p.agentId === 'SOREN') {
+        this.abilityMgr.deployZone('STIM', p.position.x, p.position.z, 5.5, 9.0, p.team);
+        this.abilityMgr.triggerReconPulse(p.position.x, 0, p.position.z, p.team, this.combatants, 14);
+      } else if (p.agentId === 'PULSE') {
+        const pt = this.findTargetPointAhead(5.5);
+        this.abilityMgr.deployTurret(pt.x, pt.z, p.yaw, p.team);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants, 18);
+      } else if (p.agentId === 'AEGIS') {
+        this.abilityMgr.deployZone('HEAL', p.position.x, p.position.z, 5.8, 8.0, p.team);
+        p.hp = Math.min(100, p.hp + 25);
+        p.armor = Math.min(50, p.armor + 15);
+        const st = this.playerStats.find((s) => s.id === p.id);
+        if (st) {
+          st.hp = p.hp;
+          st.armor = p.armor;
+        }
+        this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
+      } else if (p.agentId === 'ROOK') {
+        const pt = this.findTargetPointAhead(8);
+        for (const c of this.combatants) {
+          if (c.alive && c.team !== p.team && c.position.distanceTo(pt) < 5.0) {
+            this.applyExternalDamage(c, 40, 'Blast Pack');
+            this.abilityMgr.slowedCombatantIds.set(c.id, 2.0);
+          }
+        }
+        this.abilityMgr.barriers.forEach((b) => {
+          if (b.position.distanceTo(pt) < 5.5) b.hp -= 250;
+        });
+        soundEngine.playAbility('FLASH');
+        this.cameraShakeTrauma = Math.min(1.0, this.cameraShakeTrauma + 0.35);
       }
     }
 
     // [X] Ultimate Ability
     if (this.input.state.abilityXJustPressed && this.tryConsumeAbility('X')) {
-      if (p.agentId === 'ZEPHYR') {
-        const pt = this.findTargetPointAhead(18);
-        this.abilityMgr.deployZone('BLACKOUT', pt.x, pt.z, 8.5, 9.0, p.team);
+      if (p.agentId === 'KAEL') {
+        const pt = this.findTargetPointAhead(15);
+        this.abilityMgr.deployZone('GRAVITY', pt.x, pt.z, 7.5, 8.0, p.team);
+        this.abilityMgr.deployZone('BLACKOUT', pt.x, pt.z, 7.5, 8.0, p.team);
         this.cameraShakeTrauma = 0.7;
-      } else if (p.agentId === 'BLITZ') {
+      } else if (p.agentId === 'ZED') {
         this.playerOverdriveTimer = 12.0;
         this.abilitySlots.X.activeRemaining = 12.0;
         soundEngine.playAbility('ULT');
         this.cameraShakeTrauma = 0.65;
         this.emitAbilityStates();
-      } else if (p.agentId === 'BASTION') {
-        this.abilityMgr.deployZone('LOCKDOWN', p.position.x, p.position.z, 11.0, 10.0, p.team);
-        this.cameraShakeTrauma = 0.7;
-      } else if (p.agentId === 'LUMEN') {
-        // Resurgence: Revive fallen teammate, or supercharge self shield + health if all alive
-        const fallenAlly = this.combatants.find((c) => !c.alive && !c.isHuman && c.team === p.team);
-        if (fallenAlly) {
-          fallenAlly.alive = true;
-          fallenAlly.hp = 100;
-          fallenAlly.armor = 25;
-          fallenAlly.deathTimer = 0;
-          fallenAlly.modelPackage.resetPose();
-          fallenAlly.modelPackage.root.visible = true;
-          fallenAlly.position.set(p.position.x + 1.5, 0, p.position.z + 1.5);
-          fallenAlly.modelPackage.root.position.copy(fallenAlly.position);
-          fallenAlly.modelPackage.root.updateMatrixWorld(true);
-
-          const st = this.playerStats.find((s) => s.id === fallenAlly.id);
-          if (st) {
-            st.alive = true;
-            st.hp = 100;
-            st.armor = 25;
-          }
-          this.callbacks.onStatsUpdate([...this.playerStats]);
-        } else {
-          p.hp = 100;
-          p.armor = Math.min(50, p.armor + 50);
-          this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
-        }
+      } else if (p.agentId === 'KORA') {
+        const pt = this.findTargetPointAhead(7);
+        this.abilityMgr.deployBarrier(pt.x, 0, pt.z, p.yaw, 9.5, 14.0);
         soundEngine.playAbility('ULT');
         this.cameraShakeTrauma = 0.65;
+      } else if (p.agentId === 'SOREN') {
+        const pt = this.findTargetPointAhead(18);
+        this.abilityMgr.deployZone('BLACKOUT', pt.x, pt.z, 7.5, 6.0, p.team);
+        this.abilityMgr.triggerReconPulse(pt.x, 0, pt.z, p.team, this.combatants, 22);
+        for (const c of this.combatants) {
+          if (c.alive && c.team !== p.team && c.position.distanceTo(pt) < 7.5) {
+            this.applyExternalDamage(c, 45, 'Zenith Strike');
+          }
+        }
+        this.cameraShakeTrauma = 0.7;
+      } else if (p.agentId === 'PULSE') {
+        this.abilityMgr.deployZone('LOCKDOWN', p.position.x, p.position.z, 12.0, 9.0, p.team);
+        this.abilityMgr.triggerReconPulse(p.position.x, 0, p.position.z, p.team, this.combatants, 28);
+        this.cameraShakeTrauma = 0.7;
+      } else if (p.agentId === 'AEGIS') {
+        this.abilityMgr.deployZone('HEAL', p.position.x, p.position.z, 8.5, 8.0, p.team);
+        const pt = this.findTargetPointAhead(4);
+        this.abilityMgr.deployBarrier(pt.x, 0, pt.z, p.yaw, 8.0, 8.0);
+        p.armor = Math.min(50, p.armor + 25);
+        this.callbacks.onPlayerHealthUpdate(p.hp, p.armor, 100, 50);
+        soundEngine.playAbility('ULT');
+      } else if (p.agentId === 'ROOK') {
+        this.abilityMgr.deployZone('LOCKDOWN', p.position.x, p.position.z, 11.0, 10.0, p.team);
+        this.cameraShakeTrauma = 0.7;
       }
     }
   }
 
   private fireTurretShot(origin: THREE.Vector3, dir: THREE.Vector3, team: string): void {
-    soundEngine.playGunshot('SMG');
+    soundEngine.playWeaponShot('STINGRAY', 'SMG', true, 0.45);
     _raycaster.set(origin, dir);
     _raycaster.far = 30;
 
@@ -2007,15 +2237,16 @@ export class GameEngine {
       }
     }
 
-    const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-    const worldDist = worldHits.length > 0 ? worldHits[0].distance : Infinity;
+    const worldHit = raycastMapAABBs(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, 30, true);
+    const worldDist = worldHit ? worldHit.distance : Infinity;
 
     if (closestTarget && closestPoint && closestDist < worldDist) {
       this.spawnTracer(origin, closestPoint);
       this.applyExternalDamage(closestTarget, 16, 'Sentinel Turret');
-    } else if (worldHits.length > 0) {
-      this.spawnTracer(origin, worldHits[0].point);
-      this.spawnSparks(worldHits[0].point);
+    } else if (worldHit) {
+      _vec3_3.set(worldHit.x, worldHit.y, worldHit.z);
+      this.spawnTracer(origin, _vec3_3);
+      this.spawnSparks(_vec3_3);
     } else {
       _vec3_3.copy(origin).addScaledVector(dir, 28);
       this.spawnTracer(origin, _vec3_3);
@@ -2125,7 +2356,8 @@ export class GameEngine {
       return;
     }
 
-    soundEngine.playGunshot(shooter.weapon.category);
+    const isSpray = shooter.isHuman && this.vmRecoilZ > 0.02;
+    soundEngine.playWeaponShot(shooter.weapon.id, shooter.weapon.category, isSpray, shooter.isHuman ? 0.78 : 0.42);
 
     const origin = shooter.isHuman
       ? _vec3_1.copy(this.camera.position)
@@ -2190,13 +2422,19 @@ export class GameEngine {
         }
       }
 
-      const worldHits = _raycaster.intersectObjects(this.mapData.collidableMeshes, false);
-      let worldDist = Infinity;
-      let worldPoint: THREE.Vector3 | null = null;
-      if (worldHits.length > 0) {
-        worldDist = worldHits[0].distance;
-        worldPoint = worldHits[0].point;
-      }
+      const maxRay = _raycaster.far;
+      const worldHit = raycastMapAABBs(
+        origin.x,
+        origin.y,
+        origin.z,
+        pelletDir.x,
+        pelletDir.y,
+        pelletDir.z,
+        maxRay,
+        true
+      );
+      const worldDist = worldHit ? worldHit.distance : Infinity;
+      const worldPoint = worldHit ? _vec3_4.set(worldHit.x, worldHit.y, worldHit.z) : null;
 
       if (closestHit && closestDist < worldDist && closestDist < barrierDist) {
         _vec3_3.copy(closestHit.point);
@@ -2310,13 +2548,19 @@ export class GameEngine {
 
     if (killer.isHuman) {
       this.hitstopTimer = 0.035;
+      this.roundPlayerKills++;
+      if (this.matchMode !== 'PRACTICE') {
+        if (this.roundPlayerKills === 3) soundEngine.playAnnouncer('tripleKill');
+        else if (this.roundPlayerKills === 4) soundEngine.playAnnouncer('quadraKill');
+        else if (this.roundPlayerKills >= 5) soundEngine.playAnnouncer('ace');
+      }
       // Grant +1 Ult charge on kill
       const ultSlot = this.abilitySlots.X;
       if (ultSlot && ultSlot.ultPoints < ultSlot.ultRequired) {
         ultSlot.ultPoints++;
         this.emitAbilityStates();
       }
-      // Overdrive Matrix heal on kill
+      // Blade Storm / Overdrive heal on kill
       if (this.playerOverdriveTimer > 0) {
         killer.hp = Math.min(100, killer.hp + 35);
         this.callbacks.onPlayerHealthUpdate(killer.hp, killer.armor, 100, 50);
@@ -2539,19 +2783,19 @@ export class GameEngine {
       const basePos = isADS ? profile.adsPos : profile.hipPos;
       this.viewmodelArms.position.x = THREE.MathUtils.damp(
         this.viewmodelArms.position.x,
-        basePos[0] - 0.03 + this.vmSwayX * 0.65 + inspectShiftX * 0.5,
+        basePos[0] - 0.015 + this.vmSwayX * 0.65 + inspectShiftX * 0.5,
         16,
         dt
       );
       this.viewmodelArms.position.y = THREE.MathUtils.damp(
         this.viewmodelArms.position.y,
-        basePos[1] + 0.03 + this.vmEquipOffset * 0.65 + reloadDip * 0.55 + this.vmLandOffset * 0.75 + crouchShiftY * 0.7,
+        basePos[1] + 0.012 + this.vmEquipOffset * 0.65 + reloadDip * 0.55 + this.vmLandOffset * 0.75 + crouchShiftY * 0.7,
         16,
         dt
       );
       this.viewmodelArms.position.z = THREE.MathUtils.damp(
         this.viewmodelArms.position.z,
-        basePos[2] + 0.16 + this.vmRecoilZ * 0.65 + boltRackPull * 0.8,
+        basePos[2] + 0.14 + this.vmRecoilZ * 0.65 + boltRackPull * 0.8,
         18,
         dt
       );
@@ -2604,6 +2848,23 @@ export class GameEngine {
     soundEngine.playRoundEnd(isPlayerTeamWinner);
     this.callbacks.onRoundScoreChange(this.attackerRoundsWon, this.defenderRoundsWon, this.roundNumber);
 
+    const winnerTeam = checkMatchWin(this.attackerRoundsWon, this.defenderRoundsWon);
+    if (this.matchMode !== 'PRACTICE') {
+      const winners = this.combatants.filter((c) => c.team === winner);
+      const aliveWinners = winners.filter((c) => c.alive);
+      const losers = this.combatants.filter((c) => c.team !== winner);
+      const deadLosers = losers.filter((c) => !c.alive);
+      let event: AnnouncerEvent = winner === 'ATTACKERS' ? 'attackersWin' : 'defendersWin';
+      if (winnerTeam && winnerTeam === this.playerTeam) {
+        event = 'victory';
+      } else if (winners.length >= 2 && aliveWinners.length === winners.length) {
+        event = 'flawless';
+      } else if (aliveWinners.length === 1 && deadLosers.length >= 2) {
+        event = 'clutch';
+      }
+      soundEngine.playAnnouncer(event);
+    }
+
     const isPlantBonus = reason === 'SPIKE_PLANTED' || reason === 'SPIKE_DETONATED';
 
     const playerEcon = calculateEconomy(0, isPlayerTeamWinner, this.playerLossStreak, isPlantBonus, 0);
@@ -2619,7 +2880,6 @@ export class GameEngine {
 
     this.callbacks.onStatsUpdate([...this.playerStats]);
 
-    const winnerTeam = checkMatchWin(this.attackerRoundsWon, this.defenderRoundsWon);
     if (winnerTeam) {
       this.roundPhase = 'MATCH_OVER';
       this.callbacks.onMatchOver(winnerTeam, this.getMatchSummary(winnerTeam === this.playerTeam));
@@ -2659,6 +2919,9 @@ export class GameEngine {
     this.spikeTimer = SPIKE_DETONATION_TIME;
     this.spikePosition = null;
     this.plantedSite = null;
+    this.roundPlayerKills = 0;
+    this.playedTenSecondsAudio = false;
+    this.phaseAnchor = null;
 
     if (this.spikeMesh) {
       this.scene.remove(this.spikeMesh);
@@ -2668,7 +2931,7 @@ export class GameEngine {
     this.abilityMgr.clearAll();
 
     // Refresh non-ult ability charges between rounds & grant +1 ult orb per round played
-    const agent = AGENT_REGISTRY[this.playerCombatant.agentId] || AGENT_REGISTRY.ZEPHYR;
+    const agent = AGENT_REGISTRY[this.playerCombatant.agentId] || AGENT_REGISTRY.KAEL;
     for (const ab of agent.abilities) {
       const st = this.abilitySlots[ab.keySlot];
       if (!st) continue;
@@ -2712,7 +2975,7 @@ export class GameEngine {
         ? 2
         : roundSlotOrder[c.team][roundSlotCursor[c.team]++ % roundSlotOrder[c.team].length];
       const spawnPos = this.getSpawnSlotPosition(c.team, slotIdx);
-      const spawnYaw = isAttacker ? 0 : Math.PI;
+      const spawnYaw = isAttacker ? Math.PI : 0;
 
       c.position.copy(spawnPos);
       c.yaw = spawnYaw;
@@ -2828,7 +3091,7 @@ export class GameEngine {
         p.reserveAmmo = w.reserveAmmo;
         p.reloadTimer = 0;
         this.updateViewmodelWeapon(w.id);
-        soundEngine.playReload();
+        soundEngine.playWeaponReload(w.id);
         this.callbacks.onWeaponUpdate(w, p.ammoInMag, p.reserveAmmo, false, p.activeSlot);
         this.callbacks.onStatsUpdate([...this.playerStats]);
         return true;
@@ -2911,9 +3174,11 @@ export class GameEngine {
         }
         this.spikeMesh.position.copy(this.spikePosition);
         soundEngine.playSpikePlant();
+        soundEngine.playAnnouncer('spikePlanted');
       } else if (ev === 'DEFUSED' && this.spikeState === 'planted') {
         this.spikeState = 'defused';
         soundEngine.playSpikeDefused();
+        soundEngine.playAnnouncer('spikeDefused');
         this.endRound('DEFENDERS', 'SPIKE_DEFUSED');
       }
     } else if (type === 'ROUND_SYNC') {
@@ -2957,6 +3222,10 @@ export class GameEngine {
   public dispose(): void {
     this.isDestroyed = true;
     cancelAnimationFrame(this.frameId);
+    if (this.glSyncTimer !== null) {
+      window.clearTimeout(this.glSyncTimer);
+      this.glSyncTimer = null;
+    }
     this.unsubInMatch?.();
     if (this.customRoom) {
       multiplayerClient.notifyMatchEnded();

@@ -6,31 +6,34 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronRight, Plus, Users, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, MapPin, Plus, Users, X } from 'lucide-react';
 import {
   AGENT_REGISTRY,
   AgentDef,
   BotDifficulty,
   CustomRoomState,
   GameSettings,
+  MapDef,
   MatchMode,
   PlayerProfile,
+  getAvailableMaps,
 } from '../game/types';
 import { formatKeyCode } from '../game/rules';
 import { computeRankProgress } from '../game/profileStore';
 import { multiplayerClient } from '../game/multiplayerClient';
-import { PWAInstallButton } from './PWAInstallButton';
+import { registerCustomMaps, resolveMapDef } from '../game/mapData';
 import { SettingsPanel } from './SettingsPanel';
 import { AgentsPage } from './lobby/AgentsPage';
 import { ArmoryPage } from './lobby/ArmoryPage';
 import { CareerPage } from './lobby/CareerPage';
 import { ProfilePage } from './lobby/ProfilePage';
 import { MultiplayerDrawer } from './lobby/MultiplayerDrawer';
+import { MapSelectorModal } from './MapSelectorModal';
 import {
   ARMORY_SPOTLIGHT_ART,
   AgentEmblemMark,
-  COURTYARD_MAP_ART,
   LOBBY_BACKDROP_ART,
+  getMapArtwork,
   getPlayerCardArt,
 } from './AgentAvatar';
 import { soundEngine } from '../game/audio';
@@ -40,6 +43,8 @@ type LobbyTab = 'PLAY' | 'AGENTS' | 'ARMORY' | 'CAREER' | 'PROFILE' | 'SETTINGS'
 interface LobbyScreenProps {
   selectedAgentId: string;
   onSelectAgent: (agentId: string) => void;
+  selectedMapId: string;
+  onSelectMap: (mapId: string) => void;
   difficulty: BotDifficulty;
   onSelectDifficulty: (diff: BotDifficulty) => void;
   settings: GameSettings;
@@ -106,6 +111,8 @@ const DESKTOP_STEPPED_CLASSES: Record<number, { orderClass: string; heightClass:
 export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   selectedAgentId,
   onSelectAgent,
+  selectedMapId,
+  onSelectMap,
   difficulty,
   onSelectDifficulty,
   settings,
@@ -115,7 +122,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   onResetProfile,
   onStartGame,
 }) => {
-  const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.ZEPHYR;
+  const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.KAEL;
   const rank = computeRankProgress(profile);
   const agentKeys = Object.keys(AGENT_REGISTRY);
 
@@ -123,6 +130,8 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   const [activeTab, setActiveTab] = useState<LobbyTab>('PLAY');
   const [botAgentIds, setBotAgentIds] = useState<string[]>(DEFAULT_BOT_AGENTS);
   const [showSocialDrawer, setShowSocialDrawer] = useState<boolean>(false);
+  const [showMapSelector, setShowMapSelector] = useState<boolean>(false);
+  const [availableMaps, setAvailableMaps] = useState<MapDef[]>(() => getAvailableMaps());
   const [, setSocialTick] = useState<number>(0);
 
   const playScrollRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +142,21 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     multiplayerClient.setAgent(selectedAgentId);
     return multiplayerClient.subscribe(() => setSocialTick((t) => t + 1));
   }, [selectedAgentId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/maps')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { customMaps?: string[] } | null) => {
+        if (cancelled || !data?.customMaps) return;
+        registerCustomMaps(data.customMaps);
+        setAvailableMaps(getAvailableMaps(data.customMaps));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const scrollToStartMatch = () => {
     if (startSectionRef.current) {
@@ -196,6 +220,17 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   };
 
   const activeRoom = multiplayerClient.currentRoom;
+  const effectiveMapId = activeRoom?.mapId || selectedMapId;
+  const currentMap = resolveMapDef(effectiveMapId);
+  const isNonHostInRoom = Boolean(
+    activeRoom && activeRoom.hostUsername !== multiplayerClient.username
+  );
+  const handleChooseMap = (mapId: string) => {
+    onSelectMap(mapId);
+    if (activeRoom && activeRoom.hostUsername === multiplayerClient.username) {
+      multiplayerClient.updateRoomConfig({ mapId });
+    }
+  };
   const myUsernameLower = (multiplayerClient.username || '').toLowerCase();
   const myRoomMember = activeRoom?.members.find((m) => m.username.toLowerCase() === myUsernameLower);
   const myRoomTeam = myRoomMember?.team ?? 'ATTACKERS';
@@ -220,7 +255,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     },
     ...(queueMode === 'CUSTOM'
       ? roomTeammates.slice(0, 4).map((tm) => {
-          const ag: AgentDef = AGENT_REGISTRY[tm.agentId] || AGENT_REGISTRY.ZEPHYR;
+          const ag: AgentDef = AGENT_REGISTRY[tm.agentId] || AGENT_REGISTRY.KAEL;
           return {
             name: `@${tm.username}`,
             agent: ag,
@@ -232,7 +267,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           };
         })
       : botAgentIds.map((agId, idx) => {
-          const ag: AgentDef = AGENT_REGISTRY[agId] || AGENT_REGISTRY.ZEPHYR;
+          const ag: AgentDef = AGENT_REGISTRY[agId] || AGENT_REGISTRY.KAEL;
           return {
             name: `Ally ${ag.name}`,
             agent: ag,
@@ -279,8 +314,21 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
       {showSocialDrawer && (
         <MultiplayerDrawer
           selectedAgentId={selectedAgentId}
+          selectedMapId={effectiveMapId}
+          availableMaps={availableMaps}
           defaultDifficulty={difficulty}
+          onSelectMap={handleChooseMap}
           onClose={() => setShowSocialDrawer(false)}
+        />
+      )}
+
+      {showMapSelector && (
+        <MapSelectorModal
+          maps={availableMaps}
+          selectedMapId={effectiveMapId}
+          isRoomLockedNonHost={isNonHostInRoom}
+          onSelectMap={handleChooseMap}
+          onClose={() => setShowMapSelector(false)}
         />
       )}
 
@@ -305,8 +353,12 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             onClick={() => setActiveTab('PLAY')}
             className="flex items-center gap-2 cursor-pointer shrink-0 group"
           >
-            <div className="flex h-8 w-8 items-center justify-center border border-[#FF4655]/70 bg-[#FF4655]/15 group-hover:bg-[#FF4655] transition">
-              <AgentEmblemMark agentId="BLITZ" accentColor="#ECE8E1" className="h-5 w-5" />
+            <div className="flex h-8 w-8 items-center justify-center overflow-hidden border border-[#FF4655]/70 bg-[#0C121A] group-hover:border-[#FF4655] transition">
+              <img
+                src="/assets/aistudio/592741050_1795088378575204_98fcd619.jpg"
+                alt="Hollow Strike H Logo"
+                className="h-full w-full object-cover object-center"
+              />
             </div>
             <span className="hidden xl:inline font-display text-base font-extrabold tracking-[0.2em] text-[#ECE8E1] uppercase">
               HOLLOW <span className="text-[#FF4655]">STRIKE</span>
@@ -355,9 +407,8 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
           </div>
         </div>
 
-        {/* Right: PWA Install + Online/Friends Trigger + Operative */}
+        {/* Right: Online/Friends Trigger + Operative */}
         <div className="flex items-center gap-2 text-xs font-mono shrink-0">
-          <PWAInstallButton />
 
           <button
             type="button"
@@ -457,14 +508,14 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             <div className="space-y-2.5">
               {/* Crimson-Framed Angular Lobby Plaque (Close-up Reference #1 Top-Left Motif) */}
               <div className="relative flex items-stretch border border-[#FF4655]/85 bg-[#0C121A]/95 shadow-[0_8px_24px_rgba(0,0,0,0.55)] clip-val-plaque">
-                {/* Left Vertical Cream/Red Tab */}
-                <div className="flex w-8 shrink-0 flex-col items-center justify-center bg-[#ECE8E1] px-1 py-2 text-[#0F1923]">
+                {/* Left Vertical Dark Red-Accented Studio Tab (Transparent Blend) */}
+                <div className="flex w-9 shrink-0 flex-col items-center justify-center bg-[#090F17] border-r border-[#FF4655]/50 px-1 py-2 text-[#ECE8E1]">
                   <img
                     src="/assets/aistudio/IMG_20260612_142121_950_4842057d.webp"
                     alt="AosmiC Studio"
-                    className="h-4 w-4 object-contain invert opacity-85"
+                    className="h-4.5 w-auto object-contain mix-blend-screen"
                   />
-                  <span className="mt-1 font-mono text-[8px] font-black tracking-tighter uppercase">
+                  <span className="mt-1 font-mono text-[8px] font-black tracking-tighter uppercase text-[#FF4655]">
                     S01
                   </span>
                 </div>
@@ -482,24 +533,33 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
               {/* Map & Mode Selector Card (Matches Left Thumbnail Card in Reference #1 & #3) */}
               <div className="border border-[#ECE8E1]/15 bg-[#0D141D]/92 overflow-hidden">
-                <div className="relative h-20 sm:h-24 w-full overflow-hidden">
+                <button
+                  type="button"
+                  data-testid="open-map-selector-btn"
+                  onClick={() => setShowMapSelector(true)}
+                  className="group relative block h-22 sm:h-24 w-full overflow-hidden text-left cursor-pointer"
+                >
                   <img
-                    src={COURTYARD_MAP_ART}
-                    alt="Courtyard 5v5 Map"
-                    className="h-full w-full object-cover object-center opacity-80"
+                    src={getMapArtwork(currentMap.id)}
+                    alt={`${currentMap.name} 5v5 Map`}
+                    className="h-full w-full object-cover object-center opacity-80 transition duration-300 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0D141D] via-[#0D141D]/30 to-transparent" />
+                  <div className="absolute top-1.5 right-1.5 flex items-center gap-1 border border-[#ECE8E1]/25 bg-[#090E15]/85 px-2 py-0.5 font-mono text-[8px] font-bold uppercase tracking-widest text-[#ECE8E1] group-hover:border-[#FF4655] group-hover:bg-[#FF4655] transition">
+                    <MapPin className="h-2.5 w-2.5" />
+                    CHANGE MAP
+                  </div>
                   <div className="absolute bottom-1.5 left-2.5 right-2.5 flex items-end justify-between">
                     <div>
-                      <div className="font-display text-sm font-extrabold uppercase tracking-[0.18em] text-[#ECE8E1] leading-none">
-                        COURTYARD
+                      <div className="font-display text-sm font-extrabold uppercase tracking-[0.18em] text-[#ECE8E1] group-hover:text-[#17E5B8] transition leading-none">
+                        {currentMap.name.toUpperCase()}
                       </div>
                       <div className="font-mono text-[9px] text-[#8B978F] uppercase tracking-wider mt-0.5">
                         {activeModeMeta.desc}
                       </div>
                     </div>
                   </div>
-                </div>
+                </button>
 
                 {/* 4-Mode Selector Grid */}
                 <div className="grid grid-cols-4 border-t border-[#ECE8E1]/10 divide-x divide-[#ECE8E1]/10">
@@ -576,6 +636,20 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                     </span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  data-testid="lobby-map-row-btn"
+                  onClick={() => setShowMapSelector(true)}
+                  className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-[#172330] transition cursor-pointer group"
+                >
+                  <span className="font-bold uppercase tracking-wider text-[#ECE8E1]/90">
+                    MAP
+                  </span>
+                  <span className="text-[10px] font-bold uppercase text-[#17E5B8] group-hover:text-[#ECE8E1]">
+                    {currentMap.name} &gt;
+                  </span>
+                </button>
 
                 <button
                   type="button"
@@ -816,27 +890,33 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 </div>
               </button>
 
-              {/* Card 2: Arena Brief */}
+              {/* Card 2: Active Arena & Map Selector Trigger */}
               <button
                 type="button"
-                onClick={() => setShowSocialDrawer(true)}
+                data-testid="featured-map-card-btn"
+                onClick={() => setShowMapSelector(true)}
                 className="group relative block w-full overflow-hidden border border-[#ECE8E1]/15 bg-[#0D151F] text-left hover:border-[#17E5B8]/80 transition cursor-pointer"
               >
                 <div className="relative h-24 w-full overflow-hidden">
                   <img
-                    src={COURTYARD_MAP_ART}
-                    alt="Courtyard 5v5 Arena"
+                    src={getMapArtwork(currentMap.id)}
+                    alt={`${currentMap.name} 5v5 Arena`}
                     className="h-full w-full object-cover object-center opacity-75 transition duration-300 group-hover:scale-105"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0D151F] via-[#0D151F]/35 to-transparent" />
                 </div>
-                <div className="px-3 py-2">
-                  <div className="font-display text-sm font-extrabold uppercase tracking-wider text-[#ECE8E1] group-hover:text-[#17E5B8] transition">
-                    COURTYARD 5V5
+                <div className="px-3 py-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-display text-sm font-extrabold uppercase tracking-wider text-[#ECE8E1] group-hover:text-[#17E5B8] transition">
+                      {currentMap.name.toUpperCase()} 5V5
+                    </div>
+                    <div className="font-mono text-[9px] text-[#8B978F] uppercase tracking-wider mt-0.5">
+                      {currentMap.tagline}
+                    </div>
                   </div>
-                  <div className="font-mono text-[9px] text-[#8B978F] uppercase tracking-wider mt-0.5">
-                    A &amp; B SITES · REAL-TIME ROOMS
-                  </div>
+                  <span className="font-mono text-[9px] font-bold uppercase text-[#17E5B8] shrink-0">
+                    SWITCH &gt;
+                  </span>
                 </div>
               </button>
 

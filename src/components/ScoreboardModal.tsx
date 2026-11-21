@@ -76,7 +76,7 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/90 backdrop-blur-sm p-2 sm:p-4 select-none overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/92 p-2 sm:p-4 select-none overflow-y-auto">
       <div className="relative my-auto max-h-[92dvh] w-full max-w-4xl overflow-y-auto border border-[#ECE8E1]/20 bg-[#18232E] p-4 sm:p-6 shadow-2xl clip-val-panel">
         <div className="flex items-center justify-between border-b border-[#ECE8E1]/15 pb-3 mb-4 gap-3">
           <div>

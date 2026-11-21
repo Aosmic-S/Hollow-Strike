@@ -8,6 +8,7 @@ import { TeamSide } from '../game/types';
 import {
   BOMB_SITE_A,
   BOMB_SITE_B,
+  MAP_HALF_EXTENT,
   SPAWN_ATTACKERS,
   SPAWN_DEFENDERS,
   getActiveMapColliders,
@@ -46,7 +47,7 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
     };
   }, []);
 
-  const mapSize = 128;
+  const mapSize = MAP_HALF_EXTENT * 2;
   const canvasSize = 420;
   const scale = canvasSize / mapSize;
   const center = canvasSize / 2;
@@ -60,9 +61,9 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
   return (
     <div
       data-testid="tactical-map-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/88 backdrop-blur-sm p-4 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F1923]/92 p-2 sm:p-4 select-none"
     >
-      <div className="relative flex flex-col items-center border border-[#ECE8E1]/20 bg-[#18232E] p-5 sm:p-6 shadow-2xl max-h-[95dvh] overflow-y-auto clip-val-panel">
+      <div className="relative flex flex-col items-center border border-[#ECE8E1]/20 bg-[#18232E] p-3.5 sm:p-6 shadow-2xl max-h-[95dvh] max-w-[96vw] overflow-y-auto clip-val-panel">
         <div className="flex w-full items-center justify-between border-b border-[#ECE8E1]/15 pb-3 mb-4 gap-6">
           <div className="flex items-center gap-2.5">
             <span className="h-2.5 w-2.5 rotate-45 bg-[#17E5B8]" />
@@ -95,12 +96,12 @@ export const TacticalMapModal: React.FC<TacticalMapModalProps> = ({
         </div>
 
         {/* Tactical Map SVG Projection */}
-        <div className="relative overflow-hidden border border-[#ECE8E1]/15 bg-[#0F1923] p-2 shadow-2xl clip-val-card">
+        <div className="relative overflow-hidden border border-[#ECE8E1]/15 bg-[#0F1923] p-1.5 sm:p-2 shadow-2xl clip-val-card">
           <svg
             width={canvasSize}
             height={canvasSize}
             viewBox={`0 0 ${canvasSize} ${canvasSize}`}
-            className="block max-w-full h-auto"
+            className="block max-w-full max-h-[60dvh] sm:max-h-[68dvh] w-auto h-auto aspect-square"
           >
             <defs>
               <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">

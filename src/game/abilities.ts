@@ -1,6 +1,6 @@
 /**
  * Hollow Strike - Tactical Abilities Simulation & Visual Effects
- * Manages active world effects: Smokes, Barriers, Flashes, Puddles, Beacons, Gravity Orbs, Turrets, and Recon pulses.
+ * Manages active world effects: Smokes, Barriers, Flashes, Zones (Toxin, Stim, Gravity, Lockdown, Blackout, Heal), Turrets & Recon Pulses.
  */
 
 import * as THREE from 'three';
@@ -23,6 +23,7 @@ export interface ActiveBarrier {
   position: THREE.Vector3;
   width: number;
   height: number;
+  rotationY: number;
   hp: number;
   remainingTime: number;
 }
@@ -37,7 +38,7 @@ export interface ActivePulse {
 }
 
 export interface ActiveZone {
-  type: 'TOXIN' | 'STIM' | 'GRAVITY' | 'LOCKDOWN' | 'BLACKOUT';
+  type: 'TOXIN' | 'STIM' | 'GRAVITY' | 'LOCKDOWN' | 'BLACKOUT' | 'HEAL';
   mesh: THREE.Mesh;
   position: THREE.Vector3;
   radius: number;
@@ -76,9 +77,9 @@ export class AbilityManager {
   public blindedCombatantIds: Map<string, number> = new Map();
   public slowedCombatantIds: Map<string, number> = new Map();
   private scene: THREE.Scene;
+  private lowDetail: boolean;
 
-  // Shared Geometries & Materials
-  private smokeGeo = new THREE.DodecahedronGeometry(3.6, 2);
+  private smokeGeo = new THREE.DodecahedronGeometry(3.6, 1);
   private smokeMat = new THREE.MeshStandardMaterial({
     color: 0x1e293b,
     roughness: 0.9,
@@ -92,13 +93,13 @@ export class AbilityManager {
     color: 0x3b82f6,
     emissive: 0x1d4ed8,
     emissiveIntensity: 0.8,
-    roughness: 0.2,
-    metalness: 0.8,
+    roughness: 0.25,
+    metalness: 0.4,
     transparent: true,
     opacity: 0.82,
   });
 
-  private pulseGeo = new THREE.RingGeometry(0.2, 0.55, 32);
+  private pulseGeo = new THREE.RingGeometry(0.2, 0.55, 28);
   private pulseMat = new THREE.MeshBasicMaterial({
     color: 0x10b981,
     side: THREE.DoubleSide,
@@ -107,10 +108,11 @@ export class AbilityManager {
   });
 
   private zoneDiskGeo = new THREE.CircleGeometry(1, 24);
-  private orbGeo = new THREE.SphereGeometry(0.22, 12, 12);
+  private orbGeo = new THREE.SphereGeometry(0.22, 10, 10);
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, lowDetail = false) {
     this.scene = scene;
+    this.lowDetail = lowDetail;
   }
 
   public deploySmoke(x: number, y: number, z: number, duration = 14): void {
@@ -129,27 +131,52 @@ export class AbilityManager {
     soundEngine.playAbility('SMOKE');
   }
 
-  public deployBarrier(x: number, y: number, z: number, rotationY = 0, duration = 20): void {
+  public deployBarrier(x: number, y: number, z: number, rotationY = 0, duration = 20, width = 5.2): void {
     const mesh = new THREE.Mesh(this.barrierGeo, this.barrierMat);
     mesh.position.set(x, y + 1.6, z);
     mesh.rotation.y = rotationY;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.scale.x = width / 5.2;
+    mesh.castShadow = !this.lowDetail;
+    mesh.receiveShadow = !this.lowDetail;
     this.scene.add(mesh);
 
     this.barriers.push({
       mesh,
       position: new THREE.Vector3(x, y, z),
-      width: 5.2,
+      width,
       height: 3.2,
-      hp: 400,
+      rotationY,
+      hp: 420,
       remainingTime: duration,
     });
 
     soundEngine.playAbility('WALL');
   }
 
-  public triggerReconPulse(x: number, y: number, z: number, team: string, combatants?: BotCombatant[]): void {
+  public isBlockedByBarrier(x: number, z: number, pad = 0.55): boolean {
+    for (let i = 0; i < this.barriers.length; i++) {
+      const b = this.barriers[i];
+      const dx = x - b.position.x;
+      const dz = z - b.position.z;
+      const cos = Math.cos(-b.rotationY);
+      const sin = Math.sin(-b.rotationY);
+      const localX = dx * cos - dz * sin;
+      const localZ = dx * sin + dz * cos;
+      if (Math.abs(localX) < b.width * 0.5 + pad * 0.4 && Math.abs(localZ) < 0.3 + pad) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public triggerReconPulse(
+    x: number,
+    y: number,
+    z: number,
+    team: string,
+    combatants?: BotCombatant[],
+    maxRadius = 26
+  ): void {
     const mat = this.pulseMat.clone();
     const mesh = new THREE.Mesh(this.pulseGeo, mat);
     mesh.rotation.x = -Math.PI / 2;
@@ -160,15 +187,16 @@ export class AbilityManager {
       mesh,
       position: new THREE.Vector3(x, y, z),
       radius: 0.5,
-      maxRadius: 24,
+      maxRadius,
       remainingTime: 2.0,
       team,
     });
 
     if (combatants) {
+      const pulseOrigin = this.pulses[this.pulses.length - 1].position;
       for (const c of combatants) {
-        if (c.alive && c.team !== team && c.position.distanceTo(this.pulses[this.pulses.length - 1].position) < 26) {
-          this.revealedEnemyIds.set(c.id, 5.0);
+        if (c.alive && c.team !== team && c.position.distanceTo(pulseOrigin) <= maxRadius + 2) {
+          this.revealedEnemyIds.set(c.id, 5.5);
         }
       }
     }
@@ -190,6 +218,7 @@ export class AbilityManager {
       GRAVITY: 0xa855f7,
       LOCKDOWN: 0x3b82f6,
       BLACKOUT: 0x6366f1,
+      HEAL: 0x10b981,
     };
 
     const mat = new THREE.MeshBasicMaterial({
@@ -216,7 +245,7 @@ export class AbilityManager {
       tickTimer: 0.2,
     });
 
-    if (type === 'STIM') soundEngine.playAbility('HEAL');
+    if (type === 'STIM' || type === 'HEAL') soundEngine.playAbility('HEAL');
     else if (type === 'LOCKDOWN' || type === 'BLACKOUT') soundEngine.playAbility('ULT');
     else soundEngine.playAbility('SMOKE');
   }
@@ -248,7 +277,7 @@ export class AbilityManager {
     const root = new THREE.Group();
     root.position.set(x, 0, z);
 
-    const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 });
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.35, roughness: 0.4 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0ea5e9, emissiveIntensity: 1.5 });
 
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.38, 0.75, 8), baseMat);
@@ -311,9 +340,9 @@ export class AbilityManager {
     dt: number,
     combatants?: BotCombatant[],
     onAbilityDamage?: (target: BotCombatant, dmg: number, label: string) => void,
-    onTurretFire?: (origin: THREE.Vector3, dir: THREE.Vector3, team: string) => void
+    onTurretFire?: (origin: THREE.Vector3, dir: THREE.Vector3, team: string) => void,
+    onAllyHeal?: (target: BotCombatant, hpGain: number, armorGain: number) => void
   ): void {
-    // Tick down status timers
     for (const [id, t] of this.revealedEnemyIds.entries()) {
       if (t - dt <= 0) this.revealedEnemyIds.delete(id);
       else this.revealedEnemyIds.set(id, t - dt);
@@ -357,7 +386,7 @@ export class AbilityManager {
     for (let i = this.pulses.length - 1; i >= 0; i--) {
       const p = this.pulses[i];
       p.remainingTime -= dt;
-      p.radius += dt * 15;
+      p.radius += dt * 16;
       const progress = p.radius / p.maxRadius;
       p.mesh.scale.set(p.radius, p.radius, 1);
       (p.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - progress);
@@ -377,7 +406,7 @@ export class AbilityManager {
       if (f.fuseTimer <= 0) {
         if (combatants) {
           for (const c of combatants) {
-            if (c.alive && c.team !== f.ownerTeam && c.position.distanceTo(f.position) < 12) {
+            if (c.alive && c.team !== f.ownerTeam && c.position.distanceTo(f.position) < 12.5) {
               this.blindedCombatantIds.set(c.id, 2.8);
               this.slowedCombatantIds.set(c.id, 2.2);
             }
@@ -390,7 +419,7 @@ export class AbilityManager {
       }
     }
 
-    // 5. Update Ground Tactical Zones (Toxin, Stim, Gravity, Lockdown, Blackout)
+    // 5. Update Ground Tactical Zones
     for (let i = this.zones.length - 1; i >= 0; i--) {
       const z = this.zones[i];
       z.remainingTime -= dt;
@@ -399,23 +428,32 @@ export class AbilityManager {
       if (z.tickTimer <= 0 && combatants) {
         z.tickTimer = 0.45;
         for (const c of combatants) {
-          if (!c.alive || c.team === z.ownerTeam) continue;
-          if (c.position.distanceTo(z.position) <= z.radius) {
-            if (z.type === 'TOXIN') {
-              onAbilityDamage?.(c, 12, 'Toxin Puddle');
-              this.slowedCombatantIds.set(c.id, 0.7);
-            } else if (z.type === 'GRAVITY') {
-              onAbilityDamage?.(c, 8, 'Gravity Orb');
-              this.slowedCombatantIds.set(c.id, 1.0);
-              // Pull slightly toward center
-              _turretDir.subVectors(z.position, c.position).setY(0).normalize();
-              c.position.addScaledVector(_turretDir, 0.45);
-            } else if (z.type === 'LOCKDOWN') {
-              this.slowedCombatantIds.set(c.id, 1.2);
-            } else if (z.type === 'BLACKOUT') {
-              this.blindedCombatantIds.set(c.id, 1.2);
-              this.slowedCombatantIds.set(c.id, 1.0);
+          if (!c.alive) continue;
+          if (c.position.distanceTo(z.position) > z.radius) continue;
+
+          if (z.type === 'HEAL') {
+            if (c.team === z.ownerTeam) {
+              onAllyHeal?.(c, 8, 5);
             }
+            continue;
+          }
+
+          if (c.team === z.ownerTeam) continue;
+
+          if (z.type === 'TOXIN') {
+            onAbilityDamage?.(c, 12, 'Toxin Field');
+            this.slowedCombatantIds.set(c.id, 0.7);
+          } else if (z.type === 'GRAVITY') {
+            onAbilityDamage?.(c, 9, 'Gravity Well');
+            this.slowedCombatantIds.set(c.id, 1.0);
+            _turretDir.subVectors(z.position, c.position).setY(0).normalize();
+            c.position.addScaledVector(_turretDir, 0.5);
+          } else if (z.type === 'LOCKDOWN') {
+            this.slowedCombatantIds.set(c.id, 1.4);
+          } else if (z.type === 'BLACKOUT') {
+            onAbilityDamage?.(c, 7, 'Solar / Void Surge');
+            this.blindedCombatantIds.set(c.id, 1.2);
+            this.slowedCombatantIds.set(c.id, 1.1);
           }
         }
       }

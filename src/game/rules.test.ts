@@ -19,14 +19,20 @@ import {
   normalizeTouchLayout,
   updateTouchControlSlot,
   applyTouchLayoutPreset,
+  raycastAABBs,
+  worldToRadarCoord,
+  sanitizeChatText,
 } from './rules';
-import { DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY } from './types';
+import { AGENT_REGISTRY, DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY, getAvailableMaps } from './types';
 import {
   BOMB_SITE_A,
   BOMB_SITE_B,
+  NAV_GRAPH,
   SPAWN_ATTACKERS,
   SPAWN_DEFENDERS,
+  findNavPath,
   isPointWalkable,
+  setActiveMap,
 } from './mapData';
 
 test('WEAPON_REGISTRY contains all 18 required weapons across all 7 categories', () => {
@@ -60,6 +66,26 @@ test('WEAPON_REGISTRY contains all 18 required weapons across all 7 categories',
   }
   assert.equal(WEAPON_REGISTRY.HOLLOW_BLADE.isMelee, true);
   assert.equal(WEAPON_REGISTRY.SLUG.pellets, 8);
+});
+
+test('AGENT_REGISTRY includes all 7 launch operatives across all 4 tactical roles', () => {
+  const expected: Array<[string, string, string]> = [
+    ['KAEL', 'Kael', 'DUELIST'],
+    ['ZED', 'Zed', 'DUELIST'],
+    ['KORA', 'Kora', 'CONTROLLER'],
+    ['SOREN', 'Soren', 'INITIATOR'],
+    ['PULSE', 'Pulse', 'INITIATOR'],
+    ['AEGIS', 'Aegis', 'SENTINEL'],
+    ['ROOK', 'Rook', 'SENTINEL'],
+  ];
+  assert.equal(Object.keys(AGENT_REGISTRY).length, 7);
+  for (const [id, name, role] of expected) {
+    const ag = AGENT_REGISTRY[id];
+    assert.ok(ag, `Missing agent ${id}`);
+    assert.equal(ag.name, name);
+    assert.equal(ag.role, role);
+    assert.equal(ag.abilities.length, 4);
+  }
 });
 
 test('calculateDamage handles headshot, armor absorption, shotgun falloff, and melee immunity', () => {
@@ -115,14 +141,14 @@ test('calculateEconomy awards win and loss streaks with cap', () => {
 });
 
 test('pickBotPurchase chooses affordable weapons from new 18-weapon arsenal', () => {
-  const pistolBuy = pickBotPurchase(800, 1, 'HARD', 'ZEPHYR');
+  const pistolBuy = pickBotPurchase(800, 1, 'HARD', 'KAEL');
   if (pistolBuy) {
     assert.ok(WEAPON_REGISTRY[pistolBuy.weaponId], 'Pistol buy must exist in registry');
     assert.equal(pistolBuy.isSidearm, true);
     assert.ok(pistolBuy.cost <= 800);
   }
 
-  const rifleBuy = pickBotPurchase(3400, 4, 'HARD', 'BLITZ');
+  const rifleBuy = pickBotPurchase(3400, 4, 'HARD', 'AEGIS');
   assert.ok(rifleBuy, 'Rich bot in round 4 must buy primary weapon');
   assert.ok(WEAPON_REGISTRY[rifleBuy!.weaponId]);
   assert.ok(rifleBuy!.cost <= 3400);
@@ -182,17 +208,26 @@ test('checkRoundWin evaluates site plant, defusal, and eliminations', () => {
   assert.equal(soloCustom.winner, null);
 });
 
-test('new valorant_style_map_v2 spawns and bomb sites are symmetric and walkable', () => {
-  assert.equal(BOMB_SITE_A.x, -24.7);
-  assert.equal(BOMB_SITE_B.x, 24.7);
-  assert.equal(BOMB_SITE_A.z, -16.3);
-  assert.equal(BOMB_SITE_B.z, -16.3);
-  assert.ok(SPAWN_ATTACKERS.z > 30, 'Attacker spawn should be in south plaza');
-  assert.ok(SPAWN_DEFENDERS.z < 0, 'Defender spawn should be in north plaza near sites');
+test('Warehouse map spawns, bomb sites, and navigation graph are walkable and connected', () => {
+  assert.ok(SPAWN_ATTACKERS.z < 0, 'Attacker spawn should be in north bay');
+  assert.ok(SPAWN_DEFENDERS.z > 0, 'Defender spawn should be in south central bay');
   assert.equal(isPointWalkable(SPAWN_ATTACKERS.x, SPAWN_ATTACKERS.z, 0.45), true);
   assert.equal(isPointWalkable(SPAWN_DEFENDERS.x, SPAWN_DEFENDERS.z, 0.45), true);
   assert.equal(isPointWalkable(BOMB_SITE_A.x, BOMB_SITE_A.z, 0.45), true);
   assert.equal(isPointWalkable(BOMB_SITE_B.x, BOMB_SITE_B.z, 0.45), true);
+
+  for (const node of Object.values(NAV_GRAPH)) {
+    assert.equal(isPointWalkable(node.x, node.z, 0.35), true, `NAV_GRAPH node ${node.id} must be walkable`);
+  }
+
+  const attToA = findNavPath('att_spawn', 'site_a_plant');
+  const attToB = findNavPath('att_spawn', 'site_b_plant');
+  const defToA = findNavPath('def_spawn', 'site_a_plant');
+  const defToB = findNavPath('def_spawn', 'site_b_plant');
+  assert.equal(attToA[attToA.length - 1]?.id, 'site_a_plant');
+  assert.equal(attToB[attToB.length - 1]?.id, 'site_b_plant');
+  assert.equal(defToA[defToA.length - 1]?.id, 'site_a_plant');
+  assert.equal(defToB[defToB.length - 1]?.id, 'site_b_plant');
 });
 
 test('checkMatchWin detects first to 13 rounds', () => {
@@ -364,3 +399,100 @@ test('normalizeTouchLayout, updateTouchControlSlot, and applyTouchLayoutPreset c
   assert.equal(normalized.jump.yPct, 50);
   assert.equal(normalized.fire.scale, 1.0);
 });
+
+test('getAvailableMaps lists built-in maps, deduplicates Warehouse.glb, and exposes custom GLBs', () => {
+  const maps = getAvailableMaps(['Warehouse.glb', 'Neon_Docks.glb', 'sector-7.gltf']);
+  const ids = maps.map((m) => m.id);
+  assert.ok(ids.includes('WAREHOUSE'));
+  assert.ok(ids.includes('COURTYARD'));
+  assert.ok(ids.includes('PROVING_GRID'));
+  assert.equal(ids.filter((id) => id === 'WAREHOUSE').length, 1);
+  assert.equal(
+    maps.filter((m) => m.modelUrl === '/models/Map/Warehouse.glb').length,
+    1,
+    'Warehouse.glb should not duplicate the built-in WAREHOUSE entry'
+  );
+  const customNeon = maps.find((m) => m.modelUrl === '/models/Map/Neon_Docks.glb');
+  assert.ok(customNeon, 'Custom Neon_Docks.glb should be discovered');
+  assert.equal(customNeon!.name, 'NEON DOCKS');
+  assert.ok(ids.includes('CUSTOM_SECTOR_7_GLTF'));
+});
+
+test('setActiveMap hot-swaps spawns, bomb sites, colliders, and connected nav graphs for all built-in maps', () => {
+  try {
+    for (const mapId of ['COURTYARD', 'PROVING_GRID', 'WAREHOUSE']) {
+      const def = setActiveMap(mapId);
+      assert.equal(def.id, mapId);
+      assert.equal(isPointWalkable(SPAWN_ATTACKERS.x, SPAWN_ATTACKERS.z, 0.45), true, `${mapId} att spawn walkable`);
+      assert.equal(isPointWalkable(SPAWN_DEFENDERS.x, SPAWN_DEFENDERS.z, 0.45), true, `${mapId} def spawn walkable`);
+      assert.equal(isPointWalkable(BOMB_SITE_A.x, BOMB_SITE_A.z, 0.45), true, `${mapId} site A walkable`);
+      assert.equal(isPointWalkable(BOMB_SITE_B.x, BOMB_SITE_B.z, 0.45), true, `${mapId} site B walkable`);
+
+      for (const node of Object.values(NAV_GRAPH)) {
+        assert.equal(
+          isPointWalkable(node.x, node.z, 0.35),
+          true,
+          `${mapId} nav node ${node.id} must not overlap any collider`
+        );
+      }
+
+      const attToA = findNavPath('att_spawn', 'site_a_plant');
+      const attToB = findNavPath('att_spawn', 'site_b_plant');
+      const defToA = findNavPath('def_spawn', 'site_a_plant');
+      const defToB = findNavPath('def_spawn', 'site_b_plant');
+      assert.equal(attToA[attToA.length - 1]?.id, 'site_a_plant', `${mapId} att->A reachable`);
+      assert.equal(attToB[attToB.length - 1]?.id, 'site_b_plant', `${mapId} att->B reachable`);
+      assert.equal(defToA[defToA.length - 1]?.id, 'site_a_plant', `${mapId} def->A reachable`);
+      assert.equal(defToB[defToB.length - 1]?.id, 'site_b_plant', `${mapId} def->B reachable`);
+    }
+  } finally {
+    setActiveMap('WAREHOUSE');
+  }
+});
+
+test('raycastAABBs finds closest wall hit, respects maxDistance, and handles floor hits', () => {
+  const boxes = [
+    { minX: -2, maxX: 2, minY: 0, maxY: 4, minZ: -12, maxZ: -10 },
+    { minX: -2, maxX: 2, minY: 0, maxY: 4, minZ: -20, maxZ: -18 },
+  ];
+
+  // Shoot from (0, 1.5, 0) along -Z -> hits near face of first box at z = -10 -> distance 10
+  const hit = raycastAABBs(0, 1.5, 0, 0, 0, -1, 50, boxes);
+  assert.ok(hit);
+  assert.ok(Math.abs(hit!.distance - 10) < 1e-5);
+  assert.equal(hit!.nz, 1);
+
+  // Too short maxDistance returns null
+  assert.equal(raycastAABBs(0, 1.5, 0, 0, 0, -1, 8, boxes), null);
+
+  // Diagonal downward ray with includeFloor hits y=0
+  const invLen = 1 / Math.SQRT2;
+  const floorHit = raycastAABBs(0, 2, 0, 0, -invLen, invLen, 10, [], true);
+  assert.ok(floorHit);
+  assert.ok(Math.abs(floorHit!.y) < 1e-5);
+  assert.equal(floorHit!.ny, 1);
+});
+
+test('worldToRadarCoord rotates target ahead of player to straight UP regardless of yaw and clamps rim', () => {
+  // Player at origin facing -Z (yaw = 0); target ahead at (0, -12) -> cy < center
+  const ahead0 = worldToRadarCoord(0, -12, 0, 0, 0, 120, 24, 52);
+  assert.ok(Math.abs(ahead0.cx - 60) < 1e-5);
+  assert.equal(ahead0.cy, 30);
+  assert.equal(ahead0.clamped, false);
+
+  // Player rotated 90 deg CCW (yaw = PI/2, facing -X); target ahead at (-12, 0) -> straight UP (60, 30)
+  const ahead90 = worldToRadarCoord(-12, 0, 0, 0, Math.PI / 2, 120, 24, 52);
+  assert.ok(Math.abs(ahead90.cx - 60) < 1e-4);
+  assert.ok(Math.abs(ahead90.cy - 30) < 1e-4);
+
+  // Far enemy clamped to perimeter ring radius
+  const farTarget = worldToRadarCoord(80, -80, 0, 0, 0, 120, 24, 52);
+  assert.equal(farTarget.clamped, true);
+  assert.ok(Math.abs(Math.hypot(farTarget.cx - 60, farTarget.cy - 60) - 52) < 1e-4);
+});
+
+test('sanitizeChatText normalizes whitespace, strips newlines, and caps length', () => {
+  assert.equal(sanitizeChatText('  hold   B\nsite\tnow  '), 'hold B site now');
+  assert.equal(sanitizeChatText('a'.repeat(300), 220).length, 220);
+});
+

@@ -23,7 +23,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
 
   const rank = computeRankProgress(profile);
-  const favAgent = AGENT_REGISTRY[profile.favoriteAgentId] || AGENT_REGISTRY.ZEPHYR;
+  const favAgent = AGENT_REGISTRY[profile.favoriteAgentId] || AGENT_REGISTRY.KAEL;
 
   const handleSaveCallsign = (e: React.FormEvent) => {
     e.preventDefault();

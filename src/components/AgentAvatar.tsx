@@ -9,16 +9,27 @@ import cardBannerCrimson from '../assets/images/card_banner_crimson_179519345999
 import cardBannerTeal from '../assets/images/card_banner_teal_1795193460064.jpg';
 import mapCourtyardBg from '../assets/images/map_courtyard_loading_bg_1795193460615.jpg';
 import lobbyGoldenRaysBg from '../assets/images/lobby_golden_rays_bg_1795193459396.jpg';
+import splashBackdropBg from '../assets/images/loading_splash_art_1795091195232.jpg';
 
 export const LOBBY_BACKDROP_ART = lobbyGoldenRaysBg;
-export const COURTYARD_MAP_ART = mapCourtyardBg;
+export const WAREHOUSE_MAP_ART = mapCourtyardBg;
+export const COURTYARD_ALT_ART = splashBackdropBg;
 export const ARMORY_SPOTLIGHT_ART = cardBannerCrimson;
 
+export function getMapArtwork(mapId?: string): string {
+  if (mapId === 'COURTYARD') return COURTYARD_ALT_ART;
+  if (mapId === 'PROVING_GRID') return cardBannerTeal;
+  return WAREHOUSE_MAP_ART;
+}
+
 const CARD_ART_BY_AGENT: Record<string, string[]> = {
-  ZEPHYR: [cardBannerTeal, mapCourtyardBg],
-  BLITZ: [cardBannerCrimson, '/assets/aistudio/350024580_1795088286721343_bce24b44.jpg'],
-  BASTION: [cardBannerTeal, cardBannerCrimson],
-  LUMEN: ['/assets/aistudio/350024580_1795088286721343_bce24b44.jpg', cardBannerTeal],
+  KAEL: [cardBannerCrimson, cardBannerTeal],
+  ZED: [cardBannerCrimson, '/assets/aistudio/350024580_1795088286721343_bce24b44.jpg'],
+  KORA: [cardBannerTeal, mapCourtyardBg],
+  SOREN: ['/assets/aistudio/350024580_1795088286721343_bce24b44.jpg', cardBannerTeal],
+  PULSE: [cardBannerTeal, cardBannerCrimson],
+  AEGIS: [cardBannerTeal, mapCourtyardBg],
+  ROOK: [cardBannerCrimson, mapCourtyardBg],
 };
 
 export function getPlayerCardArt(agentId: string, variantIndex = 0): string {
@@ -30,14 +41,20 @@ export function getAgentTitleLabel(agentId: string, isLeader = false, isBot = fa
   if (isLeader) return 'SQUAD LEADER';
   if (isBot) return 'TACTICAL UNIT';
   switch (agentId) {
-    case 'ZEPHYR':
-      return 'VOID CONTROLLER';
-    case 'BLITZ':
-      return 'APEX DUELIST';
-    case 'BASTION':
-      return 'IRON SENTINEL';
-    case 'LUMEN':
+    case 'KAEL':
+      return 'VOID DUELIST';
+    case 'ZED':
+      return 'CYBER-BLADE DUELIST';
+    case 'KORA':
+      return 'ASTRAL CONTROLLER';
+    case 'SOREN':
       return 'SOLAR INITIATOR';
+    case 'PULSE':
+      return 'RECON INITIATOR';
+    case 'AEGIS':
+      return 'HARD-LIGHT SENTINEL';
+    case 'ROOK':
+      return 'HEAVY TECH SENTINEL';
     default:
       return 'OPERATIVE';
   }
@@ -50,7 +67,7 @@ interface AgentEmblemMarkProps {
 }
 
 /**
- * Bold angular Valorant-inspired twin-wing V emblem with subtle agent motif
+ * Bold angular twin-wing emblem with subtle agent motif
  * rendered inside the Lobby stepped chevron banners.
  */
 export const AgentEmblemMark: React.FC<AgentEmblemMarkProps> = ({
@@ -58,7 +75,7 @@ export const AgentEmblemMark: React.FC<AgentEmblemMarkProps> = ({
   accentColor,
   className = 'w-14 h-14',
 }) => {
-  const agent: AgentDef = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+  const agent: AgentDef = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.KAEL;
   const fill = accentColor || '#FF4655';
 
   return (
@@ -74,16 +91,16 @@ export const AgentEmblemMark: React.FC<AgentEmblemMarkProps> = ({
       {/* Right fractured wing */}
       <path d="M90 14L56 56V78L90 38V14Z" fill={fill} fillOpacity="0.92" />
       {/* Center diamond core accent per agent role */}
-      {agent.id === 'ZEPHYR' && (
+      {(agent.id === 'KAEL' || agent.id === 'KORA') && (
         <path d="M50 16L60 32L50 48L40 32L50 16Z" fill="#ECE8E1" fillOpacity="0.88" />
       )}
-      {agent.id === 'BLITZ' && (
+      {agent.id === 'ZED' && (
         <path d="M53 14L41 36H51L47 52L60 30H50L53 14Z" fill="#ECE8E1" fillOpacity="0.92" />
       )}
-      {agent.id === 'BASTION' && (
+      {(agent.id === 'AEGIS' || agent.id === 'ROOK') && (
         <path d="M41 18H59V36L50 48L41 36V18Z" fill="#ECE8E1" fillOpacity="0.88" />
       )}
-      {agent.id === 'LUMEN' && (
+      {(agent.id === 'SOREN' || agent.id === 'PULSE') && (
         <circle cx="50" cy="30" r="9" stroke="#ECE8E1" strokeWidth="4" strokeOpacity="0.9" />
       )}
     </svg>
@@ -104,7 +121,7 @@ export const AgentPortraitTile: React.FC<AgentPortraitTileProps> = ({
   teamColor,
   className = 'h-full w-full',
 }) => {
-  const agent: AgentDef = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.ZEPHYR;
+  const agent: AgentDef = AGENT_REGISTRY[agentId] || AGENT_REGISTRY.KAEL;
   const glow = teamColor || agent.primaryColor;
 
   return (
@@ -144,16 +161,16 @@ export const AgentPortraitTile: React.FC<AgentPortraitTileProps> = ({
           strokeWidth="1.4"
         />
         {/* Glowing Visor Motif */}
-        {agent.id === 'ZEPHYR' && (
+        {(agent.id === 'KAEL' || agent.id === 'KORA') && (
           <path d="M30 28L40 31L50 28L48 34L40 36L32 34L30 28Z" fill={agent.primaryColor} />
         )}
-        {agent.id === 'BLITZ' && (
+        {agent.id === 'ZED' && (
           <path d="M29 29L38 30L36 34L29 33V29ZM42 30L51 29V33L44 34L42 30Z" fill={agent.primaryColor} />
         )}
-        {agent.id === 'BASTION' && (
+        {(agent.id === 'AEGIS' || agent.id === 'ROOK') && (
           <rect x="30" y="27" width="20" height="6" rx="1" fill={agent.primaryColor} />
         )}
-        {agent.id === 'LUMEN' && (
+        {(agent.id === 'SOREN' || agent.id === 'PULSE') && (
           <>
             <circle cx="35" cy="31" r="3" fill={agent.primaryColor} />
             <circle cx="45" cy="31" r="3" fill={agent.primaryColor} />

@@ -1,7 +1,8 @@
 /**
- * Hollow Strike - GLB Model Loader, Extension Polyfills & Geometric Normalization
- * Includes a full KHR_materials_pbrSpecularGlossiness parser plugin for Three.js r187+,
- * sub-node extraction for multi-asset GLB packs, and Box3-based scale/orientation normalization.
+ * Hollow Strike - GLB Model Loader, Texture Optimizer & Geometric Normalization
+ * - Downscales oversized 2048px+ Tripo/Warehouse GLB textures on load to prevent GPU VRAM crashes.
+ * - Uses fast geometry-sharing clone (`group.clone(true)`) for non-skinned static meshes.
+ * - Normalizes weapon GLBs into standardized -Z forward frame.
  */
 
 import * as THREE from 'three';
@@ -16,11 +17,6 @@ interface SpecGlossExtDef {
   specularGlossinessTexture?: { index: number; texCoord?: number };
 }
 
-/**
- * Registers KHR_materials_pbrSpecularGlossiness extension handler on a GLTFLoader.
- * Three.js removed native support in r150+; Sketchfab architectural/urban GLBs (like japan_map.glb)
- * often require this extension for textures and materials to appear properly.
- */
 function registerSpecGlossPlugin(loader: GLTFLoader) {
   loader.register((parser: GLTFParser) => {
     const extName = 'KHR_materials_pbrSpecularGlossiness';
@@ -62,7 +58,6 @@ function registerSpecGlossPlugin(loader: GLTFLoader) {
           ? Math.max(ext.specularFactor[0] ?? 0, ext.specularFactor[1] ?? 0, ext.specularFactor[2] ?? 0)
           : 0.15;
 
-        // Convert specular/glossiness into clean PBR roughness & moderate metalness
         materialParams.roughness = THREE.MathUtils.clamp(1.0 - glossiness * 0.72, 0.25, 0.96);
         materialParams.metalness = THREE.MathUtils.clamp(specMax * 0.35, 0.0, 0.35);
 
@@ -81,121 +76,198 @@ function registerSpecGlossPlugin(loader: GLTFLoader) {
 const gltfLoader = new GLTFLoader();
 registerSpecGlossPlugin(gltfLoader);
 
-const modelCache = new Map<string, THREE.Group>();
-const loadingPromises = new Map<string, Promise<THREE.Group>>();
+interface CachedModelEntry {
+  group: THREE.Group;
+  hasSkinnedMesh: boolean;
+}
+
+const modelCache = new Map<string, CachedModelEntry>();
+const loadingPromises = new Map<string, Promise<CachedModelEntry>>();
+
+export interface LoadGLBOptions {
+  /** Set false for heavy static arenas (e.g. Warehouse.glb) to skip cloning */
+  clone?: boolean;
+  /** Whether meshes should cast real-time shadows */
+  castShadow?: boolean;
+  /** Maximum texture dimension in pixels; downscales larger decoded GLB images */
+  maxTextureSize?: number;
+  /** Strip secondary normal/bump/roughness/metalness/ao maps to save GPU VRAM */
+  stripSecondaryMaps?: boolean;
+  /** Cap metalness and floor roughness so PBR weapons stay clearly lit */
+  normalizePbrForLighting?: boolean;
+}
+
+function downscaleTexture(tex: THREE.Texture | null | undefined, maxDim: number): void {
+  if (!tex || !tex.image || maxDim <= 0) return;
+  const img = tex.image as {
+    width?: number;
+    height?: number;
+    videoWidth?: number;
+    close?: () => void;
+  };
+  const w = img.width || img.videoWidth || 0;
+  const h = img.height || 0;
+  if (w <= maxDim && h <= maxDim) return;
+  if (w <= 0 || h <= 0) return;
+
+  const scale = maxDim / Math.max(w, h);
+  const nw = Math.max(16, Math.round(w * scale));
+  const nh = Math.max(16, Math.round(h * scale));
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = nw;
+    canvas.height = nh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(tex.image as CanvasImageSource, 0, 0, nw, nh);
+    if (typeof img.close === 'function') {
+      img.close();
+    }
+    tex.image = canvas;
+    tex.needsUpdate = true;
+  } catch {
+    // Non-fatal fallback: keep original image
+  }
+}
+
+function cloneEntry(entry: CachedModelEntry, shouldClone: boolean): THREE.Group {
+  if (!shouldClone) return entry.group;
+  if (entry.hasSkinnedMesh) {
+    return SkeletonUtils.clone(entry.group) as THREE.Group;
+  }
+  // Static/non-skinned clone shares geometries & optimized textures cleanly
+  return entry.group.clone(true);
+}
 
 /**
- * Loads and caches a full GLB scene, returning a deep structural clone on every call.
+ * Loads and caches a GLB scene with optional texture downscaling & fast GPU-buffer sharing.
  */
-export function loadGLBModel(path: string): Promise<THREE.Group | null> {
-  if (modelCache.has(path)) {
-    return Promise.resolve(SkeletonUtils.clone(modelCache.get(path)!) as THREE.Group);
+export function loadGLBModel(path: string, options: LoadGLBOptions = {}): Promise<THREE.Group | null> {
+  const shouldClone = options.clone !== false;
+  const castShadow = options.castShadow === true;
+  const maxTex = options.maxTextureSize ?? 512;
+  const stripSecondary = options.stripSecondaryMaps === true;
+  const normalizePbr = options.normalizePbrForLighting === true;
+  const cacheKey = `${path}|t${maxTex}|s${stripSecondary ? 1 : 0}|p${normalizePbr ? 1 : 0}`;
+
+  if (modelCache.has(cacheKey)) {
+    return Promise.resolve(cloneEntry(modelCache.get(cacheKey)!, shouldClone));
   }
-  if (loadingPromises.has(path)) {
+  if (loadingPromises.has(cacheKey)) {
     return loadingPromises
-      .get(path)!
-      .then((group) => SkeletonUtils.clone(group) as THREE.Group)
+      .get(cacheKey)!
+      .then((entry) => cloneEntry(entry, shouldClone))
       .catch(() => null);
   }
 
-  const promise = new Promise<THREE.Group>((resolve, reject) => {
+  const promise = new Promise<CachedModelEntry>((resolve, reject) => {
     gltfLoader.load(
       path,
       (gltf) => {
         const group = gltf.scene;
         const toStrip: THREE.Object3D[] = [];
+        const seenMats = new Set<THREE.Material>();
+        const seenTex = new Set<THREE.Texture>();
+        let hasSkinnedMesh = false;
+
         group.traverse((child) => {
           if ((child as THREE.Light).isLight || (child as THREE.Camera).isCamera) {
             toStrip.push(child);
             return;
           }
           if ((child as THREE.Mesh).isMesh) {
-            child.castShadow = true;
+            child.castShadow = castShadow;
             child.receiveShadow = true;
             if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
+              hasSkinnedMesh = true;
               child.frustumCulled = false;
             }
             const mat = (child as THREE.Mesh).material;
             const mats = Array.isArray(mat) ? mat : [mat];
             mats.forEach((m) => {
-              if (m && (m as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+              if (!m || seenMats.has(m)) return;
+              seenMats.add(m);
+
+              if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
                 const sm = m as THREE.MeshStandardMaterial;
                 if (sm.map) {
                   sm.map.colorSpace = THREE.SRGBColorSpace;
-                  sm.map.needsUpdate = true;
+                  if (!seenTex.has(sm.map)) {
+                    seenTex.add(sm.map);
+                    downscaleTexture(sm.map, maxTex);
+                  }
                 }
+                if (stripSecondary) {
+                  if (sm.normalMap) {
+                    sm.normalMap.dispose();
+                    sm.normalMap = null;
+                  }
+                  if (sm.bumpMap) {
+                    sm.bumpMap.dispose();
+                    sm.bumpMap = null;
+                  }
+                  if (sm.roughnessMap) {
+                    sm.roughnessMap.dispose();
+                    sm.roughnessMap = null;
+                    sm.roughness = Math.max(sm.roughness, 0.72);
+                  }
+                  if (sm.metalnessMap) {
+                    sm.metalnessMap.dispose();
+                    sm.metalnessMap = null;
+                    sm.metalness = Math.min(sm.metalness, 0.15);
+                  }
+                  if (sm.aoMap) {
+                    sm.aoMap.dispose();
+                    sm.aoMap = null;
+                  }
+                } else {
+                  const secMax = Math.min(maxTex, 256);
+                  for (const t of [sm.normalMap, sm.roughnessMap, sm.metalnessMap, sm.aoMap, sm.emissiveMap]) {
+                    if (t && !seenTex.has(t)) {
+                      seenTex.add(t);
+                      downscaleTexture(t, secMax);
+                    }
+                  }
+                }
+
+                if (normalizePbr) {
+                  sm.metalness = THREE.MathUtils.clamp(sm.metalness, 0, 0.62);
+                  sm.roughness = THREE.MathUtils.clamp(sm.roughness, 0.28, 0.92);
+                  sm.envMapIntensity = 1.25;
+                }
+                sm.needsUpdate = true;
               }
             });
           }
         });
+
         toStrip.forEach((o) => o.parent?.remove(o));
-        modelCache.set(path, group);
-        resolve(group);
+        const entry: CachedModelEntry = { group, hasSkinnedMesh };
+        modelCache.set(cacheKey, entry);
+        resolve(entry);
       },
       undefined,
       (error) => {
+        loadingPromises.delete(cacheKey);
         console.warn(`Failed to load GLB model at ${path}:`, error);
         reject(error);
       }
     );
   });
 
-  loadingPromises.set(path, promise);
-  return promise.then((group) => SkeletonUtils.clone(group) as THREE.Group).catch(() => null);
-}
-
-/**
- * Extracts a specific named object from a multi-asset GLB pack while preserving its
- * accumulated world orientation (ignoring its giant world offset so it can be cleanly centered).
- */
-export async function loadGLBSubNode(path: string, nodeName: string): Promise<THREE.Group | null> {
-  const root = await loadGLBModel(path);
-  if (!root) return null;
-
-  root.updateMatrixWorld(true);
-  let target: THREE.Object3D | undefined;
-  root.traverse((obj) => {
-    if (!target && obj.name === nodeName) {
-      target = obj;
-    }
-  });
-
-  if (!target) {
-    console.warn(`Sub-node "${nodeName}" not found in GLB "${path}"`);
-    return null;
-  }
-
-  // Extract world rotation & scale without keeping unrelated pack siblings
-  const worldPos = new THREE.Vector3();
-  const worldQuat = new THREE.Quaternion();
-  const worldScale = new THREE.Vector3();
-  target.matrixWorld.decompose(worldPos, worldQuat, worldScale);
-
-  const wrapper = new THREE.Group();
-  wrapper.name = nodeName;
-  const detached = target.clone(true);
-  detached.position.set(0, 0, 0);
-  detached.quaternion.copy(worldQuat);
-  detached.scale.copy(worldScale);
-  wrapper.add(detached);
-  wrapper.updateMatrixWorld(true);
-
-  return wrapper;
+  loadingPromises.set(cacheKey, promise);
+  return promise
+    .then((entry) => cloneEntry(entry, shouldClone))
+    .catch(() => null);
 }
 
 export type ForwardAxis = '-z' | '+z' | '+x' | '-x';
 
 export interface NormalizeWeaponOptions {
-  targetLength: number; // Desired length in meters along -Z
+  targetLength: number;
   forwardAxis: ForwardAxis;
-  /**
-   * Offset applied after normalization in final weapon-local meters
-   * so the grip/receiver sits right at (0,0,0) in the player's hand.
-   */
   pivotShift?: [number, number, number];
-  /**
-   * Optional roll/pitch trim in radians before scaling
-   */
   extraEuler?: [number, number, number];
 }
 
@@ -213,7 +285,6 @@ export function normalizeWeaponModel(
   const oriented = new THREE.Group();
   const rotHolder = new THREE.Group();
 
-  // Rotate so raw forwardAxis aligns to -Z
   switch (options.forwardAxis) {
     case '-z':
       rotHolder.rotation.y = 0;
@@ -246,7 +317,6 @@ export function normalizeWeaponModel(
     }
   });
 
-  // Measure world Box3 of the oriented model
   const box = new THREE.Box3().setFromObject(oriented);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
@@ -254,7 +324,6 @@ export function normalizeWeaponModel(
   const lengthAlongZ = Math.max(0.001, size.z);
   const uniformScale = options.targetLength / lengthAlongZ;
 
-  // Center at origin and scale to exact real-world meters
   rawObj.updateMatrixWorld(true);
   rotHolder.position.sub(center);
 

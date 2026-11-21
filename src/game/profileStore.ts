@@ -4,6 +4,7 @@
  */
 
 import {
+  AGENT_REGISTRY,
   DEFAULT_KEY_BINDINGS,
   GameSettings,
   MatchRecord,
@@ -15,10 +16,17 @@ import { clampCrosshairConfig, normalizeTouchLayout, resolveCrosshairConfig } fr
 const PROFILE_STORAGE_KEY = 'hollow_strike_profile_v1';
 const SETTINGS_STORAGE_KEY = 'hollow_strike_settings_v1';
 
+const LEGACY_AGENT_MIGRATION: Record<string, string> = {
+  BLITZ: 'KAEL',
+  ZEPHYR: 'KORA',
+  BASTION: 'AEGIS',
+  LUMEN: 'SOREN',
+};
+
 export function createEmptyProfile(): PlayerProfile {
   return {
     callsign: 'Operative',
-    favoriteAgentId: 'ZEPHYR',
+    favoriteAgentId: 'KAEL',
     totalMatches: 0,
     wins: 0,
     losses: 0,
@@ -39,9 +47,13 @@ export function loadProfile(): PlayerProfile {
     const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
     if (!raw) return createEmptyProfile();
     const parsed = JSON.parse(raw) as Partial<PlayerProfile>;
+    const rawAgent = parsed.favoriteAgentId ?? 'KAEL';
+    const migrated = LEGACY_AGENT_MIGRATION[rawAgent] ?? rawAgent;
+    const favoriteAgentId = AGENT_REGISTRY[migrated] ? migrated : 'KAEL';
     return {
       ...createEmptyProfile(),
       ...parsed,
+      favoriteAgentId,
       agentStats: parsed.agentStats ?? {},
       weaponStats: parsed.weaponStats ?? {},
       matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
@@ -232,3 +244,25 @@ export function saveSettingsToStorage(settings: GameSettings): void {
     // Ignore storage errors
   }
 }
+
+const SELECTED_MAP_STORAGE_KEY = 'hollow_strike_selected_map_v1';
+
+export function loadSavedMapId(): string {
+  try {
+    if (typeof window === 'undefined') return 'WAREHOUSE';
+    const raw = window.localStorage.getItem(SELECTED_MAP_STORAGE_KEY);
+    return raw && raw.trim().length > 0 ? raw.trim() : 'WAREHOUSE';
+  } catch {
+    return 'WAREHOUSE';
+  }
+}
+
+export function saveSelectedMapId(mapId: string): void {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(SELECTED_MAP_STORAGE_KEY, mapId);
+  } catch {
+    // Ignore storage quota
+  }
+}
+

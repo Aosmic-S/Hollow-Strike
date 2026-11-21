@@ -1,31 +1,144 @@
 /**
- * Hollow Strike - Procedural Web Audio Synthesizer
- * 100% procedural sound synthesis using the Web Audio API. Zero external audio downloads.
+ * Hollow Strike - Hybrid Web Audio Engine
+ * Combines real weapon firing/reload & announcer MP3 sample playback
+ * with zero-latency procedural Web Audio synthesizers as instant fallback.
  */
 
 import { WeaponCategory } from './types';
+
+export type AnnouncerEvent =
+  | 'ace'
+  | 'attackersWin'
+  | 'clutch'
+  | 'defendersWin'
+  | 'flawless'
+  | 'quadraKill'
+  | 'spikeDefused'
+  | 'spikePlanted'
+  | 'tenSecondsLeft'
+  | 'thrifty'
+  | 'tripleKill'
+  | 'victory';
+
+interface WeaponAudioSpec {
+  folder: string;
+  prefix: string;
+  hasSpray: boolean;
+}
+
+const WEAPON_AUDIO_MAP: Record<string, WeaponAudioSpec> = {
+  // Sidearms (Pistol)
+  KADENCE: { folder: 'Pistol', prefix: 'Kadence', hasSpray: true },
+  THORN: { folder: 'Pistol', prefix: 'Thorn', hasSpray: true },
+  FURY: { folder: 'Pistol', prefix: 'Fury', hasSpray: true },
+  FRENKY: { folder: 'Pistol', prefix: 'Frenky', hasSpray: true },
+  HANGMAN: { folder: 'Pistol', prefix: 'Hangman', hasSpray: true },
+  // SMGs
+  MANTIS: { folder: 'smg', prefix: 'Mantis', hasSpray: true },
+  STINGRAY: { folder: 'smg', prefix: 'Stingray', hasSpray: true },
+  // Shotguns
+  JACKAL: { folder: 'shotgun', prefix: 'Jackal', hasSpray: true },
+  SLUG: { folder: 'shotgun', prefix: 'Slug', hasSpray: true },
+  // Rifles (Note: Veil only has Veil_Tap.mp3 & Veil_Reload.mp3)
+  REAPER: { folder: 'assault_rifle', prefix: 'Reaper', hasSpray: true },
+  ECLIPSE: { folder: 'assault_rifle', prefix: 'Eclipse', hasSpray: true },
+  VEIL: { folder: 'assault_rifle', prefix: 'Veil', hasSpray: false },
+  TUSK: { folder: 'assault_rifle', prefix: 'Tusk', hasSpray: true },
+  // Snipers
+  BOLT: { folder: 'sniper', prefix: 'Bolt', hasSpray: true },
+  ORACLE: { folder: 'sniper', prefix: 'Oracle', hasSpray: true },
+  // Machine Guns
+  STORM: { folder: 'machine_gun', prefix: 'Storm', hasSpray: true },
+  THOR: { folder: 'machine_gun', prefix: 'Thor', hasSpray: true },
+};
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private volume: number = 0.7;
   private muted: boolean = false;
+  private bufferCache = new Map<string, AudioBuffer>();
+  private inFlightUrls = new Set<string>();
+  private failedUrls = new Set<string>();
 
   public init(): void {
     if (this.ctx) {
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
+        this.ctx.resume().catch(() => {});
       }
       return;
     }
 
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
 
     this.ctx = new AudioCtx();
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.setValueAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime);
     this.masterGain.connect(this.ctx.destination);
+
+    // Pre-decode common weapon and round announcement MP3s in the background
+    this.prewarmCommonAudio();
+  }
+
+  private prewarmCommonAudio(): void {
+    const urls = [
+      '/Assests/Weapon_sound/Pistol/Kadence_Tap.mp3',
+      '/Assests/Weapon_sound/Pistol/Kadence_Reload.mp3',
+      '/Assests/Weapon_sound/assault_rifle/Reaper_Tap.mp3',
+      '/Assests/Weapon_sound/assault_rifle/Reaper_Spray.mp3',
+      '/Assests/Weapon_sound/assault_rifle/Reaper_Reload.mp3',
+      '/Assests/Sound%20effects/spikePlanted.mp3',
+      '/Assests/Sound%20effects/spikeDefused.mp3',
+      '/Assests/Sound%20effects/tenSecondsLeft.mp3',
+      '/Assests/Sound%20effects/attackersWin.mp3',
+      '/Assests/Sound%20effects/defendersWin.mp3',
+    ];
+    for (const url of urls) {
+      void this.loadBuffer(url);
+    }
+  }
+
+  private async loadBuffer(url: string): Promise<AudioBuffer | null> {
+    if (!this.ctx || this.failedUrls.has(url)) return null;
+    const cached = this.bufferCache.get(url);
+    if (cached) return cached;
+    if (this.inFlightUrls.has(url)) return null;
+
+    this.inFlightUrls.add(url);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        this.failedUrls.add(url);
+        return null;
+      }
+      const arr = await res.arrayBuffer();
+      if (!this.ctx) return null;
+      const decoded = await this.ctx.decodeAudioData(arr);
+      this.bufferCache.set(url, decoded);
+      return decoded;
+    } catch {
+      this.failedUrls.add(url);
+      return null;
+    } finally {
+      this.inFlightUrls.delete(url);
+    }
+  }
+
+  private playBuffer(buffer: AudioBuffer, gainScale = 0.85, rateJitter = 0): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    if (rateJitter > 0) {
+      src.playbackRate.value = 1 - rateJitter * 0.5 + Math.random() * rateJitter;
+    }
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(gainScale, this.ctx.currentTime);
+    src.connect(g);
+    g.connect(this.masterGain);
+    src.start(this.ctx.currentTime);
   }
 
   public setVolume(val: number): void {
@@ -46,7 +159,80 @@ class SoundEngine {
     return this.muted;
   }
 
-  // --- Weapon Synthesizers ---
+  // --- Real MP3 Weapon & Announcer Playback ---
+
+  public playWeaponShot(
+    weaponId: string,
+    category: WeaponCategory,
+    isSpray = false,
+    gainScale = 0.72
+  ): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (weaponId === 'HOLLOW_BLADE' || category === 'MELEE') {
+      this.playGunshot('MELEE');
+      return;
+    }
+
+    const spec = WEAPON_AUDIO_MAP[weaponId];
+    if (!spec) {
+      this.playGunshot(category);
+      return;
+    }
+
+    const variant = isSpray && spec.hasSpray ? 'Spray' : 'Tap';
+    const url = `/Assests/Weapon_sound/${spec.folder}/${spec.prefix}_${variant}.mp3`;
+    const cached = this.bufferCache.get(url);
+    if (cached) {
+      this.playBuffer(cached, gainScale, 0.06);
+      return;
+    }
+
+    // Begin decoding for subsequent shots and fire instant procedural transient now
+    void this.loadBuffer(url);
+    this.playGunshot(category);
+  }
+
+  public playWeaponReload(weaponId: string, gainScale = 0.75): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    if (weaponId === 'HOLLOW_BLADE') {
+      this.playReload();
+      return;
+    }
+
+    const spec = WEAPON_AUDIO_MAP[weaponId];
+    if (!spec) {
+      this.playReload();
+      return;
+    }
+
+    const url = `/Assests/Weapon_sound/${spec.folder}/${spec.prefix}_Reload.mp3`;
+    const cached = this.bufferCache.get(url);
+    if (cached) {
+      this.playBuffer(cached, gainScale, 0.02);
+      return;
+    }
+
+    void this.loadBuffer(url);
+    this.playReload();
+  }
+
+  public playAnnouncer(event: AnnouncerEvent, gainScale = 0.85): void {
+    if (!this.ctx || !this.masterGain || this.muted) return;
+    const url = `/Assests/Sound%20effects/${event}.mp3`;
+    const cached = this.bufferCache.get(url);
+    if (cached) {
+      this.playBuffer(cached, gainScale, 0);
+      return;
+    }
+
+    void this.loadBuffer(url).then((buf) => {
+      if (buf && !this.muted) {
+        this.playBuffer(buf, gainScale, 0);
+      }
+    });
+  }
+
+  // --- Weapon Synthesizers (Melee + Instant Fallback) ---
 
   public playGunshot(category: WeaponCategory): void {
     if (!this.ctx || !this.masterGain || this.muted) return;
@@ -54,7 +240,6 @@ class SoundEngine {
 
     switch (category) {
       case 'SIDEARM': {
-        // High crisp snap + quick pop
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'triangle';
@@ -64,7 +249,6 @@ class SoundEngine {
         gain.gain.setValueAtTime(0.5, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
 
-        // White noise transient
         const noise = this.createNoiseBuffer(0.06);
         const noiseNode = this.ctx.createBufferSource();
         noiseNode.buffer = noise;
@@ -88,7 +272,6 @@ class SoundEngine {
       }
 
       case 'SMG': {
-        // Rapid sharp snap
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sawtooth';
@@ -117,7 +300,6 @@ class SoundEngine {
       }
 
       case 'RIFLE': {
-        // Heavy punchy body + metal mechanical crack + reverb decay
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'triangle';
@@ -152,7 +334,6 @@ class SoundEngine {
       }
 
       case 'SNIPER': {
-        // Thunderous kinetic boom + massive sub-bass
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sine';
@@ -185,8 +366,8 @@ class SoundEngine {
         noiseNode.start(now);
         break;
       }
+
       case 'SHOTGUN': {
-        // Booming scatter blast + wide mid-low punch
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'sawtooth';
@@ -219,7 +400,6 @@ class SoundEngine {
       }
 
       case 'MACHINE_GUN': {
-        // Punchy mechanical heavy LMG thump
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
         osc.type = 'square';
@@ -251,7 +431,6 @@ class SoundEngine {
       }
 
       case 'MELEE': {
-        // Crisp metallic blade slash whoosh
         const noise = this.createNoiseBuffer(0.16);
         const noiseNode = this.ctx.createBufferSource();
         noiseNode.buffer = noise;
@@ -275,11 +454,8 @@ class SoundEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    // Click 1: Magazine release / slide eject
     this.playMechanicalClick(now, 1200, 0.04);
-    // Click 2: Fresh magazine locked into well
     this.playMechanicalClick(now + 0.45, 800, 0.05);
-    // Click 3: Bolt slide racked back
     this.playMechanicalClick(now + 0.85, 1400, 0.06);
   }
 
@@ -307,13 +483,11 @@ class SoundEngine {
     osc.type = 'sine';
 
     if (isHeadshot) {
-      // Crisp high bell ping for headshot
       osc.frequency.setValueAtTime(3200, now);
       osc.frequency.exponentialRampToValueAtTime(1600, now + 0.12);
       gain.gain.setValueAtTime(0.65, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
     } else {
-      // Punchy tactical body tick
       osc.frequency.setValueAtTime(1400, now);
       osc.frequency.exponentialRampToValueAtTime(600, now + 0.06);
       gain.gain.setValueAtTime(0.4, now);
@@ -377,7 +551,6 @@ class SoundEngine {
     const gain = this.ctx.createGain();
     osc.type = 'sine';
 
-    // Pitch rises as detonation approaches (from 900Hz up to 1800Hz)
     const freq = 900 + urgencyFraction * 900;
     osc.frequency.setValueAtTime(freq, now);
 
@@ -394,7 +567,6 @@ class SoundEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    // Heavy tactical plant lock sequence
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
@@ -414,8 +586,7 @@ class SoundEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    // Victory chime
-    const freqs = [523.25, 659.25, 783.99, 1046.5]; // C E G C
+    const freqs = [523.25, 659.25, 783.99, 1046.5];
     freqs.forEach((freq, i) => {
       if (!this.ctx || !this.masterGain) return;
       const osc = this.ctx.createOscillator();
@@ -437,7 +608,6 @@ class SoundEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    // Deep sub bass shake
     const sub = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     sub.type = 'sine';
@@ -446,7 +616,6 @@ class SoundEngine {
     subGain.gain.setValueAtTime(1.0, now);
     subGain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
 
-    // Blast wave noise
     const noise = this.createNoiseBuffer(1.4);
     const noiseNode = this.ctx.createBufferSource();
     noiseNode.buffer = noise;
@@ -578,7 +747,6 @@ class SoundEngine {
     if (!this.ctx || !this.masterGain || this.muted) return;
     const now = this.ctx.currentTime;
 
-    // Tactical two-tone clarion horn
     const osc1 = this.ctx.createOscillator();
     const osc2 = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -609,7 +777,6 @@ class SoundEngine {
     const now = this.ctx.currentTime;
 
     if (won) {
-      // Victory triumphant stinger
       [392, 523, 659].forEach((freq, idx) => {
         if (!this.ctx || !this.masterGain) return;
         const osc = this.ctx.createOscillator();
@@ -624,7 +791,6 @@ class SoundEngine {
         osc.stop(now + idx * 0.12 + 0.55);
       });
     } else {
-      // Defeat low horn
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';

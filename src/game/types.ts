@@ -870,223 +870,388 @@ export const SHIELD_REGISTRY: Record<string, ShieldDef> = {
 };
 
 export const AGENT_REGISTRY: Record<string, AgentDef> = {
-  ZEPHYR: {
-    id: 'ZEPHYR',
-    name: 'Zephyr',
-    role: 'CONTROLLER',
-    description: 'Atmospheric controller who commands dense smoke screens and vision-dampening zones.',
-    primaryColor: '#06b6d4',
-    accentColor: '#0e7490',
+  KAEL: {
+    id: 'KAEL',
+    name: 'Kael',
+    role: 'DUELIST',
+    description: 'Gravity-bending Duelist who warps into sites with Rift Surge and pulls foes into Singularity.',
+    primaryColor: '#8b5cf6',
+    accentColor: '#5b21b6',
     abilities: [
       {
-        id: 'HOLLOW_SMOKE',
-        name: 'Hollow Smoke',
+        id: 'RIFT_SURGE',
+        name: 'Rift Surge',
         keySlot: 'E',
         isUltimate: false,
         cost: 150,
         maxCharges: 2,
-        cooldownTime: 10,
-        description: 'Deploy an opaque sphere that blocks line of sight for 14 seconds.',
-        iconType: 'smoke',
+        cooldownTime: 9,
+        description: 'Directional dash with brief low-gravity hang time for aggressive entry angles.',
+        iconType: 'dash',
       },
       {
-        id: 'TOXIN_PUDDLE',
-        name: 'Toxin Puddle',
+        id: 'GRAVITY_WELL',
+        name: 'Gravity Well',
         keySlot: 'Q',
         isUltimate: false,
         cost: 200,
-        maxCharges: 1,
-        cooldownTime: 14,
-        description: 'Launch a chemical canister that creates a slowing, damaging corrosive pool.',
-        iconType: 'puddle',
+        maxCharges: 2,
+        cooldownTime: 12,
+        description: 'Pulls nearby enemies inward and slows their movement.',
+        iconType: 'gravity',
       },
       {
-        id: 'STIM_BEACON',
-        name: 'Stim Beacon',
+        id: 'PHASE_STEP',
+        name: 'Phase Step',
         keySlot: 'C',
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 18,
-        description: 'Place a combat beacon granting +25% fire rate and faster reloads.',
+        cooldownTime: 14,
+        description: 'Places a void anchor to snap back to within 10s.',
         iconType: 'beacon',
       },
       {
-        id: 'ORBITAL_BLACKOUT',
-        name: 'Orbital Blackout',
+        id: 'SINGULARITY',
+        name: 'Singularity',
         keySlot: 'X',
         isUltimate: true,
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
         ultPointsRequired: 5,
-        description: 'Cast a massive blackout field across an area, blinding and slowing foes.',
+        description: 'Localized zero-gravity vortex that lifts and damages enemies caught inside.',
         iconType: 'blackout',
       },
     ],
   },
-  BLITZ: {
-    id: 'BLITZ',
-    name: 'Blitz',
+  ZED: {
+    id: 'ZED',
+    name: 'Zed',
     role: 'DUELIST',
-    description: 'High-velocity entry fragger equipped with blinding pulse flares and burst dashes.',
+    description: 'Cyber-blade assassin with hyper-reflex dashes, recon shurikens, and lethal Blade Storm knives.',
     primaryColor: '#f97316',
     accentColor: '#c2410c',
     abilities: [
       {
-        id: 'BLIND_PULSE',
-        name: 'Blind Pulse',
+        id: 'BLINK_SLASH',
+        name: 'Blink Slash',
         keySlot: 'E',
-        isUltimate: false,
-        cost: 250,
-        maxCharges: 2,
-        cooldownTime: 10,
-        description: 'Cast an explosive flare forward that stuns and blinds nearby enemies.',
-        iconType: 'flash',
-      },
-      {
-        id: 'KINETIC_DASH',
-        name: 'Kinetic Dash',
-        keySlot: 'Q',
         isUltimate: false,
         cost: 150,
         maxCharges: 2,
-        cooldownTime: 9,
-        description: 'Instantly burst in your movement direction with rapid speed.',
+        cooldownTime: 8,
+        description: 'Fast linear dash; slicing an enemy resets weapon draw speed.',
         iconType: 'dash',
       },
       {
-        id: 'CONCUSSION_MINE',
-        name: 'Concussion Mine',
+        id: 'RICOCHET_SHURIKEN',
+        name: 'Ricochet Shuriken',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 2,
+        cooldownTime: 11,
+        description: 'Bouncing energy blade that pings nearby enemies and deals chip damage.',
+        iconType: 'recon',
+      },
+      {
+        id: 'SMOKE_VEIL',
+        name: 'Smoke Veil',
+        keySlot: 'C',
+        isUltimate: false,
+        cost: 150,
+        maxCharges: 2,
+        cooldownTime: 10,
+        description: 'Instant compact nano-smoke for entries or retreats.',
+        iconType: 'smoke',
+      },
+      {
+        id: 'BLADE_STORM',
+        name: 'Blade Storm',
+        keySlot: 'X',
+        isUltimate: true,
+        cost: 0,
+        maxCharges: 1,
+        cooldownTime: 0,
+        ultPointsRequired: 5,
+        description: 'Equips 5 accurate cyber-overdrive blades: +35% speed, +30% fire rate, heal on kill.',
+        iconType: 'overdrive',
+      },
+    ],
+  },
+  KORA: {
+    id: 'KORA',
+    name: 'Kora',
+    role: 'CONTROLLER',
+    description: 'Astral Controller commanding Nebula Domes, gravitational wells, and Cosmic Divide barriers.',
+    primaryColor: '#06b6d4',
+    accentColor: '#0e7490',
+    abilities: [
+      {
+        id: 'NEBULA_DOME',
+        name: 'Nebula Dome',
+        keySlot: 'E',
+        isUltimate: false,
+        cost: 150,
+        maxCharges: 2,
+        cooldownTime: 10,
+        description: 'Places up to 2 dense cosmic smokes across key chokepoints.',
+        iconType: 'smoke',
+      },
+      {
+        id: 'STARLIGHT_PULL',
+        name: 'Starlight Pull',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 1,
+        cooldownTime: 14,
+        description: 'Remotely activates a floor star to pull and slow enemies inward.',
+        iconType: 'gravity',
+      },
+      {
+        id: 'NOVA_BURST',
+        name: 'Nova Burst',
         keySlot: 'C',
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
         cooldownTime: 15,
-        description: 'Throw a shock charge that damages and slows enemies in its blast radius.',
-        iconType: 'mine',
+        description: 'Detonates a placed star to concuss and blind nearby enemies.',
+        iconType: 'flash',
       },
       {
-        id: 'OVERDRIVE_MATRIX',
-        name: 'Overdrive Matrix',
+        id: 'COSMIC_DIVIDE',
+        name: 'Cosmic Divide',
         keySlot: 'X',
         isUltimate: true,
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
         ultPointsRequired: 5,
-        description: 'Ignite kinetic servos for 12s: +35% speed, +30% fire rate, and heal on kill.',
-        iconType: 'overdrive',
-      },
-    ],
-  },
-  BASTION: {
-    id: 'BASTION',
-    name: 'Bastion',
-    role: 'SENTINEL',
-    description: 'Defensive engineer who holds chokepoints with solid energy barriers and sentry turrets.',
-    primaryColor: '#3b82f6',
-    accentColor: '#1d4ed8',
-    abilities: [
-      {
-        id: 'BARRIER_WALL',
-        name: 'Barrier Wall',
-        keySlot: 'E',
-        isUltimate: false,
-        cost: 350,
-        maxCharges: 1,
-        cooldownTime: 22,
-        description: 'Raise a solid physical barrier wall blocking passage and bullets.',
+        description: 'Raises a massive astral energy wall blocking bullets and splitting sites.',
         iconType: 'wall',
       },
-      {
-        id: 'STASIS_TRIPWIRE',
-        name: 'Stasis Tripwire',
-        keySlot: 'Q',
-        isUltimate: false,
-        cost: 200,
-        maxCharges: 2,
-        cooldownTime: 14,
-        description: 'Deploy a covert laser sensor that reveals and slows intruders.',
-        iconType: 'tripwire',
-      },
-      {
-        id: 'SENTINEL_TURRET',
-        name: 'Sentinel Turret',
-        keySlot: 'C',
-        isUltimate: false,
-        cost: 200,
-        maxCharges: 1,
-        cooldownTime: 22,
-        description: 'Deploy an automated sentry turret that fires bursts at spotted foes.',
-        iconType: 'turret',
-      },
-      {
-        id: 'LOCKDOWN_DOME',
-        name: 'Lockdown Dome',
-        keySlot: 'X',
-        isUltimate: true,
-        cost: 0,
-        maxCharges: 1,
-        cooldownTime: 0,
-        ultPointsRequired: 5,
-        description: 'Channel a containment dome that slows and weakens all enemies inside.',
-        iconType: 'lockdown',
-      },
     ],
   },
-  LUMEN: {
-    id: 'LUMEN',
-    name: 'Lumen',
+  SOREN: {
+    id: 'SOREN',
+    name: 'Soren',
     role: 'INITIATOR',
-    description: 'Support agent capable of recon pulses, tactical healing bursts, and battlefield resurrection.',
-    primaryColor: '#10b981',
-    accentColor: '#047857',
+    description: 'Solar Initiator who breaches entrenched defenders with Prism Beams, flares, and Zenith Strikes.',
+    primaryColor: '#eab308',
+    accentColor: '#a16207',
     abilities: [
       {
-        id: 'HEALING_BURST',
-        name: 'Healing Burst',
+        id: 'PRISM_BEAM',
+        name: 'Prism Beam',
         keySlot: 'E',
-        isUltimate: false,
-        cost: 200,
-        maxCharges: 2,
-        cooldownTime: 12,
-        description: 'Channel rejuvenating nanites to heal yourself and nearby allies for +60 HP.',
-        iconType: 'heal',
-      },
-      {
-        id: 'RECON_PULSE',
-        name: 'Recon Pulse',
-        keySlot: 'Q',
         isUltimate: false,
         cost: 250,
         maxCharges: 1,
-        cooldownTime: 16,
-        description: 'Fire a sonar pulse revealing nearby enemies on the radar.',
+        cooldownTime: 14,
+        description: 'Wall-piercing light beam that concusses and reveals enemies.',
         iconType: 'recon',
       },
       {
-        id: 'GRAVITY_ORB',
-        name: 'Gravity Orb',
+        id: 'SOLAR_FLARE',
+        name: 'Solar Flare',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 250,
+        maxCharges: 2,
+        cooldownTime: 11,
+        description: 'Controllable light orb that flashes enemies on detonation.',
+        iconType: 'flash',
+      },
+      {
+        id: 'MIRAGE_STEP',
+        name: 'Mirage Step',
         keySlot: 'C',
         isUltimate: false,
         cost: 200,
         maxCharges: 1,
-        cooldownTime: 14,
-        description: 'Launch a vortex orb that slows and damages enemies caught inside.',
-        iconType: 'gravity',
+        cooldownTime: 16,
+        description: 'Deploys a radiant hard-light stim decoy that boosts fire rate & baits fire.',
+        iconType: 'beacon',
       },
       {
-        id: 'RESURGENCE',
-        name: 'Resurgence',
+        id: 'ZENITH_STRIKE',
+        name: 'Zenith Strike',
         keySlot: 'X',
         isUltimate: true,
         cost: 0,
         maxCharges: 1,
         cooldownTime: 0,
         ultPointsRequired: 6,
-        description: 'Channel cellular resurrection to revive a fallen teammate with 100 HP.',
-        iconType: 'revive',
+        description: 'Sweeping pillar of sunlight that damages, reveals, and clears defensive angles.',
+        iconType: 'blackout',
+      },
+    ],
+  },
+  PULSE: {
+    id: 'PULSE',
+    name: 'Pulse',
+    role: 'INITIATOR',
+    description: 'Bio-electric recon specialist equipped with Arc Scanners, curving sparks, and Neural Storms.',
+    primaryColor: '#10b981',
+    accentColor: '#047857',
+    abilities: [
+      {
+        id: 'ARC_SCANNER',
+        name: 'Arc Scanner',
+        keySlot: 'E',
+        isUltimate: false,
+        cost: 250,
+        maxCharges: 1,
+        cooldownTime: 14,
+        description: 'Wall-sticking bolt emitting enemy-revealing sonar pulses across rooms.',
+        iconType: 'recon',
+      },
+      {
+        id: 'STATIC_FLASH',
+        name: 'Static Flash',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 250,
+        maxCharges: 2,
+        cooldownTime: 11,
+        description: 'Corner-curving electric spark that blinds enemies cleanly around cover.',
+        iconType: 'flash',
+      },
+      {
+        id: 'SURGE_DRONE',
+        name: 'Surge Drone',
+        keySlot: 'C',
+        isUltimate: false,
+        cost: 250,
+        maxCharges: 1,
+        cooldownTime: 16,
+        description: 'Deploys an autonomous recon crawler that shocks and reveals locked targets.',
+        iconType: 'turret',
+      },
+      {
+        id: 'NEURAL_STORM',
+        name: 'Neural Storm',
+        keySlot: 'X',
+        isUltimate: true,
+        cost: 0,
+        maxCharges: 1,
+        cooldownTime: 0,
+        ultPointsRequired: 6,
+        description: 'Wide electromagnetic wave through walls that concusses, slows, and reveals foes.',
+        iconType: 'lockdown',
+      },
+    ],
+  },
+  AEGIS: {
+    id: 'AEGIS',
+    name: 'Aegis',
+    role: 'SENTINEL',
+    description: 'Hard-light defensive Sentinel fortifying sites with Bastion Walls, Stasis Mines, and Fortress Domes.',
+    primaryColor: '#3b82f6',
+    accentColor: '#1d4ed8',
+    abilities: [
+      {
+        id: 'BASTION_WALL',
+        name: 'Bastion Wall',
+        keySlot: 'E',
+        isUltimate: false,
+        cost: 350,
+        maxCharges: 1,
+        cooldownTime: 20,
+        description: 'One-way energy barrier blocking enemy fire and passage.',
+        iconType: 'wall',
+      },
+      {
+        id: 'STASIS_MINE',
+        name: 'Stasis Mine',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 2,
+        cooldownTime: 14,
+        description: 'Concealed floor trap that tethers and reveals intruders.',
+        iconType: 'tripwire',
+      },
+      {
+        id: 'NANO_REPAIR',
+        name: 'Nano-Repair',
+        keySlot: 'C',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 2,
+        cooldownTime: 12,
+        description: 'Field beacon that regenerates health and armor for yourself and nearby allies.',
+        iconType: 'heal',
+      },
+      {
+        id: 'FORTRESS_PROTOCOL',
+        name: 'Fortress Protocol',
+        keySlot: 'X',
+        isUltimate: true,
+        cost: 0,
+        maxCharges: 1,
+        cooldownTime: 0,
+        ultPointsRequired: 5,
+        description: '8-second protective containment dome blocking pushes and regenerating squad armor.',
+        iconType: 'lockdown',
+      },
+    ],
+  },
+  ROOK: {
+    id: 'ROOK',
+    name: 'Rook',
+    role: 'SENTINEL',
+    description: 'Heavy-tech trapper securing flanks with automated Sentry Turrets, Shock Wires, and Lockdown Grids.',
+    primaryColor: '#ef4444',
+    accentColor: '#b91c1c',
+    abilities: [
+      {
+        id: 'SENTRY_TURRET',
+        name: 'Sentry Turret',
+        keySlot: 'E',
+        isUltimate: false,
+        cost: 250,
+        maxCharges: 1,
+        cooldownTime: 20,
+        description: '180-degree automated turret for flank alerts and sustained chip damage.',
+        iconType: 'turret',
+      },
+      {
+        id: 'SHOCK_WIRE',
+        name: 'Shock Wire',
+        keySlot: 'Q',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 2,
+        cooldownTime: 13,
+        description: 'Laser tripwire field that tethers, reveals, and shocks enemies.',
+        iconType: 'tripwire',
+      },
+      {
+        id: 'BLAST_PACK',
+        name: 'Blast Pack',
+        keySlot: 'C',
+        isUltimate: false,
+        cost: 200,
+        maxCharges: 2,
+        cooldownTime: 14,
+        description: 'Remote breach charge that knocks enemies back, damages, and breaks utility.',
+        iconType: 'mine',
+      },
+      {
+        id: 'LOCKDOWN_GRID',
+        name: 'Lockdown Grid',
+        keySlot: 'X',
+        isUltimate: true,
+        cost: 0,
+        maxCharges: 1,
+        cooldownTime: 0,
+        ultPointsRequired: 5,
+        description: 'Heavy beacon that slows and detains all enemies caught inside its perimeter.',
+        iconType: 'lockdown',
       },
     ],
   },
@@ -1134,6 +1299,7 @@ export interface CustomRoomState {
   name: string;
   hostUsername: string;
   mode: MatchMode;
+  mapId?: string;
   botDifficulty: BotDifficulty;
   fillBots: boolean;
   isPublic: boolean;
@@ -1155,4 +1321,151 @@ export interface RemotePlayerSync {
   hp: number;
   armor: number;
   alive: boolean;
+}
+
+export interface MapDef {
+  id: string;
+  name: string;
+  sector: string;
+  tagline: string;
+  description: string;
+  modelUrl: string | 'procedural';
+  scaleXZ: number;
+  scaleY: number;
+  halfExtent: number;
+  skyColor: number;
+  fogColor: number;
+  tags: string[];
+  accentColor: string;
+  spawnAttackers: { x: number; y: number; z: number };
+  spawnDefenders: { x: number; y: number; z: number };
+  siteA: { x: number; y: number; z: number; radius: number; name: string };
+  siteB: { x: number; y: number; z: number; radius: number; name: string };
+  barrierAttZ: number;
+  barrierDefZ: number;
+}
+
+export const MAP_REGISTRY: Record<string, MapDef> = {
+  WAREHOUSE: {
+    id: 'WAREHOUSE',
+    name: 'Warehouse',
+    sector: 'SECTOR 04 // INDUSTRIAL CARGO',
+    tagline: 'Cargo bay lanes · Skylight mid',
+    description: 'High-ceiling freight facility with dense container cover, west Site A plaza, and east Site B loading depot.',
+    modelUrl: '/models/Map/Warehouse.glb',
+    scaleXZ: 1.85,
+    scaleY: 1.35,
+    halfExtent: 32,
+    skyColor: 0x0d1526,
+    fogColor: 0x10192d,
+    tags: ['5v5 Standard', 'Warehouse GLB', 'A & B Sites'],
+    accentColor: '#FF4655',
+    spawnAttackers: { x: -13, y: 0, z: -18 },
+    spawnDefenders: { x: 2, y: 0, z: 16.5 },
+    siteA: { x: -19, y: 0, z: 1.5, radius: 4.5, name: 'Site A' },
+    siteB: { x: 11, y: 0, z: -4.0, radius: 4.2, name: 'Site B' },
+    barrierAttZ: -15.5,
+    barrierDefZ: 12.5,
+  },
+  COURTYARD: {
+    id: 'COURTYARD',
+    name: 'Courtyard',
+    sector: 'SECTOR 02 // VANGUARD CITADEL',
+    tagline: 'Open mid duel · Dual citadel sites',
+    description: 'Symmetric open-air tactical plaza with twin flanked avenues, elevated mid sightlines, and stone perimeter forts.',
+    modelUrl: '/api/maps/courtyard.glb',
+    scaleXZ: 1.55,
+    scaleY: 1.25,
+    halfExtent: 38,
+    skyColor: 0x16263d,
+    fogColor: 0x1a2c47,
+    tags: ['5v5 Standard', 'Classic Courtyard', 'Mid Control'],
+    accentColor: '#17E5B8',
+    spawnAttackers: { x: 0, y: 0, z: -30 },
+    spawnDefenders: { x: 0, y: 0, z: 30 },
+    siteA: { x: -20, y: 0, z: 4, radius: 4.6, name: 'Site A' },
+    siteB: { x: 20, y: 0, z: 4, radius: 4.6, name: 'Site B' },
+    barrierAttZ: -22,
+    barrierDefZ: 22,
+  },
+  PROVING_GRID: {
+    id: 'PROVING_GRID',
+    name: 'Proving Grid',
+    sector: 'SECTOR 01 // TACTICAL SANDBOX',
+    tagline: 'Instant load · High-FPS competitive grid',
+    description: 'Zero-download crisp architectural complex engineered for rapid tactical rotations, clear sightlines, and locked 60FPS combat.',
+    modelUrl: 'procedural',
+    scaleXZ: 1.0,
+    scaleY: 1.0,
+    halfExtent: 34,
+    skyColor: 0x15243b,
+    fogColor: 0x1a2c47,
+    tags: ['Instant Load', 'Symmetrical', 'Low-Spec Friendly'],
+    accentColor: '#fbbf24',
+    spawnAttackers: { x: 0, y: 0, z: -28 },
+    spawnDefenders: { x: 0, y: 0, z: 28 },
+    siteA: { x: -18, y: 0, z: 2, radius: 4.5, name: 'Site A' },
+    siteB: { x: 18, y: 0, z: 2, radius: 4.5, name: 'Site B' },
+    barrierAttZ: -20,
+    barrierDefZ: 20,
+  },
+};
+
+export const DEFAULT_MAP_ID = 'WAREHOUSE';
+
+export function getAvailableMaps(customFilenames: string[] = []): MapDef[] {
+  const base = [MAP_REGISTRY.WAREHOUSE, MAP_REGISTRY.COURTYARD, MAP_REGISTRY.PROVING_GRID];
+  const extras: MapDef[] = [];
+  for (const file of customFilenames) {
+    const clean = file.trim();
+    if (!clean) continue;
+    if (clean.toLowerCase() === 'warehouse.glb') continue;
+    const baseName = clean.replace(/\.(glb|gltf)$/i, '').replace(/[_-]+/g, ' ');
+    const id = `CUSTOM_${clean.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+    extras.push({
+      ...MAP_REGISTRY.WAREHOUSE,
+      id,
+      name: baseName.toUpperCase(),
+      sector: 'CUSTOM ARENA // LOCAL GLB',
+      tagline: `Loaded from /models/Map/${clean}`,
+      description: `Custom 3D tactical arena model (${clean}) with automated structural collision slicing.`,
+      modelUrl: `/models/Map/${clean}`,
+      tags: ['Custom GLB', 'Auto-Collider'],
+      accentColor: '#38bdf8',
+    });
+  }
+  return [...base, ...extras];
+}
+
+// === REAL-TIME TEXT CHAT & WEBRTC VOICE CHAT TYPES ===
+
+export type ChatChannel = 'ROOM' | 'TEAM' | 'GLOBAL';
+
+export interface ChatMessage {
+  id: string;
+  channel: ChatChannel;
+  fromUsername: string;
+  team?: TeamSide;
+  text: string;
+  timestamp: number;
+}
+
+export interface VoicePeerState {
+  username: string;
+  active: boolean;
+  muted: boolean;
+  speaking: boolean;
+}
+
+export interface VoiceSignalPayload {
+  kind: 'offer' | 'answer' | 'ice';
+  fromUsername: string;
+  targetUsername: string;
+  sdp?: { type: string; sdp?: string };
+  candidate?: {
+    candidate?: string;
+    sdpMid?: string | null;
+    sdpMLineIndex?: number | null;
+    usernameFragment?: string | null;
+  };
 }

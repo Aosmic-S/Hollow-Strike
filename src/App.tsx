@@ -10,13 +10,17 @@ import { isMobileDevice } from './game/device';
 import { soundEngine } from './game/audio';
 import {
   loadProfile,
+  loadSavedMapId,
   loadSavedSettings,
   recordMatchToProfile,
   resetProfileData,
   saveProfile,
+  saveSelectedMapId,
   saveSettingsToStorage,
 } from './game/profileStore';
+import { setActiveMap } from './game/mapData';
 import { multiplayerClient } from './game/multiplayerClient';
+import { voiceManager } from './game/voiceManager';
 import {
   AbilitySlotState,
   AGENT_REGISTRY,
@@ -88,23 +92,36 @@ export default function App() {
     return params.get('autostart') !== '1';
   });
   const [appState, setAppState] = useState<AppState>('title');
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(() => profile.favoriteAgentId || 'ZEPHYR');
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(() => profile.favoriteAgentId || 'KAEL');
+  const [selectedMapId, setSelectedMapId] = useState<string>(() => {
+    const saved = loadSavedMapId();
+    setActiveMap(saved);
+    return saved;
+  });
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('MEDIUM');
   const [lastMatchMode, setLastMatchMode] = useState<MatchMode>('CUSTOM');
   const [lastAllyBotIds, setLastAllyBotIds] = useState<string[]>([]);
   const [activeRoom, setActiveRoom] = useState<CustomRoomState | null>(null);
+  const pendingLaunchRef = useRef<{
+    mode: MatchMode;
+    customRoom: CustomRoomState | null;
+    allyBotAgentIds: string[];
+    mapId: string;
+  } | null>(null);
   const [prematchRoster, setPrematchRoster] = useState<{
     mode: MatchMode;
+    mapId: string;
     playerTeam: TeamSide;
     defenders: PreMatchPlayer[];
     attackers: PreMatchPlayer[];
   } | null>(null);
 
-  // Modals
+  // Modals & Comms Focus
   const [showBuyMenu, setShowBuyMenu] = useState<boolean>(false);
   const [showMapModal, setShowMapModal] = useState<boolean>(false);
   const [showScoreboard, setShowScoreboard] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [isChatFocused, setIsChatFocused] = useState<boolean>(false);
 
   // Live HUD States
   const [hp, setHp] = useState<number>(100);
@@ -164,14 +181,26 @@ export default function App() {
     }
   };
 
+  const handleSelectMap = (nextMapId: string) => {
+    setSelectedMapId(nextMapId);
+    setActiveMap(nextMapId);
+    saveSelectedMapId(nextMapId);
+  };
+
   useEffect(() => {
     document.body.dataset.state = appState;
   }, [appState]);
 
   useEffect(() => {
-    const blocked = appState !== 'playing' || showBuyMenu || showMapModal || showScoreboard || showSettings;
+    const blocked =
+      appState !== 'playing' ||
+      showBuyMenu ||
+      showMapModal ||
+      showScoreboard ||
+      showSettings ||
+      isChatFocused;
     engineRef.current?.setUiBlocking(blocked);
-  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings]);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, isChatFocused]);
 
   // Check ?autostart=1 on mount + clean up engine
   useEffect(() => {
@@ -185,6 +214,7 @@ export default function App() {
       if (damageFlashTimeoutRef.current) clearTimeout(damageFlashTimeoutRef.current);
       engineRef.current?.dispose();
       engineRef.current = null;
+      voiceManager.leaveVoice();
     };
   }, []);
 
@@ -232,24 +262,102 @@ export default function App() {
     damageFlashTimeoutRef.current = setTimeout(() => setDamageFlash(false), 200);
   };
 
-  const startGame = (
-    mode: MatchMode = lastMatchMode,
-    customRoom: CustomRoomState | null = null,
-    allyBotAgentIds: string[] = lastAllyBotIds,
-    skipPrematch = false
-  ) => {
-    soundEngine.init();
-    setLastMatchMode(mode);
-    setLastAllyBotIds(allyBotAgentIds);
-    setActiveRoom(customRoom);
-    setShowBuyMenu(false);
-    setShowMapModal(false);
-    setShowScoreboard(false);
-    setShowSettings(false);
-    setIsBlinded(false);
-    setDamageFlash(false);
-    setSpectateState(null);
+  const buildPreMatchRoster = (
+    mode: MatchMode,
+    customRoom: CustomRoomState | null,
+    allyBotAgentIds: string[],
+    mapId: string
+  ): {
+    mode: MatchMode;
+    mapId: string;
+    playerTeam: TeamSide;
+    defenders: PreMatchPlayer[];
+    attackers: PreMatchPlayer[];
+  } => {
+    const myUsername = multiplayerClient.getCachedUsername();
+    const myMember = customRoom?.members.find(
+      (m) => m.username.toLowerCase() === myUsername.toLowerCase()
+    );
+    const playerTeam: TeamSide = myMember?.team ?? 'ATTACKERS';
+    const oppTeam: TeamSide = playerTeam === 'ATTACKERS' ? 'DEFENDERS' : 'ATTACKERS';
+    const agentKeys = Object.keys(AGENT_REGISTRY);
+    const roster: PreMatchPlayer[] = [
+      {
+        id: 'player_0',
+        name: multiplayerClient.usernameClaimed
+          ? `@${multiplayerClient.username}`
+          : profile.callsign || 'Operative',
+        agentId: selectedAgentId,
+        team: playerTeam,
+        isLocalPlayer: true,
+        isHuman: true,
+      },
+    ];
 
+    const remoteMembers = (customRoom?.members ?? []).filter(
+      (m) => m.username.toLowerCase() !== myUsername.toLowerCase()
+    );
+    for (const remote of remoteMembers) {
+      roster.push({
+        id: `remote_${remote.username}`,
+        name: `@${remote.username}`,
+        agentId: remote.agentId || 'KAEL',
+        team: remote.team,
+        isLocalPlayer: false,
+        isHuman: true,
+      });
+    }
+
+    const pushBot = (team: TeamSide, agentKey: string, idx: number, isAlly: boolean) => {
+      const ag = AGENT_REGISTRY[agentKey] || AGENT_REGISTRY.KAEL;
+      roster.push({
+        id: `${isAlly ? 'ally' : 'opp'}_${idx + 1}`,
+        name: `${isAlly ? 'Ally' : 'Foe'} ${ag.name}`,
+        agentId: ag.id,
+        team,
+        isLocalPlayer: false,
+        isHuman: false,
+      });
+    };
+
+    if (customRoom) {
+      if (customRoom.fillBots) {
+        const allyCount = roster.filter((r) => r.team === playerTeam).length;
+        const oppCount = roster.filter((r) => r.team === oppTeam).length;
+        for (let i = 0; i < Math.max(0, 5 - allyCount); i++) {
+          pushBot(playerTeam, agentKeys[(i + 1) % agentKeys.length], i, true);
+        }
+        for (let i = 0; i < Math.max(0, 5 - oppCount); i++) {
+          pushBot(oppTeam, agentKeys[(i + 2) % agentKeys.length], i, false);
+        }
+      }
+    } else {
+      if (allyBotAgentIds.length > 0 && mode !== 'CUSTOM') {
+        allyBotAgentIds.slice(0, 4).forEach((agId, i) => pushBot(playerTeam, agId, i, true));
+      }
+      if (mode !== 'CUSTOM') {
+        for (let i = 0; i < 5; i++) {
+          pushBot(oppTeam, agentKeys[(i + 2) % agentKeys.length], i, false);
+        }
+      }
+    }
+
+    return {
+      mode,
+      mapId,
+      playerTeam,
+      defenders: roster.filter((p) => p.team === 'DEFENDERS'),
+      attackers: roster.filter((p) => p.team === 'ATTACKERS'),
+    };
+  };
+
+  const mountAndStartEngine = (
+    mode: MatchMode,
+    customRoom: CustomRoomState | null,
+    allyBotAgentIds: string[],
+    requestLock = false,
+    mapId = selectedMapId
+  ) => {
     if (canvasMountRef.current && !engineRef.current) {
       engineRef.current = new GameEngine(
         canvasMountRef.current,
@@ -320,52 +428,75 @@ export default function App() {
         },
         mode,
         customRoom,
-        allyBotAgentIds
+        allyBotAgentIds,
+        mapId
       );
     }
 
-    if (skipPrematch || !engineRef.current) {
-      setPrematchRoster(null);
-      setAppState('playing');
-      engineRef.current?.setPaused(false);
+    setPrematchRoster(null);
+    setAppState('playing');
+    engineRef.current?.setPaused(false);
+    if (requestLock && !isMobile) {
+      engineRef.current?.input.requestPointerLock();
+    }
+  };
+
+  const startGame = (
+    mode: MatchMode = lastMatchMode,
+    customRoom: CustomRoomState | null = null,
+    allyBotAgentIds: string[] = lastAllyBotIds,
+    skipPrematch = false
+  ) => {
+    soundEngine.init();
+    const effectiveMapId = customRoom?.mapId || selectedMapId;
+    setActiveMap(effectiveMapId);
+    setLastMatchMode(mode);
+    setLastAllyBotIds(allyBotAgentIds);
+    setActiveRoom(customRoom);
+    setShowBuyMenu(false);
+    setShowMapModal(false);
+    setShowScoreboard(false);
+    setShowSettings(false);
+    setIsChatFocused(false);
+    setIsBlinded(false);
+    setDamageFlash(false);
+    setSpectateState(null);
+    pendingLaunchRef.current = { mode, customRoom, allyBotAgentIds, mapId: effectiveMapId };
+
+    if (skipPrematch) {
+      mountAndStartEngine(mode, customRoom, allyBotAgentIds, false, effectiveMapId);
     } else {
-      engineRef.current.setPaused(true);
-      const roster: PreMatchPlayer[] = engineRef.current.combatants.map((c) => ({
-        id: c.id,
-        name:
-          c.isHuman && c.id === 'player'
-            ? multiplayerClient.usernameClaimed
-              ? `@${multiplayerClient.username}`
-              : profile.callsign || 'Operative'
-            : c.name,
-        agentId: c.agentId,
-        team: c.team,
-        isLocalPlayer: c.id === 'player',
-        isHuman: c.isHuman,
-      }));
-      setPrematchRoster({
-        mode,
-        playerTeam: engineRef.current.playerTeam,
-        defenders: roster.filter((p) => p.team === 'DEFENDERS'),
-        attackers: roster.filter((p) => p.team === 'ATTACKERS'),
-      });
+      setPrematchRoster(buildPreMatchRoster(mode, customRoom, allyBotAgentIds, effectiveMapId));
       setAppState('prematch');
     }
   };
 
   const handleFinishPreMatch = (fromUserClick = false) => {
-    setAppState((prev) => (prev === 'prematch' ? 'playing' : prev));
-    engineRef.current?.setPaused(false);
-    if (fromUserClick && !isMobile) {
-      engineRef.current?.input.requestPointerLock();
-    }
+    if (appState !== 'prematch') return;
+    const pending = pendingLaunchRef.current ?? {
+      mode: lastMatchMode,
+      customRoom: activeRoom,
+      allyBotAgentIds: lastAllyBotIds,
+      mapId: selectedMapId,
+    };
+    pendingLaunchRef.current = null;
+    mountAndStartEngine(pending.mode, pending.customRoom, pending.allyBotAgentIds, fromUserClick, pending.mapId);
   };
 
   // Keyboard shortcut listener honoring custom KeyBindings
   useEffect(() => {
     const kb = settings.keyBindings;
+    const isTypingTarget = () => {
+      if (isChatFocused) return true;
+      const activeEl = document.activeElement;
+      if (!activeEl) return false;
+      const tag = activeEl.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (appState !== 'playing' || document.body.dataset.rebinding === '1') return;
+      if (isTypingTarget()) return;
 
       if (e.code === kb.buyMenu) {
         setShowBuyMenu((prev) => !prev);
@@ -391,6 +522,7 @@ export default function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isTypingTarget()) return;
       if (e.code === kb.scoreboard) {
         setShowScoreboard(false);
       }
@@ -402,7 +534,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, settings.keyBindings]);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, isChatFocused, settings.keyBindings]);
 
   const handleOpenInGameSettings = () => {
     setShowSettings(true);
@@ -437,9 +569,13 @@ export default function App() {
     setShowMapModal(false);
     setShowScoreboard(false);
     setShowSettings(false);
+    setIsChatFocused(false);
     setIsBlinded(false);
     setDamageFlash(false);
     setSpectateState(null);
+    if (!multiplayerClient.currentRoom) {
+      voiceManager.leaveVoice();
+    }
   };
 
   const handlePlayAgain = () => {
@@ -469,7 +605,7 @@ export default function App() {
     }
   };
 
-  const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.ZEPHYR;
+  const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.KAEL;
   const playerCredits = playerStats[0]?.credits ?? 800;
   const hasPrimaryWeapon = Boolean(engineRef.current?.playerCombatant?.primaryWeapon);
 
@@ -489,6 +625,8 @@ export default function App() {
           <LobbyScreen
             selectedAgentId={selectedAgentId}
             onSelectAgent={setSelectedAgentId}
+            selectedMapId={selectedMapId}
+            onSelectMap={handleSelectMap}
             difficulty={botDifficulty}
             onSelectDifficulty={(diff) => {
               setBotDifficulty(diff);
@@ -508,6 +646,7 @@ export default function App() {
       {appState === 'prematch' && prematchRoster && (
         <PreMatchScreen
           mode={prematchRoster.mode}
+          mapId={prematchRoster.mapId}
           playerTeam={prematchRoster.playerTeam}
           defenders={prematchRoster.defenders}
           attackers={prematchRoster.attackers}
@@ -572,6 +711,7 @@ export default function App() {
             onSpectatePrev={() => engineRef.current?.cycleSpectateTarget(-1)}
             onSpectateNext={() => engineRef.current?.cycleSpectateTarget(1)}
             onToggleSpectateMode={() => engineRef.current?.toggleSpectateMode()}
+            onChatFocusChange={setIsChatFocused}
           />
 
           {/* Mobile Virtual Controls */}

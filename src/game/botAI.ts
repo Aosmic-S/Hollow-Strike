@@ -14,6 +14,7 @@ import {
   isPointWalkable,
   BOMB_SITE_A,
   BOMB_SITE_B,
+  raycastMapAABBs,
 } from './mapData';
 import { AgentMeshPackage } from './agentModels';
 import { AbilityManager } from './abilities';
@@ -29,7 +30,6 @@ const _aimDir = new THREE.Vector3();
 const _losOrigin = new THREE.Vector3();
 const _losTarget = new THREE.Vector3();
 const _losDir = new THREE.Vector3();
-const _losRaycaster = new THREE.Raycaster();
 
 function dampAngle(current: number, target: number, lambda: number, dt: number): number {
   let diff = ((target - current + Math.PI) % (Math.PI * 2)) - Math.PI;
@@ -165,29 +165,34 @@ export class BotController {
 
     if (isAttacker) {
       if (!spikePlanted) {
-        // Coordinated squad execute: carrier + 2 bots push main site; 1-2 lurk mid/opposite connector
+        // Coordinated squad execute: carrier + core push main site; 1-2 flank mid/opposite lane
         const primarySiteNode = coordinatedTargetSite === 'A' ? 'site_a_plant' : 'site_b_plant';
         if (this.combatant.hasSpike || this.assignedRoleIndex % 3 !== 2) {
           targetNodeId = primarySiteNode;
         } else {
-          targetNodeId = Math.random() < 0.55 ? 'mid_north' : coordinatedTargetSite === 'A' ? 'b_connector' : 'a_connector';
+          targetNodeId =
+            Math.random() < 0.55
+              ? 'mid_center'
+              : coordinatedTargetSite === 'A'
+                ? 'b_south_entry'
+                : 'a_south_link';
         }
       } else {
-        // Post-plant defense spread across backsite & connector crossfires
+        // Post-plant defense spread across site entries & crossfire links
         const mod = this.assignedRoleIndex % 2;
         if (plantedSite === 'A') {
-          targetNodeId = mod === 0 ? 'site_a_back' : 'a_connector';
+          targetNodeId = mod === 0 ? 'a_south_link' : 'a_lane_entry';
         } else {
-          targetNodeId = mod === 0 ? 'site_b_back' : 'b_connector';
+          targetNodeId = mod === 0 ? 'b_south_entry' : 'b_east_bend';
         }
       }
     } else {
       if (!spikePlanted) {
         // Balanced defensive setup: 2 A, 2 B, 1 Mid/Connector flex
         const slot = this.assignedRoleIndex % 5;
-        if (slot === 0 || slot === 1) targetNodeId = slot === 0 ? 'site_a_plant' : 'a_long_corner';
-        else if (slot === 2 || slot === 3) targetNodeId = slot === 2 ? 'site_b_plant' : 'b_long_corner';
-        else targetNodeId = Math.random() < 0.5 ? 'mid_north' : 'b_connector';
+        if (slot === 0 || slot === 1) targetNodeId = slot === 0 ? 'site_a_plant' : 'a_lane_entry';
+        else if (slot === 2 || slot === 3) targetNodeId = slot === 2 ? 'site_b_plant' : 'b_east_bend';
+        else targetNodeId = Math.random() < 0.5 ? 'mid_center' : 'def_north_link';
       } else {
         // Rapid coordinated retake
         targetNodeId = plantedSite === 'A' ? 'site_a_plant' : 'site_b_plant';
@@ -314,7 +319,7 @@ export class BotController {
     this.combatant.modelPackage.root.updateMatrixWorld(true);
   }
 
-  private hasLineOfSight(target: BotCombatant, worldColliders: THREE.Mesh[]): boolean {
+  private hasLineOfSight(target: BotCombatant, _worldColliders?: THREE.Mesh[]): boolean {
     _losOrigin.set(this.combatant.position.x, this.combatant.position.y + 1.45, this.combatant.position.z);
     _losTarget.set(target.position.x, target.position.y + 1.25, target.position.z);
     _losDir.subVectors(_losTarget, _losOrigin);
@@ -322,11 +327,17 @@ export class BotController {
     if (dist < 0.3) return true;
     _losDir.divideScalar(dist);
 
-    _losRaycaster.layers.enable(0);
-    _losRaycaster.set(_losOrigin, _losDir);
-    _losRaycaster.far = dist - 0.25;
-    const wallHits = _losRaycaster.intersectObjects(worldColliders, false);
-    return wallHits.length === 0;
+    const wallHit = raycastMapAABBs(
+      _losOrigin.x,
+      _losOrigin.y,
+      _losOrigin.z,
+      _losDir.x,
+      _losDir.y,
+      _losDir.z,
+      dist - 0.25,
+      false
+    );
+    return wallHit === null;
   }
 
   private scanForEnemies(
@@ -397,14 +408,7 @@ export class BotController {
     const nextX = this.combatant.position.x + dx;
     const nextZ = this.combatant.position.z + dz;
 
-    const blockedByBarrier = (tx: number, tz: number) => {
-      for (const b of abilityMgr.barriers) {
-        if (Math.abs(tx - b.position.x) < b.width * 0.55 && Math.abs(tz - b.position.z) < 0.8) {
-          return true;
-        }
-      }
-      return false;
-    };
+    const blockedByBarrier = (tx: number, tz: number) => abilityMgr.isBlockedByBarrier(tx, tz, 0.45);
 
     const col = checkCollision(nextX, nextZ, 0.45);
     if (!col.collided && !blockedByBarrier(nextX, nextZ)) {
@@ -573,44 +577,37 @@ export class BotController {
       return;
     }
 
-    // Smart multi-agent tactical abilities
+    // Smart 7-agent tactical abilities
     if (this.abilityCooldown <= 0 && this.difficulty !== 'EASY') {
       this.abilityCooldown = this.difficulty === 'HARD' ? 9.5 : 13.5;
-      if (this.combatant.agentId === 'ZEPHYR') {
+      const agId = this.combatant.agentId;
+      if (agId === 'KAEL') {
+        if (flatDist < 20) {
+          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 3.8, 5.5, this.combatant.team);
+        }
+        this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.2, dirX * this.strafeSign * 2.2, abilityMgr);
+      } else if (agId === 'ZED') {
+        if (lowHp) {
+          abilityMgr.deploySmoke(
+            this.combatant.position.x + dirX * Math.min(flatDist * 0.4, 6),
+            0,
+            this.combatant.position.z + dirZ * Math.min(flatDist * 0.4, 6)
+          );
+        } else {
+          this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.4, dirX * this.strafeSign * 2.4, abilityMgr);
+        }
+      } else if (agId === 'KORA') {
         if (lowHp) {
           abilityMgr.deploySmoke(
             this.combatant.position.x + dirX * Math.min(flatDist * 0.45, 7),
             0,
             this.combatant.position.z + dirZ * Math.min(flatDist * 0.45, 7)
           );
-        } else if (flatDist < 18) {
-          abilityMgr.deployZone('TOXIN', target.position.x, target.position.z, 3.6, 6.0, this.combatant.team);
+        } else if (flatDist < 20) {
+          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 4.0, 5.5, this.combatant.team);
         }
-      } else if (this.combatant.agentId === 'LUMEN') {
-        if (this.combatant.hp < 70) {
-          this.combatant.hp = Math.min(100, this.combatant.hp + 45);
-          soundEnginePlaySafe(abilityMgr, this.combatant, allCombatants);
-        } else {
-          abilityMgr.triggerReconPulse(this.combatant.position.x, 0, this.combatant.position.z, this.combatant.team, allCombatants);
-        }
-      } else if (this.combatant.agentId === 'BASTION') {
-        if (lowHp) {
-          abilityMgr.deployBarrier(
-            this.combatant.position.x + dirX * 2.1,
-            0,
-            this.combatant.position.z + dirZ * 2.1,
-            this.combatant.yaw
-          );
-        } else if (flatDist < 24) {
-          abilityMgr.deployTurret(
-            this.combatant.position.x + dirX * 1.8,
-            this.combatant.position.z + dirZ * 1.8,
-            this.combatant.yaw,
-            this.combatant.team
-          );
-        }
-      } else if (this.combatant.agentId === 'BLITZ' && flatDist < 22) {
-        if (Math.random() < 0.5) {
+      } else if (agId === 'SOREN' || agId === 'PULSE') {
+        if (flatDist < 22 && Math.random() < 0.55) {
           abilityMgr.throwFlashOrb(
             this.combatant.position.x,
             this.combatant.position.y + 1.4,
@@ -618,8 +615,36 @@ export class BotController {
             _toEnemy.clone().normalize(),
             this.combatant.team
           );
+        } else {
+          abilityMgr.triggerReconPulse(
+            this.combatant.position.x,
+            0,
+            this.combatant.position.z,
+            this.combatant.team,
+            allCombatants
+          );
         }
-        this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.5, dirX * this.strafeSign * 2.5, abilityMgr);
+      } else if (agId === 'AEGIS') {
+        if (lowHp) {
+          abilityMgr.deployBarrier(
+            this.combatant.position.x + dirX * 2.1,
+            0,
+            this.combatant.position.z + dirZ * 2.1,
+            this.combatant.yaw
+          );
+        } else {
+          this.combatant.armor = Math.min(50, this.combatant.armor + 25);
+          soundEnginePlaySafe(abilityMgr, this.combatant, allCombatants);
+        }
+      } else if (agId === 'ROOK') {
+        if (flatDist < 24) {
+          abilityMgr.deployTurret(
+            this.combatant.position.x + dirX * 1.8,
+            this.combatant.position.z + dirZ * 1.8,
+            this.combatant.yaw,
+            this.combatant.team
+          );
+        }
       }
     }
 

@@ -22,11 +22,16 @@ import {
   X,
 } from 'lucide-react';
 import { multiplayerClient } from '../../game/multiplayerClient';
-import { AGENT_REGISTRY, BotDifficulty, MatchMode, OnlinePresenceStatus } from '../../game/types';
+import { resolveMapDef } from '../../game/mapData';
+import { AGENT_REGISTRY, BotDifficulty, MapDef, MatchMode, OnlinePresenceStatus } from '../../game/types';
+import { TacticalComms } from '../TacticalComms';
 
 interface MultiplayerDrawerProps {
   selectedAgentId: string;
+  selectedMapId: string;
+  availableMaps: MapDef[];
   defaultDifficulty: BotDifficulty;
+  onSelectMap: (mapId: string) => void;
   onClose: () => void;
 }
 
@@ -41,7 +46,10 @@ const STATUS_DOT: Record<OnlinePresenceStatus, string> = {
 
 export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
   selectedAgentId,
+  selectedMapId,
+  availableMaps,
   defaultDifficulty,
+  onSelectMap,
   onClose,
 }) => {
   const [, setTick] = useState(0);
@@ -50,6 +58,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
   const [friendInput, setFriendInput] = useState<string>('');
   const [roomCodeInput, setRoomCodeInput] = useState<string>('');
   const [createMode, setCreateMode] = useState<MatchMode>('CUSTOM');
+  const [createMapId, setCreateMapId] = useState<string>(selectedMapId);
   const [createFillBots, setCreateFillBots] = useState<boolean>(false);
   const [createPublic, setCreatePublic] = useState<boolean>(true);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
@@ -287,12 +296,31 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                     </button>
                   </div>
                   <div className="font-mono text-[11px] text-[#8B978F] mt-0.5">
-                    Host: @{room.hostUsername} · Mode: {room.mode} · AI Fill: {room.fillBots ? '5v5 ON' : 'HUMANS ONLY'} ·{' '}
+                    Host: @{room.hostUsername} · Map: <span className="text-[#ECE8E1] font-bold">{resolveMapDef(room.mapId).name}</span> · Mode: {room.mode} · AI Fill: {room.fillBots ? '5v5 ON' : 'HUMANS ONLY'} ·{' '}
                     {room.isPublic ? 'PUBLIC' : 'PRIVATE'}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {isHost && (
+                    <select
+                      aria-label="Room Map"
+                      data-testid="mp-active-room-map-select"
+                      value={room.mapId || 'WAREHOUSE'}
+                      onChange={(e) => {
+                        onSelectMap(e.target.value);
+                        multiplayerClient.updateRoomConfig({ mapId: e.target.value });
+                      }}
+                      className="border border-[#ECE8E1]/20 bg-[#18232E] px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase text-[#ECE8E1] focus:border-[#17E5B8] focus:outline-none cursor-pointer"
+                    >
+                      {availableMaps.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          MAP: {m.name.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
                   {isHost && (
                     <button
                       type="button"
@@ -372,6 +400,9 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                 ))}
               </div>
 
+              {/* Squad Text & WebRTC Voice Chat */}
+              <TacticalComms variant="embedded" />
+
               {/* Invite Online Friends Strip + Launch */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#ECE8E1]/10 pt-3">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -442,6 +473,33 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                   ))}
                 </div>
 
+                {/* Map Picker Pills for Room Creation */}
+                <div className="space-y-1">
+                  <div className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#8B978F]">
+                    ARENA MAP
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 font-mono text-[10px]">
+                    {availableMaps.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        data-testid={`mp-create-map-${m.id}`}
+                        onClick={() => {
+                          setCreateMapId(m.id);
+                          onSelectMap(m.id);
+                        }}
+                        className={`border px-2.5 py-1 font-bold uppercase cursor-pointer transition ${
+                          createMapId === m.id
+                            ? 'border-[#17E5B8] bg-[#17E5B8]/18 text-[#17E5B8]'
+                            : 'border-[#ECE8E1]/15 bg-[#18232E] text-[#8B978F] hover:text-[#ECE8E1]'
+                        }`}
+                      >
+                        {m.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
                   <button
                     type="button"
@@ -469,6 +527,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                     onClick={() =>
                       multiplayerClient.createRoom({
                         mode: createMode,
+                        mapId: createMapId,
                         botDifficulty: defaultDifficulty,
                         fillBots: createFillBots,
                         isPublic: createPublic,
@@ -482,7 +541,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => multiplayerClient.quickMatch('CUSTOM', defaultDifficulty)}
+                    onClick={() => multiplayerClient.quickMatch('CUSTOM', defaultDifficulty, createMapId)}
                     className="flex items-center justify-center gap-1.5 border border-[#17E5B8]/60 bg-[#17E5B8]/15 py-2.5 font-display text-xs font-extrabold uppercase tracking-wider text-[#17E5B8] hover:bg-[#17E5B8]/25 cursor-pointer clip-val-card"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -531,7 +590,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                           <div>
                             <div className="font-bold text-[#ECE8E1]">{r.name}</div>
                             <div className="text-[10px] text-[#8B978F]">
-                              Host @{r.hostUsername} · {r.mode} · {r.memberCount}/10 Players
+                              Host @{r.hostUsername} · {resolveMapDef(r.mapId).name} · {r.mode} · {r.memberCount}/10 Players
                             </div>
                           </div>
                           <button

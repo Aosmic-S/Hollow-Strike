@@ -19,7 +19,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
 }) => {
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-[#0F1923]/88 backdrop-blur-sm p-2 sm:p-4 select-none">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center overflow-y-auto bg-[#0F1923]/92 p-2 sm:p-4 select-none">
       <div className="relative my-auto max-h-[94dvh] w-full max-w-4xl overflow-y-auto border border-[#ECE8E1]/20 bg-[#18232E] p-3 sm:p-6 shadow-2xl clip-val-panel">
         <div className="flex items-center justify-between border-b border-[#ECE8E1]/15 pb-2 sm:pb-3 mb-3 sm:mb-5">
           <div>

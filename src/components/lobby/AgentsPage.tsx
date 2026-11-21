@@ -19,7 +19,7 @@ export const AgentsPage: React.FC<AgentsPageProps> = ({
 }) => {
   const agents = Object.values(AGENT_REGISTRY);
   const [inspectedId, setInspectedId] = useState<string>(selectedAgentId);
-  const inspected: AgentDef = AGENT_REGISTRY[inspectedId] || AGENT_REGISTRY.ZEPHYR;
+  const inspected: AgentDef = AGENT_REGISTRY[inspectedId] || AGENT_REGISTRY.KAEL;
   const isActive = inspected.id === selectedAgentId;
 
   return (

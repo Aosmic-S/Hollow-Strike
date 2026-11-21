@@ -22,6 +22,7 @@ import {
 import { resolveCrosshairConfig } from '../game/rules';
 import { CrosshairReticle } from './CrosshairReticle';
 import { Minimap } from './Minimap';
+import { TacticalComms } from './TacticalComms';
 import { BotCombatant } from '../game/botAI';
 
 interface GameHUDProps {
@@ -75,6 +76,7 @@ interface GameHUDProps {
   onSpectatePrev?: () => void;
   onSpectateNext?: () => void;
   onToggleSpectateMode?: () => void;
+  onChatFocusChange?: (focused: boolean) => void;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({
@@ -127,6 +129,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onSpectatePrev,
   onSpectateNext,
   onToggleSpectateMode,
+  onChatFocusChange,
 }) => {
   const isSpectating = Boolean(spectateState?.active);
   const aliveAttackers = allCombatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
@@ -156,7 +159,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         <div className="flex flex-1 flex-col gap-1 sm:gap-2 items-start">
           <div
             onClick={onOpenMap}
-            className="pointer-events-auto cursor-pointer hover:opacity-90 transition group relative self-start"
+            className="pointer-events-auto cursor-pointer hover:opacity-95 transition group relative self-start flex flex-col items-center"
             title="Click to expand Tactical Map [M]"
           >
             <Minimap
@@ -168,9 +171,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               revealedEnemyIds={revealedEnemyIds}
               compact={isMobile}
             />
-            <div className="absolute top-1 right-1 font-mono text-[8px] font-bold uppercase text-[#17E5B8] bg-[#0F1923]/90 px-1 border border-[#ECE8E1]/15">
-              {isMobile ? 'MAP' : 'TAP MAP [M]'}
-            </div>
+            <span className="-mt-2.5 z-10 font-mono text-[8px] font-bold uppercase text-[#17E5B8] bg-[#0B121A]/95 px-1.5 py-0.5 rounded-full border border-[#ECE8E1]/20 shadow">
+              {isMobile ? 'MAP' : 'MAP [M]'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 bg-[#0F1923]/88 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-mono border border-[#ECE8E1]/15 clip-val-card">
@@ -533,17 +536,17 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
       ) : (
-        <div className="flex items-end justify-between">
+        <div className="flex items-end justify-between gap-2 w-full">
           {/* Vitality & Armor */}
-          <div className="flex items-center gap-3 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-3 shadow-2xl clip-val-card">
+          <div className="flex items-center gap-2 lg:gap-3 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-2 lg:p-3 shadow-2xl clip-val-card shrink-0">
             <div className="flex flex-col">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-mono uppercase text-[#8B978F]">HP</span>
-                <span className={`font-display text-4xl font-extrabold leading-none tabular-nums ${hp > 30 ? 'text-[#ECE8E1]' : 'text-[#FF4655]'}`}>
+              <div className="flex items-baseline gap-1 lg:gap-1.5">
+                <span className="text-[9px] lg:text-[10px] font-mono uppercase text-[#8B978F]">HP</span>
+                <span className={`font-display text-2xl lg:text-4xl font-extrabold leading-none tabular-nums ${hp > 30 ? 'text-[#ECE8E1]' : 'text-[#FF4655]'}`}>
                   {hp}
                 </span>
               </div>
-              <div className="mt-1 h-1.5 w-28 overflow-hidden bg-[#18232E]">
+              <div className="mt-1 h-1.5 w-16 lg:w-28 overflow-hidden bg-[#18232E]">
                 <div
                   className={`h-full transition-all duration-150 ${hp > 30 ? 'bg-[#17E5B8]' : 'bg-[#FF4655]'}`}
                   style={{ width: `${Math.max(0, hp)}%` }}
@@ -551,12 +554,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-col border-l border-[#ECE8E1]/15 pl-3">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-mono uppercase text-[#8B978F]">SHIELD</span>
-                <span className="font-display text-3xl font-extrabold leading-none text-[#17E5B8] tabular-nums">{armor}</span>
+            <div className="flex flex-col border-l border-[#ECE8E1]/15 pl-2 lg:pl-3">
+              <div className="flex items-baseline gap-1 lg:gap-1.5">
+                <span className="text-[9px] lg:text-[10px] font-mono uppercase text-[#8B978F]">SHD</span>
+                <span className="font-display text-xl lg:text-3xl font-extrabold leading-none text-[#17E5B8] tabular-nums">{armor}</span>
               </div>
-              <div className="mt-1 h-1.5 w-20 overflow-hidden bg-[#18232E]">
+              <div className="mt-1 h-1.5 w-12 lg:w-20 overflow-hidden bg-[#18232E]">
                 <div
                   className="h-full bg-[#17E5B8] transition-all duration-150"
                   style={{ width: `${Math.min(100, (armor / 50) * 100)}%` }}
@@ -564,16 +567,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-col border-l border-[#ECE8E1]/15 pl-3">
-              <span className="text-[10px] font-mono uppercase text-[#8B978F]">CREDITS</span>
-              <span className="font-mono text-base font-bold text-[#17E5B8] tabular-nums">
+            <div className="flex flex-col border-l border-[#ECE8E1]/15 pl-2 lg:pl-3">
+              <span className="text-[9px] lg:text-[10px] font-mono uppercase text-[#8B978F]">CREDITS</span>
+              <span className="font-mono text-xs lg:text-base font-bold text-[#17E5B8] tabular-nums">
                 ${credits.toLocaleString()}
               </span>
             </div>
           </div>
 
           {/* Center: Live Agent Abilities Bar */}
-          <div className="pointer-events-auto flex items-center gap-2 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-2 shadow-2xl clip-val-card">
+          <div className="pointer-events-auto flex items-center gap-1 lg:gap-2 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-1.5 lg:p-2 shadow-2xl clip-val-card shrink-0">
             {agent.abilities.map((ab) => {
               const st = abilityStates.find((s) => s.keySlot === ab.keySlot);
               const onCd = (st?.cooldownRemaining ?? 0) > 0.05;
@@ -585,7 +588,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   key={ab.id}
                   onClick={() => onTriggerAbility(ab.keySlot)}
                   title={`${ab.name}: ${ab.description}`}
-                  className={`relative flex flex-col items-center justify-center border px-1.5 py-1 w-[72px] h-16 transition cursor-pointer clip-val-card ${
+                  className={`relative flex flex-col items-center justify-center border px-1 py-1 w-[56px] lg:w-[74px] h-14 lg:h-16 transition cursor-pointer clip-val-card ${
                     !hasCharge || onCd
                       ? 'border-[#ECE8E1]/10 bg-[#18232E]/50 text-[#8B978F]'
                       : ab.isUltimate
@@ -595,13 +598,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   style={hasCharge && !onCd && !ab.isUltimate ? { borderColor: `${agent.primaryColor}99` } : undefined}
                 >
                   <span
-                    className="font-mono text-[11px] font-black leading-none"
+                    className="font-mono text-[10px] lg:text-[11px] font-black leading-none"
                     style={{ color: ab.isUltimate ? '#FF4655' : agent.primaryColor }}
                   >
                     [{ab.keySlot}]
                   </span>
-                  <span className="text-[9px] font-bold uppercase truncate max-w-full text-center mt-1 leading-none">
-                    {ab.name.split(' ')[0]}
+                  <span className="text-[8px] lg:text-[9px] font-bold uppercase truncate max-w-full text-center mt-1 leading-none">
+                    {ab.isUltimate ? 'ULT' : ab.name.split(' ')[0]}
                   </span>
                   {onCd ? (
                     <span className="text-[9px] font-mono font-bold text-[#fbbf24] mt-1 leading-none">
@@ -616,7 +619,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       {[...Array(ab.maxCharges)].map((_, idx) => (
                         <span
                           key={idx}
-                          className={`h-1.5 w-2.5 ${
+                          className={`h-1.5 w-2 lg:w-2.5 ${
                             idx < (st?.charges ?? 0) ? 'bg-[#17E5B8]' : 'bg-[#0F1923]'
                           }`}
                         />
@@ -629,8 +632,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
 
           {/* Right: Weapon & Ammo Readout + 3-Slot Quick Switch */}
-          <div className="pointer-events-auto flex items-center gap-3 sm:gap-4 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-2.5 sm:p-3 shadow-2xl clip-val-card">
-            <div className="hidden sm:flex flex-col gap-0.5 border-r border-[#ECE8E1]/15 pr-3 font-mono text-[9px]">
+          <div className="pointer-events-auto flex items-center gap-2 lg:gap-4 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-2 lg:p-3 shadow-2xl clip-val-card shrink-0">
+            <div className="hidden lg:flex flex-col gap-0.5 border-r border-[#ECE8E1]/15 pr-3 font-mono text-[9px]">
               {hasPrimaryWeapon && (
                 <button
                   onClick={() => onSwitchWeapon(1)}
@@ -667,39 +670,42 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
 
             <div className="text-right">
-              <div className="text-[9px] sm:text-[10px] font-mono uppercase text-[#8B978F]">
+              <div className="text-[8px] lg:text-[10px] font-mono uppercase text-[#8B978F]">
                 {weapon.category.replace('_', ' ')}
               </div>
-              <div className="font-display font-extrabold uppercase tracking-wide text-sm sm:text-lg text-[#ECE8E1]">
+              <div className="font-display font-extrabold uppercase tracking-wide text-xs lg:text-lg text-[#ECE8E1]">
                 {weapon.name}
               </div>
             </div>
 
-            <div className="border-l border-[#ECE8E1]/15 pl-3 sm:pl-4 text-right">
+            <div className="border-l border-[#ECE8E1]/15 pl-2 lg:pl-4 text-right">
               {weapon.isMelee ? (
-                <span className="font-mono text-xs sm:text-sm font-black text-[#17E5B8] uppercase">
+                <span className="font-mono text-xs lg:text-sm font-black text-[#17E5B8] uppercase">
                   READY · ∞
                 </span>
               ) : isReloading ? (
-                <span className="font-mono text-xs sm:text-sm font-bold text-[#FF4655] uppercase animate-pulse">
+                <span className="font-mono text-xs lg:text-sm font-bold text-[#FF4655] uppercase animate-pulse">
                   RELOAD...
                 </span>
               ) : (
                 <div className="flex items-baseline gap-1">
                   <span
-                    className={`font-display text-3xl sm:text-4xl font-extrabold leading-none tabular-nums ${
+                    className={`font-display text-2xl lg:text-4xl font-extrabold leading-none tabular-nums ${
                       ammoInMag <= 4 ? 'text-[#FF4655]' : 'text-[#ECE8E1]'
                     }`}
                   >
                     {ammoInMag}
                   </span>
-                  <span className="font-mono text-xs sm:text-sm text-[#8B978F] tabular-nums">/ {reserveAmmo}</span>
+                  <span className="font-mono text-xs lg:text-sm text-[#8B978F] tabular-nums">/ {reserveAmmo}</span>
                 </div>
               )}
             </div>
           </div>
         </div>
       )}
+
+      {/* In-Match Text Chat & WebRTC Voice Comms */}
+      <TacticalComms variant="hud" compact={isMobile} onInputFocusChange={onChatFocusChange} />
     </div>
   );
 };

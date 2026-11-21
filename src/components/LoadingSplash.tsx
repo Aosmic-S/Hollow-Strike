@@ -6,56 +6,50 @@
 
 import React, { useEffect, useState } from 'react';
 import splashArtImg from '../assets/images/loading_splash_art_1795091195232.jpg';
-import { loadGLBModel } from '../game/modelLoader';
 
 interface LoadingSplashProps {
   onComplete: () => void;
 }
 
-const PRELOAD_STEPS: { path: string; label: string }[] = [
-  { path: '/models/japan_map.glb', label: 'LOADING JAPANESE COURTYARD ARENA' },
-  { path: '/models/sci-fi_gun.glb', label: 'CALIBRATING KADENCE SIDEARM' },
-  { path: '/models/carbine_rifle.glb', label: 'CALIBRATING REAPER CARBINE' },
-  { path: '/models/smg.glb', label: 'CALIBRATING MANTIS SMG' },
-  { path: '/models/aac_honey_badger.glb', label: 'CALIBRATING ECLIPSE RIFLE' },
-  { path: '/models/free_pack_-_sci_fi_weapon.glb', label: 'PRELOADING HOLLOW BLADE & ARMORY' },
+const PRELOAD_STEPS: { url: string; label: string }[] = [
+  { url: '/api/health', label: 'CONNECTING TO AOSMIC MULTIPLAYER SERVER' },
+  { url: '/api/maps', label: 'CALIBRATING WAREHOUSE 5V5 TELEMETRY' },
+  { url: '/Assests/Weapon_sound/Pistol/Kadence_Tap.mp3', label: 'WARMING TACTICAL WEAPON AUDIO' },
 ];
 
 export const LoadingSplash: React.FC<LoadingSplashProps> = ({ onComplete }) => {
-  const [progress, setProgress] = useState<number>(8);
+  const [progress, setProgress] = useState<number>(12);
   const [statusLabel, setStatusLabel] = useState<string>('INITIALIZING TACTICAL SYSTEMS');
   const [readyToEnter, setReadyToEnter] = useState<boolean>(false);
 
   useEffect(() => {
     let cancelled = false;
-    const minDisplayMs = 1700;
+    const minDisplayMs = 1100;
     const startedAt = performance.now();
     let completedCount = 0;
 
-    // Kick off real parallel GLB warm-up so weapons & map render immediately on match deploy
     PRELOAD_STEPS.forEach((step) => {
-      loadGLBModel(step.path)
+      fetch(step.url, { cache: 'no-store' })
         .catch(() => null)
         .finally(() => {
           if (cancelled) return;
           completedCount += 1;
-          const rawPct = Math.round(12 + (completedCount / PRELOAD_STEPS.length) * 80);
+          const rawPct = Math.round(18 + (completedCount / PRELOAD_STEPS.length) * 76);
           setProgress((prev) => Math.max(prev, rawPct));
           if (completedCount < PRELOAD_STEPS.length) {
             setStatusLabel(PRELOAD_STEPS[completedCount].label);
           } else {
-            setStatusLabel('ARENA TELEMETRY READY');
+            setStatusLabel('WAREHOUSE ARENA READY');
           }
         });
     });
 
-    // Smooth visual progress ticker + bounded transition so cached loads still feel polished
     const interval = window.setInterval(() => {
       if (cancelled) return;
       const elapsed = performance.now() - startedAt;
       const timeFraction = Math.min(1, elapsed / minDisplayMs);
       const assetFraction = completedCount / PRELOAD_STEPS.length;
-      const targetPct = Math.round(Math.min(100, (timeFraction * 0.45 + assetFraction * 0.55) * 100));
+      const targetPct = Math.round(Math.min(100, (timeFraction * 0.55 + assetFraction * 0.45) * 100));
 
       setProgress((prev) => Math.max(prev, targetPct));
 
@@ -66,17 +60,16 @@ export const LoadingSplash: React.FC<LoadingSplashProps> = ({ onComplete }) => {
         window.clearInterval(interval);
         window.setTimeout(() => {
           if (!cancelled) onComplete();
-        }, 280);
+        }, 200);
       }
-    }, 60);
+    }, 50);
 
-    // Safety fallback cap at 5.5s even on throttled network connections
     const fallbackTimer = window.setTimeout(() => {
       if (cancelled) return;
       setProgress(100);
       setReadyToEnter(true);
       onComplete();
-    }, 5500);
+    }, 3200);
 
     return () => {
       cancelled = true;
@@ -170,7 +163,7 @@ export const LoadingSplash: React.FC<LoadingSplashProps> = ({ onComplete }) => {
 
             <div className="flex items-center justify-between pt-1">
               <p className="text-[11px] font-medium text-[#8B978F] tracking-wide">
-                5v5 Tactical Plant / Defuse Arena · Japan Courtyard Map
+                5v5 Tactical Plant / Defuse Arena · Warehouse Map
               </p>
               <button
                 type="button"
