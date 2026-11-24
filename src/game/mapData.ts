@@ -6,6 +6,13 @@
 
 import { DEFAULT_MAP_ID, MAP_REGISTRY, MapDef, getAvailableMaps } from './types';
 import { raycastAABBs, RaycastAABBHit } from './rules';
+import {
+  MeshColliderGrid,
+  sampleMeshFloorY,
+  checkMeshCeilingY,
+  resolveMeshHorizontalCylinder,
+  raycastMeshGrid,
+} from './meshCollider';
 
 export interface MapAABB {
   minX: number;
@@ -34,12 +41,15 @@ const WAREHOUSE_COLLIDERS: MapAABB[] = [
 ];
 
 const COURTYARD_COLLIDERS: MapAABB[] = [
-  // Outer Perimeter Walls
-  { minX: -38, maxX: 38, minY: 0, maxY: 8, minZ: 35, maxZ: 37 },
-  { minX: -38, maxX: 38, minY: 0, maxY: 8, minZ: -37, maxZ: -35 },
-  { minX: -37, maxX: -35, minY: 0, maxY: 8, minZ: -36, maxZ: 36 },
-  { minX: 35, maxX: 37, minY: 0, maxY: 8, minZ: -36, maxZ: 36 },
-  // Architectural lane dividers & tactical cover (active in both GLB fallback & base arena)
+  // Outer Perimeter Safety Bounds (invisible for GLB; interior geometry comes from courtyard.glb)
+  { minX: -46, maxX: 46, minY: 0, maxY: 8, minZ: 44.5, maxZ: 46.5 },
+  { minX: -46, maxX: 46, minY: 0, maxY: 8, minZ: -46.5, maxZ: -44.5 },
+  { minX: -46.5, maxX: -44.5, minY: 0, maxY: 8, minZ: -46, maxZ: 46 },
+  { minX: 44.5, maxX: 46.5, minY: 0, maxY: 8, minZ: -46, maxZ: 46 },
+];
+
+export const COURTYARD_FALLBACK_COLLIDERS: MapAABB[] = [
+  ...COURTYARD_COLLIDERS,
   { minX: -12.5, maxX: -9.5, minY: 0, maxY: 4.5, minZ: -16, maxZ: 14, color: 0x3b4d63 },
   { minX: 9.5, maxX: 12.5, minY: 0, maxY: 4.5, minZ: -16, maxZ: 14, color: 0x3b4d63 },
   { minX: -3.2, maxX: 3.2, minY: 0, maxY: 3.4, minZ: -4, maxZ: 2, color: 0x475d78 },
@@ -93,20 +103,20 @@ const WAREHOUSE_NAV: Record<string, NavNode> = {
 };
 
 const COURTYARD_NAV: Record<string, NavNode> = {
-  att_spawn: { id: 'att_spawn', x: 0, y: 0, z: -30, type: 'spawn_att', neighbors: ['att_west', 'mid_north', 'att_east'] },
-  att_west: { id: 'att_west', x: -20, y: 0, z: -24, type: 'lane_a', neighbors: ['att_spawn', 'a_main'] },
-  a_main: { id: 'a_main', x: -20, y: 0, z: -10, type: 'lane_a', neighbors: ['att_west', 'site_a_plant'] },
-  site_a_plant: { id: 'site_a_plant', x: -20, y: 0, z: 4, type: 'site_a', neighbors: ['a_main', 'def_west', 'mid_west'] },
-  mid_north: { id: 'mid_north', x: 0, y: 0, z: -14, type: 'lane_mid', neighbors: ['att_spawn', 'mid_west', 'mid_east'] },
-  mid_west: { id: 'mid_west', x: -6, y: 0, z: -1, type: 'lane_mid', neighbors: ['mid_north', 'mid_center', 'site_a_plant'] },
+  att_spawn: { id: 'att_spawn', x: 0, y: 0, z: -26, type: 'spawn_att', neighbors: ['att_west', 'mid_north', 'att_east'] },
+  att_west: { id: 'att_west', x: -18, y: 0, z: -20, type: 'lane_a', neighbors: ['att_spawn', 'a_main'] },
+  a_main: { id: 'a_main', x: -18, y: 0, z: -4, type: 'lane_a', neighbors: ['att_west', 'site_a_plant'] },
+  site_a_plant: { id: 'site_a_plant', x: -18, y: 0, z: 11.5, type: 'site_a', neighbors: ['a_main', 'def_west', 'mid_west'] },
+  mid_north: { id: 'mid_north', x: 0, y: 0, z: -12, type: 'lane_mid', neighbors: ['att_spawn', 'mid_west', 'mid_east'] },
+  mid_west: { id: 'mid_west', x: -6, y: 0, z: 2, type: 'lane_mid', neighbors: ['mid_north', 'mid_center', 'site_a_plant'] },
   mid_center: { id: 'mid_center', x: 0, y: 0, z: 8, type: 'lane_mid', neighbors: ['mid_west', 'mid_east', 'def_spawn'] },
-  mid_east: { id: 'mid_east', x: 6, y: 0, z: -1, type: 'lane_mid', neighbors: ['mid_north', 'mid_center', 'site_b_plant'] },
-  att_east: { id: 'att_east', x: 20, y: 0, z: -24, type: 'lane_b', neighbors: ['att_spawn', 'b_main'] },
-  b_main: { id: 'b_main', x: 20, y: 0, z: -10, type: 'lane_b', neighbors: ['att_east', 'site_b_plant'] },
-  site_b_plant: { id: 'site_b_plant', x: 20, y: 0, z: 4, type: 'site_b', neighbors: ['b_main', 'def_east', 'mid_east'] },
-  def_west: { id: 'def_west', x: -20, y: 0, z: 22, type: 'cover', neighbors: ['site_a_plant', 'def_spawn'] },
-  def_east: { id: 'def_east', x: 20, y: 0, z: 22, type: 'cover', neighbors: ['site_b_plant', 'def_spawn'] },
-  def_spawn: { id: 'def_spawn', x: 0, y: 0, z: 30, type: 'spawn_def', neighbors: ['def_west', 'mid_center', 'def_east'] },
+  mid_east: { id: 'mid_east', x: 6, y: 0, z: 2, type: 'lane_mid', neighbors: ['mid_north', 'mid_center', 'site_b_plant'] },
+  att_east: { id: 'att_east', x: 18, y: 0, z: -20, type: 'lane_b', neighbors: ['att_spawn', 'b_main'] },
+  b_main: { id: 'b_main', x: 18, y: 0, z: -4, type: 'lane_b', neighbors: ['att_east', 'site_b_plant'] },
+  site_b_plant: { id: 'site_b_plant', x: 18, y: 0, z: 11.5, type: 'site_b', neighbors: ['b_main', 'def_east', 'mid_east'] },
+  def_west: { id: 'def_west', x: -18, y: 0, z: 21, type: 'cover', neighbors: ['site_a_plant', 'def_spawn'] },
+  def_east: { id: 'def_east', x: 18, y: 0, z: 21, type: 'cover', neighbors: ['site_b_plant', 'def_spawn'] },
+  def_spawn: { id: 'def_spawn', x: 0, y: 0, z: 26, type: 'spawn_def', neighbors: ['def_west', 'mid_center', 'def_east'] },
 };
 
 const PROVING_GRID_NAV: Record<string, NavNode> = {
@@ -124,6 +134,33 @@ const PROVING_GRID_NAV: Record<string, NavNode> = {
   def_west: { id: 'def_west', x: -18, y: 0, z: 22, type: 'cover', neighbors: ['site_a_plant', 'def_spawn'] },
   def_east: { id: 'def_east', x: 18, y: 0, z: 22, type: 'cover', neighbors: ['site_b_plant', 'def_spawn'] },
   def_spawn: { id: 'def_spawn', x: 0, y: 0, z: 28, type: 'spawn_def', neighbors: ['def_west', 'mid_center', 'def_east'] },
+};
+
+const TRAINING_GROUND_COLLIDERS: MapAABB[] = [
+  // Outer island boundary safety walls only; interior floors, ramps, doorways & buildings use 3D MeshColliderGrid
+  { minX: -59, maxX: 59, minY: -2, maxY: 60, minZ: 57.5, maxZ: 59.5 },
+  { minX: -59, maxX: 59, minY: -2, maxY: 60, minZ: -59.5, maxZ: -57.5 },
+  { minX: -59.5, maxX: -57.5, minY: -2, maxY: 60, minZ: -59, maxZ: 59 },
+  { minX: 57.5, maxX: 59.5, minY: -2, maxY: 60, minZ: -59, maxZ: 59 },
+];
+
+const TRAINING_GROUND_NAV: Record<string, NavNode> = {
+  att_spawn: { id: 'att_spawn', x: -2, y: 8.05, z: 2, type: 'spawn_att', neighbors: ['mid_center', 'pit_west', 'terrace_east', 'village_south'] },
+  mid_center: { id: 'mid_center', x: -2, y: 8.05, z: 0, type: 'lane_mid', neighbors: ['att_spawn', 'pit_west', 'terrace_east', 'village_south'] },
+  pit_west: { id: 'pit_west', x: 14, y: 8.3, z: 0, type: 'lane_mid', neighbors: ['att_spawn', 'mid_center', 'pit_center', 'range_south'] },
+  pit_center: { id: 'pit_center', x: 22, y: 8.6, z: 1, type: 'cover', neighbors: ['pit_west', 'range_south', 'dock_north'] },
+  range_south: { id: 'range_south', x: 24, y: 12.05, z: -6, type: 'lane_b', neighbors: ['pit_west', 'pit_center', 'def_spawn'] },
+  def_spawn: { id: 'def_spawn', x: 24, y: 12.05, z: -12, type: 'spawn_def', neighbors: ['range_south', 'village_east'] },
+  terrace_east: { id: 'terrace_east', x: -16, y: 6.2, z: 10, type: 'lane_a', neighbors: ['att_spawn', 'mid_center', 'bridge_west', 'site_a_plant'] },
+  bridge_west: { id: 'bridge_west', x: -4, y: 5.2, z: 15, type: 'lane_mid', neighbors: ['terrace_east', 'bridge_east'] },
+  bridge_east: { id: 'bridge_east', x: 10, y: 5.2, z: 16, type: 'lane_b', neighbors: ['bridge_west', 'site_b_plant'] },
+  site_b_plant: { id: 'site_b_plant', x: 24, y: 5.05, z: 20, type: 'site_b', neighbors: ['bridge_east', 'dock_north'] },
+  dock_north: { id: 'dock_north', x: 24, y: 6.5, z: 10, type: 'cover', neighbors: ['site_b_plant', 'pit_center'] },
+  site_a_plant: { id: 'site_a_plant', x: -26, y: 12.3, z: -13, type: 'site_a', neighbors: ['terrace_east', 'village_west'] },
+  village_west: { id: 'village_west', x: -12, y: 12.0, z: -18, type: 'cover', neighbors: ['site_a_plant', 'village_south', 'bunker_entry'] },
+  village_south: { id: 'village_south', x: 0, y: 12.5, z: -24, type: 'cover', neighbors: ['att_spawn', 'mid_center', 'village_west', 'village_east'] },
+  village_east: { id: 'village_east', x: 14, y: 12.0, z: -18, type: 'cover', neighbors: ['village_south', 'def_spawn'] },
+  bunker_entry: { id: 'bunker_entry', x: -16, y: 17.05, z: -28, type: 'cover', neighbors: ['village_west'] },
 };
 
 let activeMapDef: MapDef = MAP_REGISTRY[DEFAULT_MAP_ID];
@@ -148,6 +185,7 @@ const HASH_CELL_SIZE = 2.0;
 let extractedWallColliders: MapAABB[] = [];
 let combinedColliders: MapAABB[] = [...MAP_COLLIDERS];
 let spatialBuckets = new Map<string, MapAABB[]>();
+let activeMeshCollider: MeshColliderGrid | null = null;
 const colliderListeners = new Set<() => void>();
 
 function bucketKey(bx: number, bz: number): string {
@@ -211,25 +249,30 @@ export function setActiveMap(mapId: string): MapDef {
   Object.assign(BOMB_SITE_B, def.siteB);
 
   const nextColliders =
-    def.id === 'PROVING_GRID'
-      ? PROVING_GRID_COLLIDERS
-      : def.id === 'COURTYARD'
-        ? COURTYARD_COLLIDERS
-        : WAREHOUSE_COLLIDERS;
+    def.id === 'TRAINING_GROUND' || def.isTrainingMap
+      ? TRAINING_GROUND_COLLIDERS
+      : def.id === 'PROVING_GRID'
+        ? PROVING_GRID_COLLIDERS
+        : def.id === 'COURTYARD'
+          ? COURTYARD_COLLIDERS
+          : WAREHOUSE_COLLIDERS;
   MAP_COLLIDERS.length = 0;
   MAP_COLLIDERS.push(...nextColliders);
 
   const nextNav =
-    def.id === 'PROVING_GRID'
-      ? PROVING_GRID_NAV
-      : def.id === 'COURTYARD'
-        ? COURTYARD_NAV
-        : WAREHOUSE_NAV;
+    def.id === 'TRAINING_GROUND' || def.isTrainingMap
+      ? TRAINING_GROUND_NAV
+      : def.id === 'PROVING_GRID'
+        ? PROVING_GRID_NAV
+        : def.id === 'COURTYARD'
+          ? COURTYARD_NAV
+          : WAREHOUSE_NAV;
   for (const key of Object.keys(NAV_GRAPH)) {
     delete NAV_GRAPH[key];
   }
   Object.assign(NAV_GRAPH, nextNav);
 
+  activeMeshCollider = null;
   extractedWallColliders = [];
   combinedColliders = [...MAP_COLLIDERS];
   rebuildSpatialBuckets(combinedColliders);
@@ -238,9 +281,35 @@ export function setActiveMap(mapId: string): MapDef {
   return def;
 }
 
+export function setActiveMeshCollider(grid: MeshColliderGrid | null): void {
+  activeMeshCollider = grid;
+}
+
+export function getActiveMeshCollider(): MeshColliderGrid | null {
+  return activeMeshCollider;
+}
+
+export function sampleWorldFloorY(x: number, z: number, feetY = 0, maxStepUp = 0.72): number {
+  if (!activeMeshCollider) return activeMapDef.isTrainingMap ? feetY : 0;
+  const hitY = sampleMeshFloorY(activeMeshCollider, x, z, feetY, maxStepUp);
+  if (hitY !== null) return hitY;
+  return activeMapDef.isTrainingMap ? -5 : 0;
+}
+
+export function checkWorldCeilingY(x: number, z: number, feetY = 0, headHeight = 1.78): number | null {
+  if (!activeMeshCollider) return null;
+  return checkMeshCeilingY(activeMeshCollider, x, z, feetY, headHeight);
+}
+
 export function setExtractedMapColliders(boxes: MapAABB[]): void {
   extractedWallColliders = boxes;
-  combinedColliders = boxes.length === 0 ? [...MAP_COLLIDERS] : [...MAP_COLLIDERS, ...boxes];
+  if (activeMeshCollider && activeMapDef.isTrainingMap) {
+    // Training map uses exact 3D triangle collision for player movement & raycasts;
+    // keep only the perimeter bounds in combinedColliders while notifying minimap listeners cleanly.
+    combinedColliders = [...MAP_COLLIDERS];
+  } else {
+    combinedColliders = boxes.length === 0 ? [...MAP_COLLIDERS] : [...MAP_COLLIDERS, ...boxes];
+  }
   rebuildSpatialBuckets(combinedColliders);
   colliderListeners.forEach((cb) => cb());
 }
@@ -263,7 +332,23 @@ export function raycastMapAABBs(
   maxDistance: number,
   includeFloor = false
 ): RaycastAABBHit | null {
-  return raycastAABBs(ox, oy, oz, dx, dy, dz, maxDistance, combinedColliders, includeFloor);
+  const aabbHit = raycastAABBs(
+    ox,
+    oy,
+    oz,
+    dx,
+    dy,
+    dz,
+    maxDistance,
+    combinedColliders,
+    activeMeshCollider ? false : includeFloor
+  );
+  if (!activeMeshCollider) return aabbHit;
+
+  const limit = aabbHit ? aabbHit.distance : maxDistance;
+  const meshHit = raycastMeshGrid(activeMeshCollider, ox, oy, oz, dx, dy, dz, limit);
+  if (meshHit) return meshHit;
+  return aabbHit;
 }
 
 export function subscribeMapColliders(listener: () => void): () => void {
@@ -275,7 +360,7 @@ export function subscribeMapColliders(listener: () => void): () => void {
 
 const _checkedScratch = new Set<MapAABB>();
 
-export function checkCollision(x: number, z: number, radius = 0.5): { collided: boolean; normalX: number; normalZ: number } {
+function checkBucketCollision(x: number, z: number, radius = 0.5): { collided: boolean; normalX: number; normalZ: number } {
   const minBx = Math.floor((x - radius) / HASH_CELL_SIZE);
   const maxBx = Math.floor((x + radius) / HASH_CELL_SIZE);
   const minBz = Math.floor((z - radius) / HASH_CELL_SIZE);
@@ -314,8 +399,69 @@ export function checkCollision(x: number, z: number, radius = 0.5): { collided: 
   return { collided: false, normalX: 0, normalZ: 0 };
 }
 
-export function isPointWalkable(x: number, z: number, radius = 0.45): boolean {
-  return !checkCollision(x, z, radius).collided;
+export function resolveWorldMovement(
+  x: number,
+  z: number,
+  feetY = 0,
+  radius = 0.36
+): { x: number; z: number; collided: boolean; normalX: number; normalZ: number } {
+  const half = Math.max(4, MAP_HALF_EXTENT - radius - 0.15);
+  let rx = Math.max(-half, Math.min(half, x));
+  let rz = Math.max(-half, Math.min(half, z));
+  let collided = rx !== x || rz !== z;
+  let nx = rx !== x ? (x > 0 ? -1 : 1) : 0;
+  let nz = rz !== z ? (z > 0 ? -1 : 1) : 0;
+
+  if (activeMeshCollider) {
+    const res = resolveMeshHorizontalCylinder(activeMeshCollider, rx, rz, feetY, radius, 1.72);
+    if (res.collided) {
+      rx = res.x;
+      rz = res.z;
+      collided = true;
+      nx = res.normalX;
+      nz = res.normalZ;
+    }
+    return { x: rx, z: rz, collided, normalX: nx, normalZ: nz };
+  }
+
+  const bucketHit = checkBucketCollision(rx, rz, radius);
+  if (bucketHit.collided) {
+    return {
+      x: rx + bucketHit.normalX * 0.04,
+      z: rz + bucketHit.normalZ * 0.04,
+      collided: true,
+      normalX: bucketHit.normalX,
+      normalZ: bucketHit.normalZ,
+    };
+  }
+  return { x: rx, z: rz, collided, normalX: nx, normalZ: nz };
+}
+
+export function checkCollision(
+  x: number,
+  z: number,
+  radius = 0.5,
+  feetY = 0
+): { collided: boolean; normalX: number; normalZ: number } {
+  const bucketHit = checkBucketCollision(x, z, radius);
+  if (bucketHit.collided) return bucketHit;
+
+  if (activeMeshCollider) {
+    const res = resolveMeshHorizontalCylinder(activeMeshCollider, x, z, feetY, radius, 1.72);
+    if (res.collided) {
+      return { collided: true, normalX: res.normalX, normalZ: res.normalZ };
+    }
+  }
+  return { collided: false, normalX: 0, normalZ: 0 };
+}
+
+export function isPointWalkable(x: number, z: number, radius = 0.45, feetY = 0): boolean {
+  if (checkCollision(x, z, radius, feetY).collided) return false;
+  if (activeMeshCollider && activeMapDef.isTrainingMap) {
+    const floor = sampleMeshFloorY(activeMeshCollider, x, z, feetY, 0.9);
+    if (floor === null || floor < 1.5) return false;
+  }
+  return true;
 }
 
 export function findNavPath(startNodeId: string, targetNodeId: string): NavNode[] {
@@ -358,15 +504,16 @@ export function findNavPath(startNodeId: string, targetNodeId: string): NavNode[
   return path;
 }
 
-export function findClosestNavNode(x: number, z: number): NavNode {
+export function findClosestNavNode(x: number, z: number, y = 0): NavNode {
   let closest: NavNode = NAV_GRAPH['mid_center'] ?? Object.values(NAV_GRAPH)[0];
   let minDistanceSq = Infinity;
 
   for (const key in NAV_GRAPH) {
     const node = NAV_GRAPH[key];
     const dx = node.x - x;
+    const dy = (node.y - y) * 1.6;
     const dz = node.z - z;
-    const distSq = dx * dx + dz * dz;
+    const distSq = dx * dx + dy * dy + dz * dz;
     if (distSq < minDistanceSq) {
       minDistanceSq = distSq;
       closest = node;

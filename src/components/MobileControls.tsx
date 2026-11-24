@@ -4,7 +4,7 @@
  * cycling, custom touch coordinate layout mapping, and multi-touch pointer capture.
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -47,6 +47,7 @@ interface MobileControlsProps {
   onOpenPause: () => void;
   canPlantOrDefuse: boolean;
   isPlantingOrDefusing: boolean;
+  hideSpike?: boolean;
   isSpectating?: boolean;
 }
 
@@ -72,6 +73,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   onOpenPause,
   canPlantOrDefuse,
   isPlantingOrDefusing,
+  hideSpike = false,
   isSpectating = false,
 }) => {
   const joystickRef = useRef<HTMLDivElement | null>(null);
@@ -91,6 +93,29 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   const touchScale = settings.touchScale ?? 1.0;
   const touchOpacity = settings.touchOpacity ?? 0.85;
   const layout = normalizeTouchLayout(settings.touchLayout);
+
+  useEffect(() => {
+    if (isSpectating) {
+      firePointerId.current = null;
+      joystickPointerId.current = null;
+      lookPointerId.current = null;
+      setFireActive(false);
+      setIsJoystickActive(false);
+      setJoystickPos({ x: 0, y: 0 });
+      input.setMobileFire(false);
+      input.setMobileMove(0, 0);
+    }
+  }, [isSpectating, input]);
+
+  useEffect(() => {
+    return () => {
+      firePointerId.current = null;
+      joystickPointerId.current = null;
+      lookPointerId.current = null;
+      input.setMobileFire(false);
+      input.setMobileMove(0, 0);
+    };
+  }, [input]);
 
   const getSlotStyle = (id: TouchControlId): React.CSSProperties => {
     const slot = layout[id];
@@ -222,6 +247,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
         onPointerMove={handleLookPointerMove}
         onPointerUp={handleLookPointerUp}
         onPointerCancel={handleLookPointerUp}
+        onLostPointerCapture={handleLookPointerUp}
         className="pointer-events-auto fixed inset-x-0 top-14 bottom-0 z-10 touch-none"
       />
 
@@ -244,6 +270,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                   onPointerMove={handleJoystickPointerMove}
                   onPointerUp={handleJoystickPointerUp}
                   onPointerCancel={handleJoystickPointerUp}
+                  onLostPointerCapture={handleJoystickPointerUp}
                   className="relative flex h-32 w-32 items-center justify-center rounded-full border-2 border-[#ECE8E1]/25 bg-[#0F1923]/82 touch-none shadow-2xl"
                 >
                   <div className="absolute h-full w-full rounded-full border border-[#17E5B8]/35" />
@@ -274,6 +301,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
                 onPointerMove={handleFirePointerMove}
                 onPointerUp={handleFirePointerUp}
                 onPointerCancel={handleFirePointerUp}
+                onLostPointerCapture={handleFirePointerUp}
                 style={getSlotStyle('fire')}
                 className={`pointer-events-auto absolute z-40 flex h-19 w-19 flex-col items-center justify-center gap-0.5 rounded-full border-2 text-[#ECE8E1] shadow-2xl transition cursor-pointer touch-none ${
                   fireActive
@@ -405,7 +433,7 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             )}
 
             {/* Plant / Defuse */}
-            {canPlantOrDefuse && layout.plantDefuse.visible && (
+            {!hideSpike && canPlantOrDefuse && layout.plantDefuse.visible && (
               <button
                 type="button"
                 aria-label="Plant or Defuse Spike"

@@ -6,6 +6,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { resolveMapDef } from '../game/mapData';
+import { preloadGLBAssets } from '../game/modelLoader';
+import { getWeaponGLBPaths, WEAPON_GLB_LOAD_OPTIONS } from '../game/weaponModels';
+import { loadSettings } from '../game/profileStore';
+import { clampTeamSizeForMap, getTdmKillTarget, isTdmMap } from '../game/rules';
 import { AGENT_REGISTRY, MatchMode, TeamSide } from '../game/types';
 import {
   AgentEmblemMark,
@@ -28,6 +32,7 @@ export interface PreMatchPlayer {
 interface PreMatchScreenProps {
   mode: MatchMode;
   mapId?: string;
+  tdmTeamSize?: 1 | 2;
   playerTeam: TeamSide;
   defenders: PreMatchPlayer[];
   attackers: PreMatchPlayer[];
@@ -45,26 +50,83 @@ const MODE_SUBTITLE: Record<MatchMode, string> = {
 export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
   mode,
   mapId,
+  tdmTeamSize,
   playerTeam,
   defenders,
   attackers,
-  durationSeconds = 3.2,
+  durationSeconds = 2.4,
   onDeployNow,
 }) => {
   const activeMap = resolveMapDef(mapId);
+  const isTdm = isTdmMap(activeMap);
+  const isTraining = Boolean(activeMap.isTrainingMap || mode === 'PRACTICE');
+  const teamSlotsCount = isTdm
+    ? clampTeamSizeForMap(activeMap, tdmTeamSize)
+    : isTraining
+      ? 1
+      : 5;
+  const killTarget = getTdmKillTarget(teamSlotsCount);
+
   const [remainingMs, setRemainingMs] = useState<number>(Math.round(durationSeconds * 1000));
+  const [assetProgress, setAssetProgress] = useState<{ loaded: number; total: number; ready: boolean }>({
+    loaded: 0,
+    total: 1,
+    ready: false,
+  });
+  const assetsReadyRef = useRef(false);
   const deployRef = useRef(onDeployNow);
   deployRef.current = onDeployNow;
 
   useEffect(() => {
-    const totalMs = Math.round(durationSeconds * 1000);
+    let cancelled = false;
+    const settings = loadSettings();
+    const lowDetail = settings.graphics === 'LOW';
+    const items: Array<{ path: string; options?: typeof WEAPON_GLB_LOAD_OPTIONS }> = [];
+
+    if (activeMap.modelUrl && activeMap.modelUrl !== 'procedural') {
+      items.push({
+        path: activeMap.modelUrl,
+        options: {
+          clone: false,
+          castShadow: false,
+          maxTextureSize: lowDetail ? 256 : 512,
+          stripSecondaryMaps: lowDetail,
+        },
+      });
+    }
+
+    for (const w of getWeaponGLBPaths()) {
+      items.push({ path: w.path, options: WEAPON_GLB_LOAD_OPTIONS });
+    }
+
+    preloadGLBAssets(items, (loaded, total) => {
+      if (cancelled) return;
+      const done = loaded >= total;
+      assetsReadyRef.current = done;
+      setAssetProgress({ loaded, total, ready: done });
+    }).then(() => {
+      if (cancelled) return;
+      assetsReadyRef.current = true;
+      setAssetProgress((prev) => ({ loaded: prev.total, total: prev.total, ready: true }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeMap.modelUrl]);
+
+  useEffect(() => {
+    const minWaitMs = Math.round(durationSeconds * 1000);
+    const maxWaitMs = 10000;
     const started = performance.now();
+    let deployed = false;
 
     const interval = window.setInterval(() => {
       const elapsed = performance.now() - started;
-      const next = Math.max(0, totalMs - elapsed);
+      const next = Math.max(0, minWaitMs - elapsed);
       setRemainingMs(next);
-      if (next <= 0) {
+      if (!deployed && ((elapsed >= minWaitMs && assetsReadyRef.current) || elapsed >= maxWaitMs)) {
+        deployed = true;
         window.clearInterval(interval);
         deployRef.current();
       }
@@ -73,14 +135,25 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
     return () => window.clearInterval(interval);
   }, [durationSeconds]);
 
-  const progressPct = Math.min(
-    100,
-    Math.max(0, Math.round((1 - remainingMs / (durationSeconds * 1000)) * 100))
-  );
+  const timePct = Math.min(1, Math.max(0, 1 - remainingMs / (durationSeconds * 1000)));
+  const assetPct = assetProgress.total > 0 ? assetProgress.loaded / assetProgress.total : 1;
+  const progressPct = Math.min(100, Math.round((assetPct * 0.65 + timePct * 0.35) * 100));
   const secondsLeft = Math.max(1, Math.ceil(remainingMs / 1000));
 
-  const defenderSlots: (PreMatchPlayer | null)[] = Array.from({ length: 5 }, (_, i) => defenders[i] ?? null);
-  const attackerSlots: (PreMatchPlayer | null)[] = Array.from({ length: 5 }, (_, i) => attackers[i] ?? null);
+  const defenderSlots: (PreMatchPlayer | null)[] = Array.from(
+    { length: teamSlotsCount },
+    (_, i) => defenders[i] ?? null
+  );
+  const attackerSlots: (PreMatchPlayer | null)[] = Array.from(
+    { length: teamSlotsCount },
+    (_, i) => attackers[i] ?? null
+  );
+
+  const subtitleLabel = isTdm
+    ? `${teamSlotsCount}V${teamSlotsCount} TEAM DEATHMATCH // NO SPIKE`
+    : isTraining
+      ? 'THE RANGE // ALL WEAPONS & DRILLS UNLOCKED'
+      : MODE_SUBTITLE[mode];
 
   return (
     <div
@@ -107,7 +180,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
         </div>
       </div>
 
-      {/* TOP CENTER HEADER: MAP NAME + MODE + DEPLOY PROGRESS */}
+      {/* TOP CENTER HEADER: MAP NAME + MODE + ASSET PRELOAD & DEPLOY PROGRESS */}
       <header className="relative z-10 flex flex-col items-center pt-4 sm:pt-6 pb-2 px-4 text-center shrink-0">
         <span className="font-mono text-[10px] tracking-[0.28em] text-[#8B978F] uppercase">
           {activeMap.sector} · YOUR SIDE:{' '}
@@ -119,19 +192,26 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
           {activeMap.name.toUpperCase()}
         </h1>
         <div className="mt-1 font-display text-xs sm:text-sm font-bold uppercase tracking-[0.26em] text-[#ECE8E1]/75">
-          {MODE_SUBTITLE[mode]}
+          {subtitleLabel}
         </div>
 
-        {/* Sleek Inline Deploy Progress Bar */}
-        <div className="mt-2.5 flex items-center gap-3">
-          <div className="h-1 w-32 sm:w-44 bg-[#ECE8E1]/15 overflow-hidden">
+        {/* Asset Preload + Deploy Progress Bar */}
+        <div className="mt-2.5 flex flex-wrap items-center justify-center gap-3">
+          <div className="h-1.5 w-36 sm:w-48 bg-[#ECE8E1]/15 overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-[#17E5B8] to-[#FF4655] transition-all duration-75"
+              className="h-full bg-gradient-to-r from-[#17E5B8] to-[#FF4655] transition-all duration-100"
               style={{ width: `${progressPct}%` }}
             />
           </div>
-          <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#8B978F] tabular-nums">
-            DEPLOY {secondsLeft}S
+          <span
+            data-testid="prematch-asset-status"
+            className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#17E5B8] tabular-nums"
+          >
+            {assetProgress.ready
+              ? remainingMs > 0
+                ? `DEPLOY ${secondsLeft}S`
+                : 'READY'
+              : `LOADING 3D ASSETS (${assetProgress.loaded}/${assetProgress.total})`}
           </span>
           <button
             type="button"
@@ -154,7 +234,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                 DEFENDING
               </span>
               <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#8B978F]">
-                {defenders.length}/5 ACTIVE
+                {defenders.length}/{teamSlotsCount} ACTIVE
               </span>
             </div>
 
@@ -196,17 +276,13 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                         : 'border-[#ECE8E1]/20'
                     } bg-[#0D1621]/95`}
                   >
-                    {/* Teal Outer Edge Accent */}
                     <div className="w-1.5 shrink-0 bg-[#17E5B8]" />
 
-                    {/* Outer Left Agent Portrait */}
                     <div className="w-14 sm:w-[70px] shrink-0 border-r border-[#ECE8E1]/15">
                       <AgentPortraitTile agentId={agent.id} teamColor="#17E5B8" />
                     </div>
 
-                    {/* Right Banner Strip + Nameplate */}
                     <div className="relative flex flex-1 flex-col justify-between overflow-hidden">
-                      {/* Card Art Top Strip */}
                       <div className="relative flex flex-1 items-center justify-end overflow-hidden px-3">
                         <img
                           src={artUrl}
@@ -219,7 +295,6 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                         </span>
                       </div>
 
-                      {/* Dark Bottom Nameplate */}
                       <div className="relative z-10 flex h-6 sm:h-7 items-center justify-between border-t border-[#ECE8E1]/15 bg-[#090F17]/95 px-3">
                         <div className="flex items-center gap-2 min-w-0">
                           <span
@@ -260,7 +335,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
           <section className="flex flex-col">
             <div className="mb-2 flex items-center justify-between border-b border-[#FF4655]/45 pb-1 px-1">
               <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#8B978F]">
-                {attackers.length}/5 ACTIVE
+                {attackers.length}/{teamSlotsCount} ACTIVE
               </span>
               <span className="font-display text-sm sm:text-base font-extrabold uppercase tracking-[0.28em] text-[#FF4655]">
                 ATTACKING
@@ -305,9 +380,7 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                         : 'border-[#ECE8E1]/20'
                     } bg-[#0D1621]/95`}
                   >
-                    {/* Left Banner Strip + Nameplate */}
                     <div className="relative flex flex-1 flex-col justify-between overflow-hidden">
-                      {/* Card Art Top Strip */}
                       <div className="relative flex flex-1 items-center justify-start overflow-hidden px-3">
                         <img
                           src={artUrl}
@@ -320,7 +393,6 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                         </span>
                       </div>
 
-                      {/* Dark Bottom Nameplate */}
                       <div className="relative z-10 flex h-6 sm:h-7 items-center justify-between border-t border-[#ECE8E1]/15 bg-[#090F17]/95 px-3">
                         <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#8B978F]">
                           {agent.name}
@@ -342,12 +414,10 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Outer Right Agent Portrait */}
                     <div className="w-14 sm:w-[70px] shrink-0 border-l border-[#ECE8E1]/15">
                       <AgentPortraitTile agentId={agent.id} teamColor="#FF4655" />
                     </div>
 
-                    {/* Crimson Outer Edge Accent */}
                     <div className="w-1.5 shrink-0 bg-[#FF4655]" />
                   </div>
                 );
@@ -373,7 +443,11 @@ export const PreMatchScreen: React.FC<PreMatchScreenProps> = ({
         </div>
 
         <span className="hidden sm:inline font-mono text-[10px] uppercase tracking-[0.2em] text-[#8B978F]">
-          FIRST TO 13 ROUNDS · SWAP SIDES AT ROUND 12
+          {isTdm
+            ? `FIRST TO ${killTarget} KILLS · NO SPIKE · INSTANT RESPAWN`
+            : isTraining
+              ? 'UNLIMITED AMMO · ALL WEAPONS FREE · FULL ISLAND ACCESS'
+              : 'FIRST TO 13 ROUNDS · SWAP SIDES AT ROUND 12'}
         </span>
       </footer>
     </div>

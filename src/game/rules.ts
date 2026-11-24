@@ -20,6 +20,7 @@ import {
   TouchLayoutPresetId,
   BotDifficulty,
   WEAPON_REGISTRY,
+  MapDef,
 } from './types';
 
 export interface GridWallBox {
@@ -261,6 +262,45 @@ export function checkMatchWin(attackerRounds: number, defenderRounds: number): T
 
 export function shouldSwapSides(completedRounds: number): boolean {
   return completedRounds === HALF_TIME_ROUND;
+}
+
+export function isTdmMap(mapDef?: Pick<MapDef, 'isTdmOnly' | 'supportsSpike'> | null): boolean {
+  return Boolean(mapDef?.isTdmOnly) || mapDef?.supportsSpike === false;
+}
+
+export function getAllowedTeamSizes(
+  mapDef?: Pick<MapDef, 'allowedTeamSizes' | 'maxTeamSize' | 'isTdmOnly'> | null
+): number[] {
+  if (mapDef?.allowedTeamSizes && mapDef.allowedTeamSizes.length > 0) {
+    return mapDef.allowedTeamSizes;
+  }
+  if (mapDef?.isTdmOnly) return [1, 2];
+  return [mapDef?.maxTeamSize ?? 5];
+}
+
+export function clampTeamSizeForMap(
+  mapDef: Pick<MapDef, 'allowedTeamSizes' | 'maxTeamSize' | 'isTdmOnly'> | null | undefined,
+  requested?: number
+): number {
+  const allowed = getAllowedTeamSizes(mapDef);
+  if (typeof requested === 'number' && allowed.includes(requested)) {
+    return requested;
+  }
+  return allowed[allowed.length - 1] ?? 5;
+}
+
+export function getTdmKillTarget(teamSize: number): number {
+  return teamSize <= 1 ? 15 : 25;
+}
+
+export function checkTdmMatchWin(
+  attackerKills: number,
+  defenderKills: number,
+  killTarget: number
+): TeamSide | null {
+  if (attackerKills >= killTarget) return 'ATTACKERS';
+  if (defenderKills >= killTarget) return 'DEFENDERS';
+  return null;
 }
 
 /**

@@ -10,15 +10,17 @@ import {
   NavNode,
   findClosestNavNode,
   findNavPath,
-  checkCollision,
   isPointWalkable,
   BOMB_SITE_A,
   BOMB_SITE_B,
   raycastMapAABBs,
+  getActiveMapDef,
+  resolveWorldMovement,
+  sampleWorldFloorY,
 } from './mapData';
 import { AgentMeshPackage } from './agentModels';
 import { AbilityManager } from './abilities';
-import { computeBotAimSolution } from './rules';
+import { computeBotAimSolution, isTdmMap } from './rules';
 
 const _toEnemy = new THREE.Vector3();
 const _forward = new THREE.Vector3();
@@ -80,6 +82,9 @@ export interface BotCombatant {
   isCrouching?: boolean;
   actionProgress: number; // 0 to 1
   modelPackage: AgentMeshPackage;
+  rangeMode?: 'IDLE' | 'STRAFE' | 'COMBAT';
+  rangeAnchor?: THREE.Vector3;
+  rangeStrafePhase?: number;
 }
 
 export class BotController {
@@ -161,9 +166,13 @@ export class BotController {
     this.progressInit = false;
 
     const isAttacker = this.combatant.team === 'ATTACKERS';
+    const isTdm = isTdmMap(getActiveMapDef());
     let targetNodeId = 'mid_center';
 
-    if (isAttacker) {
+    if (isTdm) {
+      const tdmNodes = ['site_a_plant', 'mid_center', 'site_b_plant', 'a_lane_entry', 'b_east_bend'];
+      targetNodeId = tdmNodes[Math.floor(Math.random() * tdmNodes.length)];
+    } else if (isAttacker) {
       if (!spikePlanted) {
         // Coordinated squad execute: carrier + core push main site; 1-2 flank mid/opposite lane
         const primarySiteNode = coordinatedTargetSite === 'A' ? 'site_a_plant' : 'site_b_plant';
@@ -199,7 +208,11 @@ export class BotController {
       }
     }
 
-    const startNode = findClosestNavNode(this.combatant.position.x, this.combatant.position.z);
+    const startNode = findClosestNavNode(
+      this.combatant.position.x,
+      this.combatant.position.z,
+      this.combatant.position.y
+    );
     this.currentPath = findNavPath(startNode.id, targetNodeId);
     this.currentPathIndex = 0;
   }
@@ -257,6 +270,43 @@ export class BotController {
       if (this.burstPauseTimer <= 0) {
         this.burstShotsFired = 0;
       }
+    }
+
+    if (this.combatant.rangeMode === 'IDLE' || this.combatant.rangeMode === 'STRAFE') {
+      const anchor = this.combatant.rangeAnchor ?? this.combatant.position;
+      let isMovingRange = false;
+      let rangeSpeed = 0;
+
+      if (this.combatant.rangeMode === 'STRAFE') {
+        const nextPhase = (this.combatant.rangeStrafePhase ?? 0) + dt * 2.0;
+        this.combatant.rangeStrafePhase = nextPhase;
+        const offsetX = Math.sin(nextPhase) * 2.6;
+        const tx = anchor.x + offsetX;
+        const tz = anchor.z;
+        const res = resolveWorldMovement(tx, tz, anchor.y, 0.36);
+        const floorY = sampleWorldFloorY(res.x, res.z, anchor.y, 0.8);
+        if (floorY > 1.5) {
+          this.combatant.position.set(res.x, floorY, res.z);
+        } else {
+          this.combatant.position.x = res.x;
+        }
+        isMovingRange = true;
+        rangeSpeed = 3.2;
+        this.combatant.velocity.set(Math.cos(nextPhase) * 3.2, 0, 0);
+      } else {
+        this.combatant.velocity.set(0, 0, 0);
+      }
+
+      // Face player deck (+Z south from gallery pits)
+      const desiredYaw = Math.PI;
+      this.combatant.yaw = dampAngle(this.combatant.yaw, desiredYaw, 10, dt);
+      this.combatant.pitch = 0;
+      this.combatant.isCrouching = false;
+      this.combatant.modelPackage.root.position.copy(this.combatant.position);
+      this.combatant.modelPackage.root.rotation.y = this.combatant.yaw;
+      this.combatant.modelPackage.updateAnimation(dt, isMovingRange, rangeSpeed, false, false, 0, false);
+      this.combatant.modelPackage.root.updateMatrixWorld(true);
+      return;
     }
 
     const isBlinded = abilityMgr.blindedCombatantIds.has(this.combatant.id);
@@ -405,30 +455,53 @@ export class BotController {
   }
 
   private tryMoveWithSlide(dx: number, dz: number, abilityMgr: AbilityManager): boolean {
-    const nextX = this.combatant.position.x + dx;
-    const nextZ = this.combatant.position.z + dz;
+    const prevX = this.combatant.position.x;
+    const prevZ = this.combatant.position.z;
+    const feetY = this.combatant.position.y;
+    const nextX = prevX + dx;
+    const nextZ = prevZ + dz;
+    const isTraining = Boolean(getActiveMapDef().isTrainingMap);
 
-    const blockedByBarrier = (tx: number, tz: number) => abilityMgr.isBlockedByBarrier(tx, tz, 0.45);
+    const canStand = (tx: number, tz: number): number | null => {
+      if (abilityMgr.isBlockedByBarrier(tx, tz, 0.45)) return null;
+      const floorY = sampleWorldFloorY(tx, tz, feetY, 0.72);
+      if (isTraining && floorY < 1.5) return null;
+      return Math.max(0, floorY);
+    };
 
-    const col = checkCollision(nextX, nextZ, 0.45);
-    if (!col.collided && !blockedByBarrier(nextX, nextZ)) {
-      this.combatant.position.x = nextX;
-      this.combatant.position.z = nextZ;
+    const res = resolveWorldMovement(nextX, nextZ, feetY, 0.45);
+    const fullFloor = canStand(res.x, res.z);
+    if (!res.collided && fullFloor !== null) {
+      this.combatant.position.x = res.x;
+      this.combatant.position.z = res.z;
+      this.combatant.position.y = fullFloor;
       return true;
     }
 
-    let moved = false;
-    if (!checkCollision(nextX, this.combatant.position.z, 0.45).collided && !blockedByBarrier(nextX, this.combatant.position.z)) {
-      this.combatant.position.x = nextX;
-      moved = true;
-    } else if (!checkCollision(this.combatant.position.x, nextZ, 0.45).collided && !blockedByBarrier(this.combatant.position.x, nextZ)) {
-      this.combatant.position.z = nextZ;
-      moved = true;
-    } else {
-      this.combatant.position.x += col.normalX * 0.08;
-      this.combatant.position.z += col.normalZ * 0.08;
+    if (fullFloor !== null && (Math.abs(res.x - prevX) > 0.005 || Math.abs(res.z - prevZ) > 0.005)) {
+      this.combatant.position.x = res.x;
+      this.combatant.position.z = res.z;
+      this.combatant.position.y = fullFloor;
+      return true;
     }
-    return moved;
+
+    const resX = resolveWorldMovement(nextX, prevZ, feetY, 0.45);
+    const floorX = !resX.collided ? canStand(resX.x, resX.z) : null;
+    if (floorX !== null) {
+      this.combatant.position.x = resX.x;
+      this.combatant.position.y = floorX;
+      return true;
+    }
+
+    const resZ = resolveWorldMovement(prevX, nextZ, feetY, 0.45);
+    const floorZ = !resZ.collided ? canStand(resZ.x, resZ.z) : null;
+    if (floorZ !== null) {
+      this.combatant.position.z = resZ.z;
+      this.combatant.position.y = floorZ;
+      return true;
+    }
+
+    return false;
   }
 
   private switchBotSlot(slot: 1 | 2 | 3): void {
@@ -553,7 +626,7 @@ export class BotController {
     // Check if strafing side is walkable; flip strafe sign immediately if hitting a wall
     const probeX = this.combatant.position.x + (-dirZ * this.strafeSign) * 1.1;
     const probeZ = this.combatant.position.z + (dirX * this.strafeSign) * 1.1;
-    if (!isPointWalkable(probeX, probeZ, 0.45)) {
+    if (!isPointWalkable(probeX, probeZ, 0.45, this.combatant.position.y)) {
       this.strafeSign *= -1;
     }
 
@@ -581,16 +654,17 @@ export class BotController {
     if (this.abilityCooldown <= 0 && this.difficulty !== 'EASY') {
       this.abilityCooldown = this.difficulty === 'HARD' ? 9.5 : 13.5;
       const agId = this.combatant.agentId;
+      const feetY = this.combatant.position.y;
       if (agId === 'KAEL') {
         if (flatDist < 20) {
-          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 3.8, 5.5, this.combatant.team);
+          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 3.8, 5.5, this.combatant.team, target.position.y);
         }
         this.tryMoveWithSlide(-dirZ * this.strafeSign * 2.2, dirX * this.strafeSign * 2.2, abilityMgr);
       } else if (agId === 'ZED') {
         if (lowHp) {
           abilityMgr.deploySmoke(
             this.combatant.position.x + dirX * Math.min(flatDist * 0.4, 6),
-            0,
+            feetY,
             this.combatant.position.z + dirZ * Math.min(flatDist * 0.4, 6)
           );
         } else {
@@ -600,17 +674,17 @@ export class BotController {
         if (lowHp) {
           abilityMgr.deploySmoke(
             this.combatant.position.x + dirX * Math.min(flatDist * 0.45, 7),
-            0,
+            feetY,
             this.combatant.position.z + dirZ * Math.min(flatDist * 0.45, 7)
           );
         } else if (flatDist < 20) {
-          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 4.0, 5.5, this.combatant.team);
+          abilityMgr.deployZone('GRAVITY', target.position.x, target.position.z, 4.0, 5.5, this.combatant.team, target.position.y);
         }
       } else if (agId === 'SOREN' || agId === 'PULSE') {
         if (flatDist < 22 && Math.random() < 0.55) {
           abilityMgr.throwFlashOrb(
             this.combatant.position.x,
-            this.combatant.position.y + 1.4,
+            feetY + 1.4,
             this.combatant.position.z,
             _toEnemy.clone().normalize(),
             this.combatant.team
@@ -618,7 +692,7 @@ export class BotController {
         } else {
           abilityMgr.triggerReconPulse(
             this.combatant.position.x,
-            0,
+            feetY,
             this.combatant.position.z,
             this.combatant.team,
             allCombatants
@@ -628,7 +702,7 @@ export class BotController {
         if (lowHp) {
           abilityMgr.deployBarrier(
             this.combatant.position.x + dirX * 2.1,
-            0,
+            feetY,
             this.combatant.position.z + dirZ * 2.1,
             this.combatant.yaw
           );
@@ -642,7 +716,8 @@ export class BotController {
             this.combatant.position.x + dirX * 1.8,
             this.combatant.position.z + dirZ * 1.8,
             this.combatant.yaw,
-            this.combatant.team
+            this.combatant.team,
+            feetY
           );
         }
       }
@@ -743,10 +818,17 @@ export class BotController {
     }
 
     const isAttacker = this.combatant.team === 'ATTACKERS';
+    const isTdm = isTdmMap(getActiveMapDef());
 
-    if (isAttacker && this.combatant.hasSpike && spikeState === 'not_planted') {
-      const distA = this.combatant.position.distanceTo(_sitePos.set(BOMB_SITE_A.x, 0, BOMB_SITE_A.z));
-      const distB = this.combatant.position.distanceTo(_sitePos.set(BOMB_SITE_B.x, 0, BOMB_SITE_B.z));
+    if (!isTdm && isAttacker && this.combatant.hasSpike && spikeState === 'not_planted') {
+      const distA = Math.hypot(
+        this.combatant.position.x - BOMB_SITE_A.x,
+        this.combatant.position.z - BOMB_SITE_A.z
+      );
+      const distB = Math.hypot(
+        this.combatant.position.x - BOMB_SITE_B.x,
+        this.combatant.position.z - BOMB_SITE_B.z
+      );
 
       if (distA < BOMB_SITE_A.radius || distB < BOMB_SITE_B.radius) {
         this.state = 'PLANTING';
@@ -756,7 +838,7 @@ export class BotController {
       }
     }
 
-    if (!isAttacker && spikeState === 'planted' && spikePosition) {
+    if (!isTdm && !isAttacker && spikeState === 'planted' && spikePosition) {
       const distToSpike = this.combatant.position.distanceTo(spikePosition);
       if (distToSpike < 2.8) {
         this.state = 'DEFUSING';
@@ -772,10 +854,13 @@ export class BotController {
     }
 
     const nextNode = this.currentPath[this.currentPathIndex];
-    _targetPos.set(nextNode.x, 0, nextNode.z);
-    const distToNode = this.combatant.position.distanceTo(_targetPos);
+    _targetPos.set(nextNode.x, nextNode.y || 0, nextNode.z);
+    const distToNode = Math.hypot(
+      nextNode.x - this.combatant.position.x,
+      nextNode.z - this.combatant.position.z
+    );
 
-    if (distToNode < 1.7) {
+    if (distToNode < 1.85) {
       this.currentPathIndex++;
       this.stuckTimer = 0;
       if (this.currentPathIndex >= this.currentPath.length) {
@@ -838,7 +923,10 @@ export class BotController {
       this.combatant.actionProgress = 0;
       this.state = 'HOLDING_ANGLE';
       this.angleHoldTimer = 2.0;
-      const distA = this.combatant.position.distanceTo(_sitePos.set(BOMB_SITE_A.x, 0, BOMB_SITE_A.z));
+      const distA = Math.hypot(
+        this.combatant.position.x - BOMB_SITE_A.x,
+        this.combatant.position.z - BOMB_SITE_A.z
+      );
       onBotPlantComplete?.(this.combatant, distA < BOMB_SITE_A.radius + 2 ? 'A' : 'B');
     }
   }

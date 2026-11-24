@@ -50,6 +50,7 @@ interface CustomRoom {
   fillBots: boolean;
   isPublic: boolean;
   inMatch: boolean;
+  tdmTeamSize?: 1 | 2;
   members: RoomMember[];
 }
 
@@ -63,6 +64,8 @@ const DEFAULT_CUSTOM_MAP_URL =
   'https://raw.githubusercontent.com/Aosmic-S/Hollow-Strike/b8fdc2d84131569747a1fa9db1b516e1a4dd136b/public/models/Map/Warehouse.glb';
 const COURTYARD_CUSTOM_MAP_URL =
   'https://raw.githubusercontent.com/Aosmic-S/Hollow-Strike/7cf95c8ed1f2f06632311cdf8e967e58dd01f944/public/models/Map/valorant_style_map_v2_heavy-compressed.glb';
+const TRAINING_GROUND_CUSTOM_MAP_URL =
+  'https://raw.githubusercontent.com/Aosmic-S/Hollow-Strike/main/public/models/Map/training_ground_map_under25MB.glb';
 const PREFERRED_MAP_FILENAME = 'Warehouse.glb';
 
 interface ClientSession {
@@ -212,15 +215,27 @@ function sendJson(ws: WebSocket, payload: unknown): void {
   }
 }
 
+function getRoomMaxTeamSize(room: CustomRoom): number {
+  if (room.mapId === 'WAREHOUSE') {
+    return room.tdmTeamSize === 1 ? 1 : 2;
+  }
+  return 5;
+}
+
+function getRoomMaxTotal(room: CustomRoom): number {
+  return getRoomMaxTeamSize(room) * 2;
+}
+
 function getPublicRoomsSummary() {
   return Array.from(roomsByCode.values())
-    .filter((r) => r.isPublic && !r.inMatch && r.members.length < 10)
+    .filter((r) => r.isPublic && !r.inMatch && r.members.length < getRoomMaxTotal(r))
     .map((r) => ({
       code: r.code,
       name: r.name,
       hostUsername: r.hostUsername,
       mode: r.mode,
       mapId: r.mapId,
+      tdmTeamSize: r.tdmTeamSize,
       memberCount: r.members.length,
       fillBots: r.fillBots,
     }));
@@ -346,10 +361,16 @@ function addMemberToRoom(sess: ClientSession, room: CustomRoom, desiredTeam?: Te
     existing.online = true;
     existing.agentId = sess.agentId;
   } else {
+    const maxPerTeam = getRoomMaxTeamSize(room);
     const attCount = room.members.filter((m) => m.team === 'ATTACKERS').length;
     const defCount = room.members.filter((m) => m.team === 'DEFENDERS').length;
-    const assignedTeam: TeamSide =
+    let assignedTeam: TeamSide =
       desiredTeam ?? (attCount <= defCount ? 'ATTACKERS' : 'DEFENDERS');
+    if (assignedTeam === 'ATTACKERS' && attCount >= maxPerTeam && defCount < maxPerTeam) {
+      assignedTeam = 'DEFENDERS';
+    } else if (assignedTeam === 'DEFENDERS' && defCount >= maxPerTeam && attCount < maxPerTeam) {
+      assignedTeam = 'ATTACKERS';
+    }
 
     room.members.push({
       username: sess.username,
@@ -544,6 +565,8 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
       const fillBots = typeof msg.fillBots === 'boolean' ? msg.fillBots : false;
       const isPublic = typeof msg.isPublic === 'boolean' ? msg.isPublic : true;
       const mapId = typeof msg.mapId === 'string' && msg.mapId.trim() ? msg.mapId.trim().slice(0, 40) : 'WAREHOUSE';
+      const tdmTeamSize: 1 | 2 | undefined =
+        mapId === 'WAREHOUSE' ? (msg.tdmTeamSize === 1 ? 1 : 2) : undefined;
       const roomName =
         typeof msg.name === 'string' && msg.name.trim().length > 0
           ? msg.name.trim().slice(0, 26)
@@ -560,6 +583,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         fillBots,
         isPublic,
         inMatch: false,
+        tdmTeamSize,
         members: [],
       };
       roomsByCode.set(code, room);
@@ -574,7 +598,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         sendJson(sess.ws, { type: 'SERVER_NOTICE', message: `Room ${code} not found.` });
         return;
       }
-      if (room.members.length >= 10) {
+      if (room.members.length >= getRoomMaxTotal(room)) {
         sendJson(sess.ws, { type: 'SERVER_NOTICE', message: `Room ${code} is full.` });
         return;
       }
@@ -591,12 +615,14 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         : 'MEDIUM') as BotDifficulty;
       const fillBots = typeof msg.fillBots === 'boolean' ? msg.fillBots : false;
       const mapId = typeof msg.mapId === 'string' && msg.mapId.trim() ? msg.mapId.trim().slice(0, 40) : 'WAREHOUSE';
+      const tdmTeamSize: 1 | 2 | undefined =
+        mapId === 'WAREHOUSE' ? (msg.tdmTeamSize === 1 ? 1 : 2) : undefined;
 
       const openRoom = Array.from(roomsByCode.values()).find(
         (r) =>
           r.isPublic &&
           !r.inMatch &&
-          r.members.length < 10 &&
+          r.members.length < getRoomMaxTotal(r) &&
           r.mode === targetMode &&
           r.fillBots === fillBots
       );
@@ -605,9 +631,17 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
         addMemberToRoom(sess, openRoom);
       } else {
         const code = generateRoomCode();
+        const formatLabel =
+          mapId === 'WAREHOUSE'
+            ? `${tdmTeamSize === 1 ? '1v1' : '2v2'} TDM`
+            : targetMode === 'SKIRMISH'
+              ? 'Skirmish'
+              : targetMode === 'CUSTOM'
+                ? 'Multiplayer 5v5'
+                : 'Competitive';
         const room: CustomRoom = {
           code,
-          name: `${targetMode === 'SKIRMISH' ? 'Skirmish' : targetMode === 'CUSTOM' ? 'Multiplayer 5v5' : 'Competitive'} Match`,
+          name: `${formatLabel} Match`,
           hostUsername: sess.username,
           mode: targetMode,
           mapId,
@@ -615,6 +649,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
           fillBots,
           isPublic: true,
           inMatch: false,
+          tdmTeamSize,
           members: [],
         };
         roomsByCode.set(code, room);
@@ -641,7 +676,7 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
             ? 'DEFENDERS'
             : 'ATTACKERS';
       const countInTarget = room.members.filter((m) => m.team === requested).length;
-      if (countInTarget < 5) {
+      if (countInTarget < getRoomMaxTeamSize(room)) {
         member.team = requested;
         broadcastRoomState(room);
       }
@@ -668,6 +703,12 @@ function handleSocketMessage(sess: ClientSession, raw: string): void {
       if (typeof msg.isPublic === 'boolean') room.isPublic = msg.isPublic;
       if (typeof msg.mapId === 'string' && msg.mapId.trim()) {
         room.mapId = msg.mapId.trim().slice(0, 40);
+        if (room.mapId === 'WAREHOUSE' && !room.tdmTeamSize) {
+          room.tdmTeamSize = 2;
+        }
+      }
+      if (msg.tdmTeamSize === 1 || msg.tdmTeamSize === 2) {
+        room.tdmTeamSize = msg.tdmTeamSize;
       }
       if (['COMPETITIVE', 'SKIRMISH', 'PRACTICE', 'CUSTOM'].includes(String(msg.mode))) {
         room.mode = String(msg.mode) as MatchMode;
@@ -938,7 +979,7 @@ async function startServer(): Promise<void> {
     }
     res.setHeader('Content-Type', 'model/gltf-binary');
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.sendFile(filePath);
+    res.sendFile(filePath, { dotfiles: 'allow' });
   });
 
   app.get('/api/maps/courtyard.glb', async (_req, res) => {
@@ -946,7 +987,7 @@ async function startServer(): Promise<void> {
     if (fs.existsSync(courtyardCache) && fs.statSync(courtyardCache).size > 1024) {
       res.setHeader('Content-Type', 'model/gltf-binary');
       res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(courtyardCache);
+      res.sendFile(courtyardCache, { dotfiles: 'allow' });
       return;
     }
     try {
@@ -969,9 +1010,43 @@ async function startServer(): Promise<void> {
       fs.renameSync(tmp, courtyardCache);
       res.setHeader('Content-Type', 'model/gltf-binary');
       res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(courtyardCache);
+      res.sendFile(courtyardCache, { dotfiles: 'allow' });
     } catch {
       res.status(502).json({ ok: false, error: 'Unable to load courtyard GLB.' });
+    }
+  });
+
+  app.get('/api/maps/training_ground.glb', async (_req, res) => {
+    const trainingCache = path.join(MAP_CACHE_DIR, 'training_ground.glb');
+    if (fs.existsSync(trainingCache) && fs.statSync(trainingCache).size > 1024) {
+      res.setHeader('Content-Type', 'model/gltf-binary');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(trainingCache, { dotfiles: 'allow' });
+      return;
+    }
+    try {
+      fs.mkdirSync(MAP_CACHE_DIR, { recursive: true });
+      const upstream = await fetch(TRAINING_GROUND_CUSTOM_MAP_URL, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!upstream.ok) {
+        res.status(502).json({ ok: false, error: 'Training Ground GLB upstream unavailable.' });
+        return;
+      }
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      if (buffer.length < 1024) {
+        res.status(502).json({ ok: false, error: 'Training Ground GLB response invalid.' });
+        return;
+      }
+      const tmp = `${trainingCache}.tmp`;
+      fs.writeFileSync(tmp, buffer);
+      fs.renameSync(tmp, trainingCache);
+      res.setHeader('Content-Type', 'model/gltf-binary');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(trainingCache, { dotfiles: 'allow' });
+    } catch {
+      res.status(502).json({ ok: false, error: 'Unable to load training_ground GLB.' });
     }
   });
 

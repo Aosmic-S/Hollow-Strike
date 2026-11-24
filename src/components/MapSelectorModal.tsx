@@ -5,8 +5,9 @@
  */
 
 import React from 'react';
-import { Check, Layers, MapPin, ShieldAlert, X, Zap } from 'lucide-react';
+import { Check, Crosshair, Layers, MapPin, ShieldAlert, Swords, X, Zap } from 'lucide-react';
 import { MapDef } from '../game/types';
+import { isTdmMap } from '../game/rules';
 import { getMapArtwork } from './AgentAvatar';
 
 interface MapSelectorModalProps {
@@ -64,12 +65,14 @@ export const MapSelectorModal: React.FC<MapSelectorModalProps> = ({
           </div>
         )}
 
-        {/* Map Card Grid */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Map Card Grid (2-column balanced layout for 4 maps) */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           {maps.map((map) => {
             const isSelected = map.id === selectedMapId;
             const artUrl = getMapArtwork(map.id);
             const isInstant = map.modelUrl === 'procedural';
+            const isTdm = isTdmMap(map);
+            const isTraining = Boolean(map.isTrainingMap);
 
             return (
               <button
@@ -114,11 +117,21 @@ export const MapSelectorModal: React.FC<MapSelectorModalProps> = ({
                     {map.sector.split('//')[0].trim()}
                   </div>
 
-                  {/* Selected / Instant Badge */}
+                  {/* Selected / Mode Badge */}
                   {isSelected ? (
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-[#FF4655] px-2 py-0.5 font-mono text-[9px] font-extrabold uppercase tracking-wider text-white">
                       <Check className="h-3 w-3" />
                       ACTIVE
+                    </div>
+                  ) : isTdm ? (
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-[#FF4655]/20 border border-[#FF4655]/65 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-[#FF4655]">
+                      <Swords className="h-2.5 w-2.5" />
+                      1V1 / 2V2 TDM
+                    </div>
+                  ) : isTraining ? (
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-[#38bdf8]/20 border border-[#38bdf8]/65 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-[#38bdf8]">
+                      <Crosshair className="h-2.5 w-2.5" />
+                      THE RANGE
                     </div>
                   ) : isInstant ? (
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-[#17E5B8]/20 border border-[#17E5B8]/60 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-[#17E5B8]">

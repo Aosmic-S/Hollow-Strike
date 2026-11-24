@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { soundEngine } from './audio';
+import { sampleWorldFloorY } from './mapData';
 import type { BotCombatant } from './botAI';
 
 const _line = new THREE.Line3();
@@ -116,14 +117,15 @@ export class AbilityManager {
   }
 
   public deploySmoke(x: number, y: number, z: number, duration = 14): void {
+    const groundY = y > 0.1 ? y : Math.max(0, sampleWorldFloorY(x, z, y, 2.0));
     const mesh = new THREE.Mesh(this.smokeGeo, this.smokeMat);
-    mesh.position.set(x, Math.max(1.8, y), z);
+    mesh.position.set(x, groundY + 1.8, z);
     mesh.scale.set(0.1, 0.1, 0.1);
     this.scene.add(mesh);
 
     this.smokes.push({
       mesh,
-      position: new THREE.Vector3(x, y, z),
+      position: new THREE.Vector3(x, groundY + 1.8, z),
       radius: 3.6,
       remainingTime: duration,
     });
@@ -132,8 +134,9 @@ export class AbilityManager {
   }
 
   public deployBarrier(x: number, y: number, z: number, rotationY = 0, duration = 20, width = 5.2): void {
+    const groundY = y > 0.1 ? y : Math.max(0, sampleWorldFloorY(x, z, y, 2.0));
     const mesh = new THREE.Mesh(this.barrierGeo, this.barrierMat);
-    mesh.position.set(x, y + 1.6, z);
+    mesh.position.set(x, groundY + 1.6, z);
     mesh.rotation.y = rotationY;
     mesh.scale.x = width / 5.2;
     mesh.castShadow = !this.lowDetail;
@@ -142,7 +145,7 @@ export class AbilityManager {
 
     this.barriers.push({
       mesh,
-      position: new THREE.Vector3(x, y, z),
+      position: new THREE.Vector3(x, groundY, z),
       width,
       height: 3.2,
       rotationY,
@@ -177,15 +180,16 @@ export class AbilityManager {
     combatants?: BotCombatant[],
     maxRadius = 26
   ): void {
+    const groundY = y > 0.1 ? y : Math.max(0, sampleWorldFloorY(x, z, y, 2.0));
     const mat = this.pulseMat.clone();
     const mesh = new THREE.Mesh(this.pulseGeo, mat);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, 0.08, z);
+    mesh.position.set(x, groundY + 0.08, z);
     this.scene.add(mesh);
 
     this.pulses.push({
       mesh,
-      position: new THREE.Vector3(x, y, z),
+      position: new THREE.Vector3(x, groundY, z),
       radius: 0.5,
       maxRadius,
       remainingTime: 2.0,
@@ -210,8 +214,10 @@ export class AbilityManager {
     z: number,
     radius: number,
     duration: number,
-    ownerTeam: string
+    ownerTeam: string,
+    y = 0
   ): void {
+    const groundY = y > 0.1 ? y : Math.max(0, sampleWorldFloorY(x, z, y, 2.0));
     const colorMap: Record<ActiveZone['type'], number> = {
       TOXIN: 0x22c55e,
       STIM: 0x06b6d4,
@@ -231,14 +237,14 @@ export class AbilityManager {
 
     const mesh = new THREE.Mesh(this.zoneDiskGeo, mat);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, 0.06, z);
+    mesh.position.set(x, groundY + 0.06, z);
     mesh.scale.set(radius, radius, 1);
     this.scene.add(mesh);
 
     this.zones.push({
       type,
       mesh,
-      position: new THREE.Vector3(x, 0, z),
+      position: new THREE.Vector3(x, groundY, z),
       radius,
       remainingTime: duration,
       ownerTeam,
@@ -273,9 +279,10 @@ export class AbilityManager {
     soundEngine.playAbility('FLASH');
   }
 
-  public deployTurret(x: number, z: number, yaw: number, team: string): void {
+  public deployTurret(x: number, z: number, yaw: number, team: string, y = 0): void {
+    const groundY = y > 0.1 ? y : Math.max(0, sampleWorldFloorY(x, z, y, 2.0));
     const root = new THREE.Group();
-    root.position.set(x, 0, z);
+    root.position.set(x, groundY, z);
 
     const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.35, roughness: 0.4 });
     const eyeMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0ea5e9, emissiveIntensity: 1.5 });
@@ -301,7 +308,7 @@ export class AbilityManager {
     this.turrets.push({
       mesh: root,
       headGroup,
-      position: new THREE.Vector3(x, 0, z),
+      position: new THREE.Vector3(x, groundY, z),
       team,
       yaw,
       fireCooldown: 0.5,
@@ -429,7 +436,8 @@ export class AbilityManager {
         z.tickTimer = 0.45;
         for (const c of combatants) {
           if (!c.alive) continue;
-          if (c.position.distanceTo(z.position) > z.radius) continue;
+          const flatDist = Math.hypot(c.position.x - z.position.x, c.position.z - z.position.z);
+          if (flatDist > z.radius || Math.abs(c.position.y - z.position.y) > 3.5) continue;
 
           if (z.type === 'HEAL') {
             if (c.team === z.ownerTeam) {
@@ -484,14 +492,15 @@ export class AbilityManager {
         }
 
         if (bestTarget) {
+          const originY = t.position.y + 0.85;
           _turretDir.set(
             bestTarget.position.x - t.position.x,
-            1.15 - 0.85,
+            bestTarget.position.y + 1.15 - originY,
             bestTarget.position.z - t.position.z
           ).normalize();
           t.headGroup.rotation.y = Math.atan2(-_turretDir.x, -_turretDir.z);
           t.fireCooldown = 0.55;
-          onTurretFire?.(_closest.set(t.position.x, 0.85, t.position.z), _turretDir, t.team);
+          onTurretFire?.(_closest.set(t.position.x, originY, t.position.z), _turretDir, t.team);
         }
       }
 

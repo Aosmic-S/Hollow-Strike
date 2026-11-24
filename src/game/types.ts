@@ -1300,6 +1300,7 @@ export interface CustomRoomState {
   hostUsername: string;
   mode: MatchMode;
   mapId?: string;
+  tdmTeamSize?: 1 | 2;
   botDifficulty: BotDifficulty;
   fillBots: boolean;
   isPublic: boolean;
@@ -1332,6 +1333,7 @@ export interface MapDef {
   modelUrl: string | 'procedural';
   scaleXZ: number;
   scaleY: number;
+  rotationY?: number;
   halfExtent: number;
   skyColor: number;
   fogColor: number;
@@ -1343,22 +1345,27 @@ export interface MapDef {
   siteB: { x: number; y: number; z: number; radius: number; name: string };
   barrierAttZ: number;
   barrierDefZ: number;
+  supportsSpike?: boolean;
+  isTdmOnly?: boolean;
+  maxTeamSize?: number;
+  allowedTeamSizes?: number[];
+  isTrainingMap?: boolean;
 }
 
 export const MAP_REGISTRY: Record<string, MapDef> = {
   WAREHOUSE: {
     id: 'WAREHOUSE',
     name: 'Warehouse',
-    sector: 'SECTOR 04 // INDUSTRIAL CARGO',
-    tagline: 'Cargo bay lanes · Skylight mid',
-    description: 'High-ceiling freight facility with dense container cover, west Site A plaza, and east Site B loading depot.',
+    sector: 'SECTOR 04 // 1v1 & 2v2 TDM',
+    tagline: '1v1 / 2v2 TDM Only · Close-quarters cargo duel',
+    description: 'High-ceiling cargo bay tuned exclusively for fast 1v1 and 2v2 Team Deathmatch duels. No Spike plants — pure gunplay and rotations.',
     modelUrl: '/models/Map/Warehouse.glb',
     scaleXZ: 1.85,
     scaleY: 1.35,
     halfExtent: 32,
     skyColor: 0x0d1526,
     fogColor: 0x10192d,
-    tags: ['5v5 Standard', 'Warehouse GLB', 'A & B Sites'],
+    tags: ['1v1 / 2v2 TDM', 'No Spike', 'Warehouse GLB'],
     accentColor: '#FF4655',
     spawnAttackers: { x: -13, y: 0, z: -18 },
     spawnDefenders: { x: 2, y: 0, z: 16.5 },
@@ -1366,6 +1373,10 @@ export const MAP_REGISTRY: Record<string, MapDef> = {
     siteB: { x: 11, y: 0, z: -4.0, radius: 4.2, name: 'Site B' },
     barrierAttZ: -15.5,
     barrierDefZ: 12.5,
+    supportsSpike: false,
+    isTdmOnly: true,
+    maxTeamSize: 2,
+    allowedTeamSizes: [1, 2],
   },
   COURTYARD: {
     id: 'COURTYARD',
@@ -1374,19 +1385,23 @@ export const MAP_REGISTRY: Record<string, MapDef> = {
     tagline: 'Open mid duel · Dual citadel sites',
     description: 'Symmetric open-air tactical plaza with twin flanked avenues, elevated mid sightlines, and stone perimeter forts.',
     modelUrl: '/api/maps/courtyard.glb',
-    scaleXZ: 1.55,
-    scaleY: 1.25,
-    halfExtent: 38,
+    scaleXZ: 0.72,
+    scaleY: 0.85,
+    rotationY: Math.PI,
+    halfExtent: 46,
     skyColor: 0x16263d,
     fogColor: 0x1a2c47,
     tags: ['5v5 Standard', 'Classic Courtyard', 'Mid Control'],
     accentColor: '#17E5B8',
-    spawnAttackers: { x: 0, y: 0, z: -30 },
-    spawnDefenders: { x: 0, y: 0, z: 30 },
-    siteA: { x: -20, y: 0, z: 4, radius: 4.6, name: 'Site A' },
-    siteB: { x: 20, y: 0, z: 4, radius: 4.6, name: 'Site B' },
-    barrierAttZ: -22,
-    barrierDefZ: 22,
+    spawnAttackers: { x: 0, y: 0, z: -26 },
+    spawnDefenders: { x: 0, y: 0, z: 26 },
+    siteA: { x: -18, y: 0, z: 11.5, radius: 4.6, name: 'Site A' },
+    siteB: { x: 18, y: 0, z: 11.5, radius: 4.6, name: 'Site B' },
+    barrierAttZ: -17.5,
+    barrierDefZ: 18.5,
+    supportsSpike: true,
+    isTdmOnly: false,
+    maxTeamSize: 5,
   },
   PROVING_GRID: {
     id: 'PROVING_GRID',
@@ -1408,22 +1423,115 @@ export const MAP_REGISTRY: Record<string, MapDef> = {
     siteB: { x: 18, y: 0, z: 2, radius: 4.5, name: 'Site B' },
     barrierAttZ: -20,
     barrierDefZ: 20,
+    supportsSpike: true,
+    isTdmOnly: false,
+    maxTeamSize: 5,
+  },
+  TRAINING_GROUND: {
+    id: 'TRAINING_GROUND',
+    name: 'The Range',
+    sector: 'SECTOR 00 // VALKYRIE TRAINING RANGE',
+    tagline: 'Shooting gallery · Plant & Defuse drills · Open island',
+    description: 'Multi-level island training compound with live target boards (10m/18m/26m), speed/streak trials, Temple Plant & Dock Defuse modules, and full walkway access.',
+    modelUrl: '/api/maps/training_ground.glb',
+    scaleXZ: 1.0,
+    scaleY: 1.0,
+    halfExtent: 58,
+    skyColor: 0x162b42,
+    fogColor: 0x1d3652,
+    tags: ['Training Area', 'All Guns Free', 'Drills & Bots'],
+    accentColor: '#38bdf8',
+    spawnAttackers: { x: -2, y: 8.05, z: 2 },
+    spawnDefenders: { x: 24, y: 12.05, z: -8 },
+    siteA: { x: -26, y: 12.3, z: -13, radius: 5.0, name: 'Temple Plant' },
+    siteB: { x: 24, y: 5.05, z: 20, radius: 5.0, name: 'Dock Defuse' },
+    barrierAttZ: -999,
+    barrierDefZ: 999,
+    supportsSpike: true,
+    isTdmOnly: false,
+    isTrainingMap: true,
+    maxTeamSize: 5,
   },
 };
 
 export const DEFAULT_MAP_ID = 'WAREHOUSE';
 
+export type TrainingDrillMode =
+  | 'PRACTICE'
+  | 'SPEED_30'
+  | 'STREAK_50'
+  | 'STRAFE'
+  | 'PLANT_DRILL'
+  | 'DEFUSE_DRILL'
+  | 'FREE_ROAM';
+
+export type TrainingZoneId =
+  | 'PLAZA'
+  | 'GALLERY'
+  | 'PIT'
+  | 'TEMPLE'
+  | 'DOCK'
+  | 'VILLAGE'
+  | 'BUNKER'
+  | 'ISLAND';
+
+export interface TrainingZoneDef {
+  id: TrainingZoneId;
+  label: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+
+export const TRAINING_ZONES: TrainingZoneDef[] = [
+  { id: 'PLAZA', label: 'Plaza', x: -2, y: 8.05, z: 2, yaw: 0 },
+  { id: 'GALLERY', label: 'Range', x: 24, y: 12.05, z: -6, yaw: 0 },
+  { id: 'PIT', label: 'Mid Pit', x: 22, y: 8.6, z: 1, yaw: Math.PI / 2 },
+  { id: 'TEMPLE', label: 'Temple', x: -26, y: 12.35, z: -13, yaw: 0 },
+  { id: 'DOCK', label: 'Dock', x: 24, y: 5.1, z: 18, yaw: Math.PI },
+  { id: 'VILLAGE', label: 'Village', x: 0, y: 12.5, z: -24, yaw: Math.PI },
+  { id: 'BUNKER', label: 'Bunker', x: -16, y: 17.05, z: -28, yaw: Math.PI * 0.75 },
+  { id: 'ISLAND', label: 'Sky Isle', x: 0, y: 47.6, z: -25, yaw: 0 },
+];
+
+export interface TrainingSessionState {
+  drillMode: TrainingDrillMode;
+  botArmor: boolean;
+  botsStrafe: boolean;
+  infiniteMag: boolean;
+  activeTargetDistance: 10 | 18 | 26;
+  trialStatus: 'IDLE' | 'RUNNING' | 'COMPLETE';
+  trialTimeElapsed: number;
+  trialKills: number;
+  trialTarget: number;
+  shotsFired: number;
+  shotsHit: number;
+  headshots: number;
+  bestSpeedTime: number | null;
+  bestStreakScore: number;
+  spikeObjectiveActive: boolean;
+  spikeObjectiveLabel: string;
+  spikeObjectiveTimer: number;
+}
+
 export function getAvailableMaps(customFilenames: string[] = []): MapDef[] {
-  const base = [MAP_REGISTRY.WAREHOUSE, MAP_REGISTRY.COURTYARD, MAP_REGISTRY.PROVING_GRID];
+  const base = [
+    MAP_REGISTRY.WAREHOUSE,
+    MAP_REGISTRY.COURTYARD,
+    MAP_REGISTRY.PROVING_GRID,
+    MAP_REGISTRY.TRAINING_GROUND,
+  ];
   const extras: MapDef[] = [];
   for (const file of customFilenames) {
     const clean = file.trim();
     if (!clean) continue;
-    if (clean.toLowerCase() === 'warehouse.glb') continue;
+    const lower = clean.toLowerCase();
+    if (lower === 'warehouse.glb' || lower === 'training_ground_map_under25mb.glb') continue;
     const baseName = clean.replace(/\.(glb|gltf)$/i, '').replace(/[_-]+/g, ' ');
     const id = `CUSTOM_${clean.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
     extras.push({
-      ...MAP_REGISTRY.WAREHOUSE,
+      ...MAP_REGISTRY.COURTYARD,
       id,
       name: baseName.toUpperCase(),
       sector: 'CUSTOM ARENA // LOCAL GLB',

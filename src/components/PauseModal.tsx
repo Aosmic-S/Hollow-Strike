@@ -9,6 +9,8 @@ interface PauseModalProps {
   attackerScore: number;
   defenderScore: number;
   currentRound: number;
+  isTdmMatch?: boolean;
+  teamSize?: number;
   onResume: () => void;
   onOpenSettings: () => void;
   onReturnToTitle: () => void;
@@ -18,6 +20,8 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   attackerScore,
   defenderScore,
   currentRound,
+  isTdmMatch = false,
+  teamSize = 2,
   onResume,
   onOpenSettings,
   onReturnToTitle,
@@ -42,7 +46,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
           <span className="text-[#8B978F]">—</span>
           <span className="text-[#17E5B8] font-bold">{defenderScore} DEF</span>
           <span className="text-[#8B978F]">|</span>
-          <span className="text-xs text-[#8B978F]">ROUND {currentRound}</span>
+          <span className="text-xs text-[#8B978F]">
+            {isTdmMatch ? `${teamSize}V${teamSize} TDM` : `ROUND ${currentRound}`}
+          </span>
         </div>
 
         <div className="mt-6 flex flex-col gap-2.5">

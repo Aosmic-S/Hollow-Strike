@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import {
   calculateDamage,
   calculateEconomy,
@@ -22,18 +23,41 @@ import {
   raycastAABBs,
   worldToRadarCoord,
   sanitizeChatText,
+  isTdmMap,
+  getAllowedTeamSizes,
+  clampTeamSizeForMap,
+  getTdmKillTarget,
+  checkTdmMatchWin,
 } from './rules';
-import { AGENT_REGISTRY, DEFAULT_KEY_BINDINGS, WEAPON_REGISTRY, getAvailableMaps } from './types';
+import { computeRankProgress } from './profileStore';
+import {
+  AGENT_REGISTRY,
+  DEFAULT_KEY_BINDINGS,
+  MAP_REGISTRY,
+  TRAINING_ZONES,
+  WEAPON_REGISTRY,
+  getAvailableMaps,
+} from './types';
 import {
   BOMB_SITE_A,
   BOMB_SITE_B,
+  COURTYARD_FALLBACK_COLLIDERS,
+  MAP_COLLIDERS,
   NAV_GRAPH,
   SPAWN_ATTACKERS,
   SPAWN_DEFENDERS,
   findNavPath,
+  getExtractedWallColliders,
   isPointWalkable,
   setActiveMap,
+  setExtractedMapColliders,
 } from './mapData';
+import {
+  buildMeshColliderFromObject,
+  raycastMeshGrid,
+  resolveMeshHorizontalCylinder,
+  sampleMeshFloorY,
+} from './meshCollider';
 
 test('WEAPON_REGISTRY contains all 18 required weapons across all 7 categories', () => {
   const expectedNames = [
@@ -496,3 +520,169 @@ test('sanitizeChatText normalizes whitespace, strips newlines, and caps length',
   assert.equal(sanitizeChatText('a'.repeat(300), 220).length, 220);
 });
 
+test('computeRankProgress and leaderboard sorting order players correctly', () => {
+  const p1 = {
+    callsign: 'P1',
+    favoriteAgentId: 'KAEL',
+    totalMatches: 20,
+    wins: 15,
+    losses: 5,
+    kills: 180,
+    deaths: 90,
+    headshots: 45,
+    damageDealt: 21000,
+    roundsWon: 120,
+    roundsLost: 70,
+    agentStats: {},
+    weaponStats: {},
+    matchHistory: [],
+  };
+  const r1 = computeRankProgress(p1);
+  assert.ok(r1.level >= 15);
+  assert.equal(r1.tier, 'APEX COMMANDER');
+
+  const p2 = { ...p1, callsign: 'P2', wins: 5, kills: 50 };
+  const r2 = computeRankProgress(p2);
+  assert.ok(r1.xp > r2.xp);
+
+  const list = [
+    { callsign: 'B', wins: 10, kills: 100, score: 60000 },
+    { callsign: 'A', wins: 20, kills: 80, score: 108000 },
+    { callsign: 'C', wins: 5, kills: 150, score: 40000 },
+  ];
+  list.sort((a, b) => b.wins - a.wins);
+  assert.equal(list[0].callsign, 'A');
+  assert.equal(list[1].callsign, 'B');
+  assert.equal(list[2].callsign, 'C');
+
+  list.sort((a, b) => b.kills - a.kills);
+  assert.equal(list[0].callsign, 'C');
+  assert.equal(list[1].callsign, 'B');
+  assert.equal(list[2].callsign, 'A');
+});
+
+test('setActiveMap isolates Courtyard GLB from procedural interior colliders and clears prior extracted walls', () => {
+  setActiveMap('WAREHOUSE');
+  setExtractedMapColliders([{ minX: -2, maxX: 2, minY: 0, maxY: 3, minZ: -2, maxZ: 2 }]);
+  assert.equal(getExtractedWallColliders().length, 1);
+
+  setActiveMap('COURTYARD');
+  assert.equal(getExtractedWallColliders().length, 0);
+  // Only the 4 outer perimeter safety bounds remain active for Courtyard GLB
+  assert.equal(MAP_COLLIDERS.length, 4);
+  assert.ok(COURTYARD_FALLBACK_COLLIDERS.length > MAP_COLLIDERS.length);
+  // Mid center must remain unobstructed by procedural boxes when courtyard.glb is active
+  assert.equal(isPointWalkable(0, 0), true);
+
+  setActiveMap('PROVING_GRID');
+  assert.ok(MAP_COLLIDERS.length > 4);
+  setActiveMap('WAREHOUSE');
+});
+
+test('WAREHOUSE enforces 1v1 and 2v2 TDM-only rules without Spike play', () => {
+  const wh = MAP_REGISTRY.WAREHOUSE;
+  assert.equal(isTdmMap(wh), true);
+  assert.equal(wh.supportsSpike, false);
+  assert.deepEqual(getAllowedTeamSizes(wh), [1, 2]);
+  assert.equal(clampTeamSizeForMap(wh, 1), 1);
+  assert.equal(clampTeamSizeForMap(wh, 2), 2);
+  assert.equal(clampTeamSizeForMap(wh, 5), 2);
+  assert.equal(getTdmKillTarget(1), 15);
+  assert.equal(getTdmKillTarget(2), 25);
+  assert.equal(checkTdmMatchWin(14, 14, 15), null);
+  assert.equal(checkTdmMatchWin(15, 10, 15), 'ATTACKERS');
+  assert.equal(checkTdmMatchWin(20, 25, 25), 'DEFENDERS');
+
+  assert.equal(isTdmMap(MAP_REGISTRY.COURTYARD), false);
+  assert.deepEqual(getAllowedTeamSizes(MAP_REGISTRY.COURTYARD), [5]);
+  assert.equal(clampTeamSizeForMap(MAP_REGISTRY.COURTYARD, 2), 5);
+});
+
+test('TRAINING_GROUND registers all four built-in maps, training zones, and connected Range nav graph', () => {
+  const available = getAvailableMaps().map((m) => m.id);
+  for (const id of ['WAREHOUSE', 'COURTYARD', 'PROVING_GRID', 'TRAINING_GROUND']) {
+    assert.ok(available.includes(id), `Expected ${id} in getAvailableMaps()`);
+  }
+
+  assert.equal(MAP_REGISTRY.TRAINING_GROUND.isTrainingMap, true);
+  assert.ok(TRAINING_ZONES.length >= 6);
+  for (const zone of TRAINING_ZONES) {
+    assert.ok(zone.id && zone.label);
+    assert.ok(Number.isFinite(zone.x) && Number.isFinite(zone.y) && Number.isFinite(zone.z));
+  }
+
+  try {
+    const def = setActiveMap('TRAINING_GROUND');
+    assert.equal(def.id, 'TRAINING_GROUND');
+    assert.equal(MAP_COLLIDERS.length, 4);
+    assert.ok(Object.keys(NAV_GRAPH).length >= 8);
+    const path = findNavPath('att_spawn', 'site_a_plant');
+    assert.equal(path[path.length - 1]?.id, 'site_a_plant');
+  } finally {
+    setActiveMap('WAREHOUSE');
+  }
+});
+
+test('MeshColliderGrid samples stepped elevations, blocks solid walls, clears overhead doorways, and raycasts faces', () => {
+  const root = new THREE.Group();
+
+  const floorMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(20, 0.4, 20),
+    new THREE.MeshBasicMaterial({ name: 'stone' })
+  );
+  floorMesh.position.set(0, 1.8, 0);
+  root.add(floorMesh);
+
+  const stepMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 0.4, 8),
+    new THREE.MeshBasicMaterial({ name: 'stone' })
+  );
+  stepMesh.position.set(5, 2.2, 0);
+  root.add(stepMesh);
+
+  const leftWall = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 3.0, 0.6),
+    new THREE.MeshBasicMaterial({ name: 'brick' })
+  );
+  leftWall.position.set(-3.2, 3.5, -3);
+  root.add(leftWall);
+
+  const rightWall = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 3.0, 0.6),
+    new THREE.MeshBasicMaterial({ name: 'brick' })
+  );
+  rightWall.position.set(3.2, 3.5, -3);
+  root.add(rightWall);
+
+  const lintel = new THREE.Mesh(
+    new THREE.BoxGeometry(2.4, 0.8, 0.6),
+    new THREE.MeshBasicMaterial({ name: 'brick' })
+  );
+  lintel.position.set(0, 4.6, -3);
+  root.add(lintel);
+
+  const grid = buildMeshColliderFromObject(root, { cellSize: 2.0, minWorldY: 0.4 });
+  assert.ok(grid);
+  assert.ok(grid!.triCount > 0);
+
+  const yBase = sampleMeshFloorY(grid!, 0, 0, 2.0, 0.65);
+  assert.ok(yBase !== null && Math.abs(yBase - 2.0) < 0.05);
+
+  const yStep = sampleMeshFloorY(grid!, 5, 0, 2.0, 0.65);
+  assert.ok(yStep !== null && Math.abs(yStep - 2.4) < 0.05);
+
+  const doorwayPass = resolveMeshHorizontalCylinder(grid!, 0, -3.0, 2.0, 0.36, 1.72);
+  assert.equal(doorwayPass.collided, false);
+
+  // Player at (-3.0, -2.5) penetrates front wall face at z = -2.7 with radius 0.36; pushed back to > -2.45
+  const wallHit = resolveMeshHorizontalCylinder(grid!, -3.0, -2.5, 2.0, 0.36, 1.72);
+  assert.equal(wallHit.collided, true);
+  assert.ok(wallHit.z > -2.45);
+
+  const wallRay = raycastMeshGrid(grid!, -3.0, 3.3, 0, 0, 0, -1, 15);
+  assert.ok(wallRay);
+  assert.ok(Math.abs(wallRay!.z - (-2.7)) < 0.05);
+
+  const doorwayRay = raycastMeshGrid(grid!, 0, 3.3, 0, 0, 0, -1, 15);
+  assert.equal(doorwayRay, null);
+});

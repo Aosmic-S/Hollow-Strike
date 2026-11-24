@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { loadGLBModel, normalizeWeaponModel } from './modelLoader';
+import { LoadGLBOptions, loadGLBModel, normalizeWeaponModel } from './modelLoader';
 
 const darkMetalMat = new THREE.MeshStandardMaterial({
   color: 0x334458,
@@ -72,33 +72,33 @@ export interface WeaponViewmodelProfile {
 
 const WEAPON_VIEWMODEL_PROFILES: Record<string, WeaponViewmodelProfile> = {
   // === SIDEARMS ===
-  KADENCE: { hipPos: [0.22, -0.21, -0.40], adsPos: [0, -0.13, -0.32], flashPos: [0, 0.04, -0.18] },
-  THORN: { hipPos: [0.22, -0.20, -0.39], adsPos: [0, -0.13, -0.32], flashPos: [0, 0.04, -0.21] },
-  FURY: { hipPos: [0.23, -0.21, -0.40], adsPos: [0, -0.13, -0.31], flashPos: [0, 0.04, -0.22] },
-  FRENKY: { hipPos: [0.23, -0.22, -0.41], adsPos: [0, -0.14, -0.32], flashPos: [0, 0.045, -0.24] },
-  HANGMAN: { hipPos: [0.23, -0.21, -0.42], adsPos: [0, -0.135, -0.32], flashPos: [0, 0.045, -0.25] },
+  KADENCE: { hipPos: [0.22, -0.21, -0.40], adsPos: [0, -0.118, -0.32], flashPos: [0, 0.04, -0.18] },
+  THORN: { hipPos: [0.22, -0.20, -0.39], adsPos: [0, -0.118, -0.32], flashPos: [0, 0.04, -0.21] },
+  FURY: { hipPos: [0.23, -0.21, -0.40], adsPos: [0, -0.12, -0.31], flashPos: [0, 0.04, -0.22] },
+  FRENKY: { hipPos: [0.23, -0.22, -0.41], adsPos: [0, -0.125, -0.32], flashPos: [0, 0.045, -0.24] },
+  HANGMAN: { hipPos: [0.23, -0.21, -0.42], adsPos: [0, -0.122, -0.32], flashPos: [0, 0.045, -0.25] },
 
   // === SMGs ===
-  MANTIS: { hipPos: [0.24, -0.22, -0.43], adsPos: [0, -0.14, -0.31], flashPos: [0, 0.04, -0.34] },
-  STINGRAY: { hipPos: [0.24, -0.22, -0.42], adsPos: [0, -0.14, -0.30], flashPos: [0, 0.04, -0.29] },
+  MANTIS: { hipPos: [0.23, -0.21, -0.41], adsPos: [0, -0.105, -0.30], flashPos: [0, 0.036, -0.31] },
+  STINGRAY: { hipPos: [0.22, -0.21, -0.40], adsPos: [0, -0.102, -0.29], flashPos: [0, 0.036, -0.27] },
 
   // === SHOTGUNS ===
-  SLUG: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.15, -0.33], flashPos: [0, 0.04, -0.42] },
-  JACKAL: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.15, -0.33], flashPos: [0, 0.045, -0.41] },
+  SLUG: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.135, -0.33], flashPos: [0, 0.04, -0.42] },
+  JACKAL: { hipPos: [0.24, -0.22, -0.44], adsPos: [0, -0.112, -0.32], flashPos: [0, 0.04, -0.37] },
 
   // === RIFLES ===
-  REAPER: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.148, -0.31], flashPos: [0, 0.045, -0.44] },
-  ECLIPSE: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.148, -0.31], flashPos: [0, 0.045, -0.49] },
-  VEIL: { hipPos: [0.25, -0.22, -0.45], adsPos: [0, -0.152, -0.30], flashPos: [0, 0.04, -0.42] },
-  TUSK: { hipPos: [0.25, -0.22, -0.45], adsPos: [0, -0.148, -0.31], flashPos: [0, 0.042, -0.42] },
+  REAPER: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.135, -0.31], flashPos: [0, 0.045, -0.44] },
+  ECLIPSE: { hipPos: [0.25, -0.23, -0.46], adsPos: [0, -0.135, -0.31], flashPos: [0, 0.045, -0.49] },
+  VEIL: { hipPos: [0.24, -0.22, -0.44], adsPos: [0, -0.112, -0.30], flashPos: [0, 0.04, -0.40] },
+  TUSK: { hipPos: [0.25, -0.22, -0.45], adsPos: [0, -0.135, -0.31], flashPos: [0, 0.042, -0.42] },
 
   // === SNIPERS ===
-  BOLT: { hipPos: [0.26, -0.23, -0.48], adsPos: [0, -0.155, -0.30], flashPos: [0, 0.045, -0.52] },
-  ORACLE: { hipPos: [0.27, -0.24, -0.50], adsPos: [0, -0.158, -0.29], flashPos: [0, 0.048, -0.60] },
+  BOLT: { hipPos: [0.26, -0.23, -0.48], adsPos: [0, -0.138, -0.30], flashPos: [0, 0.045, -0.52] },
+  ORACLE: { hipPos: [0.25, -0.23, -0.47], adsPos: [0, -0.118, -0.29], flashPos: [0, 0.044, -0.52] },
 
   // === MACHINE GUNS ===
-  STORM: { hipPos: [0.26, -0.24, -0.47], adsPos: [0, -0.15, -0.32], flashPos: [0, 0.045, -0.45] },
-  THOR: { hipPos: [0.27, -0.25, -0.49], adsPos: [0, -0.155, -0.32], flashPos: [0, 0.05, -0.50] },
+  STORM: { hipPos: [0.26, -0.24, -0.47], adsPos: [0, -0.138, -0.32], flashPos: [0, 0.045, -0.45] },
+  THOR: { hipPos: [0.27, -0.25, -0.49], adsPos: [0, -0.142, -0.32], flashPos: [0, 0.05, -0.50] },
 
   // === MELEE ===
   HOLLOW_BLADE: { hipPos: [0.28, -0.26, -0.38], adsPos: [0.28, -0.26, -0.38], flashPos: [0, 0.04, -0.22] },
@@ -114,42 +114,77 @@ function syncLayerMask(target: THREE.Object3D, mask: number) {
   });
 }
 
-// New bespoke weapon GLBs added under /public/Assests/Weapon_models/
-const WEAPON_GLB_CONFIG: Record<
+export const WEAPON_GLB_LOAD_OPTIONS: LoadGLBOptions = {
+  clone: true,
+  castShadow: false,
+  maxTextureSize: 256,
+  stripSecondaryMaps: true,
+  normalizePbrForLighting: true,
+};
+
+// Optimized bespoke weapon GLBs under /public/Assests/Weapon_models/
+export const WEAPON_GLB_CONFIG: Record<
   string,
-  { path: string; targetLength: number; forwardAxis: '+x' | '-x' | '+z' | '-z'; pivotShift: [number, number, number] }
+  {
+    path: string;
+    targetLength: number;
+    forwardAxis: '+x' | '-x' | '+z' | '-z';
+    pivotShift: [number, number, number];
+    sightType: 'holo' | 'scope';
+    sightZ: number;
+    accentColor: 'teal' | 'crimson';
+  }
 > = {
   JACKAL: {
     path: '/Assests/Weapon_models/Jackal.glb',
-    targetLength: 0.72,
+    targetLength: 0.58,
     forwardAxis: '-x',
-    pivotShift: [0, 0.02, -0.12],
+    pivotShift: [0, 0.012, -0.09],
+    sightType: 'holo',
+    sightZ: -0.06,
+    accentColor: 'crimson',
   },
   MANTIS: {
     path: '/Assests/Weapon_models/mantis.glb',
-    targetLength: 0.56,
+    targetLength: 0.48,
     forwardAxis: '-x',
-    pivotShift: [0, 0.02, -0.09],
+    pivotShift: [0, 0.014, -0.07],
+    sightType: 'holo',
+    sightZ: -0.04,
+    accentColor: 'teal',
   },
   ORACLE: {
     path: '/Assests/Weapon_models/oracle.glb',
-    targetLength: 1.05,
+    targetLength: 0.78,
     forwardAxis: '-x',
-    pivotShift: [0, 0.025, -0.18],
+    pivotShift: [0, 0.015, -0.14],
+    sightType: 'scope',
+    sightZ: -0.08,
+    accentColor: 'crimson',
   },
   STINGRAY: {
     path: '/Assests/Weapon_models/stringray.glb',
-    targetLength: 0.48,
+    targetLength: 0.42,
     forwardAxis: '-x',
-    pivotShift: [0, 0.02, -0.08],
+    pivotShift: [0, 0.012, -0.06],
+    sightType: 'holo',
+    sightZ: -0.03,
+    accentColor: 'crimson',
   },
   VEIL: {
     path: '/Assests/Weapon_models/veil.glb',
-    targetLength: 0.78,
+    targetLength: 0.64,
     forwardAxis: '-x',
-    pivotShift: [0, 0.02, -0.14],
+    pivotShift: [0, 0.012, -0.11],
+    sightType: 'holo',
+    sightZ: -0.06,
+    accentColor: 'teal',
   },
 };
+
+export function getWeaponGLBPaths(): Array<{ id: string; path: string }> {
+  return Object.entries(WEAPON_GLB_CONFIG).map(([id, cfg]) => ({ id, path: cfg.path }));
+}
 
 function box(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -167,20 +202,31 @@ function cyl(rTop: number, rBot: number, len: number, mat: THREE.Material, x: nu
 }
 
 function addHoloOptic(g: THREE.Group, y: number, z: number, accent: THREE.Material) {
-  g.add(
-    box(0.028, 0.014, 0.06, darkMetalMat, 0, y, z),
-    box(0.032, 0.024, 0.038, gunmetalMat, 0, y + 0.018, z),
-    box(0.014, 0.012, 0.004, accent, 0, y + 0.018, z)
+  const railBase = box(0.028, 0.012, 0.064, darkMetalMat, 0, y, z);
+  const frameL = box(0.005, 0.026, 0.036, gunmetalMat, -0.016, y + 0.018, z);
+  const frameR = box(0.005, 0.026, 0.036, gunmetalMat, 0.016, y + 0.018, z);
+  const frameTop = box(0.037, 0.005, 0.036, gunmetalMat, 0, y + 0.031, z);
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(0.026, 0.022, 0.004),
+    new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    })
   );
+  glass.position.set(0, y + 0.018, z);
+  const reticleDot = box(0.005, 0.005, 0.005, accent, 0, y + 0.018, z - 0.002);
+  g.add(railBase, frameL, frameR, frameTop, glass, reticleDot);
 }
 
 function addScope(g: THREE.Group, y: number, z: number, len: number, accent: THREE.Material) {
   g.add(
-    box(0.022, 0.018, len * 0.4, darkMetalMat, 0, y - 0.014, z),
-    cyl(0.018, 0.018, len, darkMetalMat, 0, y + 0.008, z, 'z'),
-    cyl(0.026, 0.018, 0.06, gunmetalMat, 0, y + 0.008, z - len * 0.52, 'z'),
-    cyl(0.022, 0.022, 0.008, lensMat, 0, y + 0.008, z - len * 0.55, 'z'),
-    box(0.04, 0.008, 0.02, accent, 0, y + 0.008, z)
+    box(0.022, 0.018, len * 0.4, darkMetalMat, 0, y - 0.012, z),
+    cyl(0.017, 0.017, len, darkMetalMat, 0, y + 0.008, z, 'z'),
+    cyl(0.024, 0.017, 0.055, gunmetalMat, 0, y + 0.008, z - len * 0.52, 'z'),
+    cyl(0.020, 0.020, 0.008, lensMat, 0, y + 0.008, z - len * 0.55, 'z'),
+    box(0.038, 0.007, 0.018, accent, 0, y + 0.008, z)
   );
 }
 
@@ -207,13 +253,15 @@ function buildPistol(id: string): THREE.Group {
   }
 
   if (id === 'FRENKY') {
-    // Double-barrel pocket shotgun
+    // Double-barrel pocket shotgun with fiber-optic front sight
     g.add(
       box(0.044, 0.04, 0.13, polymerMat, 0, 0.018, -0.04),
       cyl(0.014, 0.014, 0.18, chromeMat, -0.015, 0.036, -0.14, 'z'),
       cyl(0.014, 0.014, 0.18, chromeMat, 0.015, 0.036, -0.14, 'z'),
-      box(0.046, 0.01, 0.08, accent, 0, 0.025, -0.10)
+      box(0.046, 0.01, 0.08, accent, 0, 0.025, -0.10),
+      box(0.007, 0.012, 0.012, accent, 0, 0.052, -0.21)
     );
+    addHoloOptic(g, 0.048, -0.04, accent);
     return g;
   }
 
@@ -328,10 +376,10 @@ function buildLongGun(id: string): THREE.Group {
     g.add(mag);
   }
 
-  // Optics
+  // Optics (all long guns including Slug now feature crisp tactical optics)
   if (isSniper) {
     addScope(g, 0.088, -0.12, 0.25, accent);
-  } else if (id !== 'SLUG') {
+  } else {
     addHoloOptic(g, 0.082, -0.06, accent);
   }
 
@@ -358,10 +406,14 @@ function buildHollowBladeModel(): THREE.Group {
 
 /**
  * Unified Weapon Model Factory by Weapon ID (supports all 18 arsenal weapons)
- * Uses the 5 bespoke GLBs under /Assests/Weapon_models/ where present and
- * crisp procedural 3D weapon silhouettes everywhere else (zero legacy paths).
+ * Uses optimized bespoke GLBs under /Assests/Weapon_models/ for first-person viewmodels,
+ * mounts calibrated 3D holo/scope optics directly onto the normalized receiver top rail,
+ * and allows lightweight `proceduralOnly` models for third-person bots.
  */
-export function createWeaponModel(weaponId: string): THREE.Group {
+export function createWeaponModel(
+  weaponId: string,
+  options: { proceduralOnly?: boolean } = {}
+): THREE.Group {
   if (weaponId === 'HOLLOW_BLADE') {
     return buildHollowBladeModel();
   }
@@ -369,15 +421,9 @@ export function createWeaponModel(weaponId: string): THREE.Group {
   const isSidearm = ['KADENCE', 'THORN', 'FURY', 'FRENKY', 'HANGMAN'].includes(weaponId);
   const container = isSidearm ? buildPistol(weaponId) : buildLongGun(weaponId);
 
-  const glbCfg = WEAPON_GLB_CONFIG[weaponId];
+  const glbCfg = options.proceduralOnly ? undefined : WEAPON_GLB_CONFIG[weaponId];
   if (glbCfg) {
-    loadGLBModel(glbCfg.path, {
-      clone: true,
-      castShadow: false,
-      maxTextureSize: 512,
-      stripSecondaryMaps: false,
-      normalizePbrForLighting: true,
-    }).then((rawObj) => {
+    loadGLBModel(glbCfg.path, WEAPON_GLB_LOAD_OPTIONS).then((rawObj) => {
       if (!rawObj) return;
       rawObj.traverse((c) => {
         if ((c as THREE.Mesh).isMesh) {
@@ -389,7 +435,20 @@ export function createWeaponModel(weaponId: string): THREE.Group {
         forwardAxis: glbCfg.forwardAxis,
         pivotShift: glbCfg.pivotShift,
       });
+
+      const normBox = new THREE.Box3().setFromObject(normalized);
+      const topRailY = THREE.MathUtils.clamp(normBox.max.y, 0.032, 0.095);
+      const opticGroup = new THREE.Group();
+      opticGroup.name = 'vm_mounted_optic';
+      const accent = glbCfg.accentColor === 'teal' ? tealAccentMat : crimsonAccentMat;
+      if (glbCfg.sightType === 'scope') {
+        addScope(opticGroup, topRailY + 0.014, glbCfg.sightZ, 0.22, accent);
+      } else {
+        addHoloOptic(opticGroup, topRailY + 0.004, glbCfg.sightZ, accent);
+      }
+
       syncLayerMask(normalized, container.layers.mask);
+      syncLayerMask(opticGroup, container.layers.mask);
 
       for (let i = container.children.length - 1; i >= 0; i--) {
         const child = container.children[i];
@@ -397,7 +456,7 @@ export function createWeaponModel(weaponId: string): THREE.Group {
           container.remove(child);
         }
       }
-      container.add(normalized);
+      container.add(normalized, opticGroup);
     });
   }
 

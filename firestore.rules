@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Leaderboard & profile lookup is public readable
+    // Only the authenticated owner can write/update their user profile
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    // Match history is readable for match breakdowns and stats
+    // Only authenticated users can record matches under their own uid
+    match /matches/{matchId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /test/connection {
+      allow read, write: if true;
+    }
+  }
+}

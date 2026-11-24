@@ -18,7 +18,8 @@ import {
   saveSelectedMapId,
   saveSettingsToStorage,
 } from './game/profileStore';
-import { setActiveMap } from './game/mapData';
+import { resolveMapDef, setActiveMap } from './game/mapData';
+import { clampTeamSizeForMap, getTdmKillTarget, isTdmMap } from './game/rules';
 import { multiplayerClient } from './game/multiplayerClient';
 import { voiceManager } from './game/voiceManager';
 import {
@@ -36,11 +37,13 @@ import {
   RoundPhase,
   SpectateState,
   TeamSide,
+  TrainingSessionState,
   WEAPON_REGISTRY,
   WeaponDef,
 } from './game/types';
 import { LobbyScreen } from './components/LobbyScreen';
 import { GameHUD } from './components/GameHUD';
+import { TrainingHUD } from './components/TrainingHUD';
 import { MobileControls } from './components/MobileControls';
 import { BuyMenu } from './components/BuyMenu';
 import { ScoreboardModal } from './components/ScoreboardModal';
@@ -51,6 +54,15 @@ import { OrientationGuard } from './components/OrientationGuard';
 import { TacticalMapModal } from './components/TacticalMapModal';
 import { LoadingSplash } from './components/LoadingSplash';
 import { PreMatchPlayer, PreMatchScreen } from './components/PreMatchScreen';
+import { GlobalLeaderboardModal } from './components/GlobalLeaderboardModal';
+import {
+  auth,
+  onAuthStateChanged,
+  saveMatchSummaryToFirestore,
+  syncUserProfileWithFirestore,
+  User,
+} from './firebase';
+import { MatchSummaryPayload } from './game/profileStore';
 
 type AppState = 'title' | 'prematch' | 'playing' | 'paused' | 'gameover';
 
@@ -67,7 +79,7 @@ export default function App() {
     loadSavedSettings({
       graphics: 'HIGH',
       fpsCap: 60,
-      showFps: false,
+      showFps: true,
       mouseSensitivity: 0.0022,
       touchSensitivity: 0.0035,
       adsSensitivityMultiplier: 0.7,
@@ -99,18 +111,23 @@ export default function App() {
     return saved;
   });
   const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('MEDIUM');
+  const [tdmTeamSize, setTdmTeamSize] = useState<1 | 2>(2);
+  const [tdmKillTarget, setTdmKillTarget] = useState<number>(25);
   const [lastMatchMode, setLastMatchMode] = useState<MatchMode>('CUSTOM');
   const [lastAllyBotIds, setLastAllyBotIds] = useState<string[]>([]);
   const [activeRoom, setActiveRoom] = useState<CustomRoomState | null>(null);
+  const [trainingState, setTrainingState] = useState<TrainingSessionState | null>(null);
   const pendingLaunchRef = useRef<{
     mode: MatchMode;
     customRoom: CustomRoomState | null;
     allyBotAgentIds: string[];
     mapId: string;
+    tdmTeamSize: 1 | 2;
   } | null>(null);
   const [prematchRoster, setPrematchRoster] = useState<{
     mode: MatchMode;
     mapId: string;
+    tdmTeamSize?: 1 | 2;
     playerTeam: TeamSide;
     defenders: PreMatchPlayer[];
     attackers: PreMatchPlayer[];
@@ -121,7 +138,24 @@ export default function App() {
   const [showMapModal, setShowMapModal] = useState<boolean>(false);
   const [showScoreboard, setShowScoreboard] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [showLeaderboard, setShowLeaderboard] = useState<boolean>(false);
   const [isChatFocused, setIsChatFocused] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
+  const [lastMatchSummary, setLastMatchSummary] = useState<MatchSummaryPayload | null>(null);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const synced = await syncUserProfileWithFirestore(user, profile);
+          setProfile(synced);
+        } catch (err) {
+          console.warn('[Firebase] Profile sync on auth change warning:', err);
+        }
+      }
+    });
+  }, []);
 
   // Live HUD States
   const [hp, setHp] = useState<number>(100);
@@ -185,6 +219,14 @@ export default function App() {
     setSelectedMapId(nextMapId);
     setActiveMap(nextMapId);
     saveSelectedMapId(nextMapId);
+    if (engineRef.current) {
+      if (appState === 'playing' || appState === 'paused') {
+        engineRef.current.loadMap(nextMapId);
+      } else {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
+    }
   };
 
   useEffect(() => {
@@ -198,15 +240,26 @@ export default function App() {
       showMapModal ||
       showScoreboard ||
       showSettings ||
+      showLeaderboard ||
       isChatFocused;
     engineRef.current?.setUiBlocking(blocked);
-  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, isChatFocused]);
+  }, [appState, showBuyMenu, showMapModal, showScoreboard, showSettings, showLeaderboard, isChatFocused]);
 
   // Check ?autostart=1 on mount + clean up engine
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('autostart') === '1') {
-      startGame('CUSTOM', null, [], true);
+      const qMap = params.get('map') || undefined;
+      const qMode = (params.get('mode') as MatchMode | null) || (qMap === 'TRAINING_GROUND' ? 'PRACTICE' : 'CUSTOM');
+      const qTdm = params.get('tdm') === '1' ? 1 : params.get('tdm') === '2' ? 2 : undefined;
+      if (qMap) {
+        setSelectedMapId(qMap);
+        setActiveMap(qMap);
+      }
+      if (qTdm) {
+        setTdmTeamSize(qTdm);
+      }
+      startGame(qMode, null, [], true, qMap, qTdm);
     }
     return () => {
       if (hitmarkerTimeoutRef.current) clearTimeout(hitmarkerTimeoutRef.current);
@@ -266,14 +319,25 @@ export default function App() {
     mode: MatchMode,
     customRoom: CustomRoomState | null,
     allyBotAgentIds: string[],
-    mapId: string
+    mapId: string,
+    teamSizeOverride?: 1 | 2
   ): {
     mode: MatchMode;
     mapId: string;
+    tdmTeamSize?: 1 | 2;
     playerTeam: TeamSide;
     defenders: PreMatchPlayer[];
     attackers: PreMatchPlayer[];
   } => {
+    const mapDef = resolveMapDef(mapId);
+    const isTdm = isTdmMap(mapDef);
+    const isTraining = Boolean(mapDef.isTrainingMap || mode === 'PRACTICE');
+    const maxSlots = isTdm
+      ? clampTeamSizeForMap(mapDef, teamSizeOverride ?? customRoom?.tdmTeamSize ?? tdmTeamSize)
+      : isTraining
+        ? 1
+        : 5;
+
     const myUsername = multiplayerClient.getCachedUsername();
     const myMember = customRoom?.members.find(
       (m) => m.username.toLowerCase() === myUsername.toLowerCase()
@@ -324,19 +388,20 @@ export default function App() {
       if (customRoom.fillBots) {
         const allyCount = roster.filter((r) => r.team === playerTeam).length;
         const oppCount = roster.filter((r) => r.team === oppTeam).length;
-        for (let i = 0; i < Math.max(0, 5 - allyCount); i++) {
+        for (let i = 0; i < Math.max(0, maxSlots - allyCount); i++) {
           pushBot(playerTeam, agentKeys[(i + 1) % agentKeys.length], i, true);
         }
-        for (let i = 0; i < Math.max(0, 5 - oppCount); i++) {
+        for (let i = 0; i < Math.max(0, maxSlots - oppCount); i++) {
           pushBot(oppTeam, agentKeys[(i + 2) % agentKeys.length], i, false);
         }
       }
-    } else {
+    } else if (!isTraining) {
+      const maxAllyBots = Math.max(0, maxSlots - 1);
       if (allyBotAgentIds.length > 0 && mode !== 'CUSTOM') {
-        allyBotAgentIds.slice(0, 4).forEach((agId, i) => pushBot(playerTeam, agId, i, true));
+        allyBotAgentIds.slice(0, maxAllyBots).forEach((agId, i) => pushBot(playerTeam, agId, i, true));
       }
       if (mode !== 'CUSTOM') {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < maxSlots; i++) {
           pushBot(oppTeam, agentKeys[(i + 2) % agentKeys.length], i, false);
         }
       }
@@ -345,6 +410,7 @@ export default function App() {
     return {
       mode,
       mapId,
+      tdmTeamSize: isTdm ? (maxSlots as 1 | 2) : undefined,
       playerTeam,
       defenders: roster.filter((p) => p.team === 'DEFENDERS'),
       attackers: roster.filter((p) => p.team === 'ATTACKERS'),
@@ -356,9 +422,22 @@ export default function App() {
     customRoom: CustomRoomState | null,
     allyBotAgentIds: string[],
     requestLock = false,
-    mapId = selectedMapId
+    mapId = selectedMapId,
+    teamSizeOverride: 1 | 2 = tdmTeamSize
   ) => {
-    if (canvasMountRef.current && !engineRef.current) {
+    const resolvedMap = resolveMapDef(mapId);
+    const effectiveTdmSize = clampTeamSizeForMap(
+      resolvedMap,
+      teamSizeOverride ?? customRoom?.tdmTeamSize ?? tdmTeamSize
+    ) as 1 | 2;
+    setTdmKillTarget(getTdmKillTarget(effectiveTdmSize));
+    setTrainingState(null);
+
+    if (canvasMountRef.current) {
+      if (engineRef.current) {
+        engineRef.current.dispose();
+        engineRef.current = null;
+      }
       engineRef.current = new GameEngine(
         canvasMountRef.current,
         settings,
@@ -369,7 +448,7 @@ export default function App() {
           onRoundPhaseChange: (phase, time) => {
             setRoundPhase(phase);
             setRoundTimeRemaining(time);
-            if (phase !== 'BUY_PHASE' && mode !== 'PRACTICE') {
+            if (phase !== 'BUY_PHASE' && mode !== 'PRACTICE' && !resolvedMap.isTrainingMap) {
               setShowBuyMenu(false);
             }
           },
@@ -377,6 +456,14 @@ export default function App() {
             setAttackerRoundsWon(attWins);
             setDefenderRoundsWon(defWins);
             setCurrentRound(round);
+          },
+          onTdmScoreUpdate: (attKills, defKills, targetKills) => {
+            setAttackerRoundsWon(attKills);
+            setDefenderRoundsWon(defKills);
+            setTdmKillTarget(targetKills);
+          },
+          onTrainingUpdate: (nextTraining) => {
+            setTrainingState(nextTraining);
           },
           onKillEvent: (event) => {
             setKillFeed((prev) => [...prev.slice(-6), event]);
@@ -422,15 +509,29 @@ export default function App() {
           onMatchOver: (winner, summary) => {
             setMatchWinner(winner);
             setAppState('gameover');
-            setProfile((prev) => recordMatchToProfile(prev, summary));
+            setLastMatchSummary(summary);
+            setProfile((prev) => {
+              const updated = recordMatchToProfile(prev, summary);
+              if (auth.currentUser) {
+                saveMatchSummaryToFirestore(auth.currentUser, summary, updated, mapId).catch((err) => {
+                  console.warn('[Firestore] Failed to persist match to cloud:', err);
+                });
+              }
+              return updated;
+            });
             multiplayerClient.notifyMatchEnded();
           },
         },
         mode,
         customRoom,
         allyBotAgentIds,
-        mapId
+        mapId,
+        effectiveTdmSize
       );
+
+      if (engineRef.current.isTrainingMatch) {
+        setTrainingState(engineRef.current.getTrainingState());
+      }
     }
 
     setPrematchRoster(null);
@@ -445,14 +546,25 @@ export default function App() {
     mode: MatchMode = lastMatchMode,
     customRoom: CustomRoomState | null = null,
     allyBotAgentIds: string[] = lastAllyBotIds,
-    skipPrematch = false
+    skipPrematch = false,
+    overrideMapId?: string,
+    overrideTdmTeamSize?: 1 | 2
   ) => {
     soundEngine.init();
-    const effectiveMapId = customRoom?.mapId || selectedMapId;
+    const effectiveMapId = customRoom?.mapId || overrideMapId || selectedMapId;
+    const effectiveMap = resolveMapDef(effectiveMapId);
+    const effectiveTdmSize = clampTeamSizeForMap(
+      effectiveMap,
+      overrideTdmTeamSize ?? customRoom?.tdmTeamSize ?? tdmTeamSize
+    ) as 1 | 2;
+    const safeMode: MatchMode =
+      isTdmMap(effectiveMap) && mode === 'COMPETITIVE' ? 'SKIRMISH' : mode;
+
     setActiveMap(effectiveMapId);
-    setLastMatchMode(mode);
+    setLastMatchMode(safeMode);
     setLastAllyBotIds(allyBotAgentIds);
     setActiveRoom(customRoom);
+    setTdmKillTarget(getTdmKillTarget(effectiveTdmSize));
     setShowBuyMenu(false);
     setShowMapModal(false);
     setShowScoreboard(false);
@@ -461,12 +573,18 @@ export default function App() {
     setIsBlinded(false);
     setDamageFlash(false);
     setSpectateState(null);
-    pendingLaunchRef.current = { mode, customRoom, allyBotAgentIds, mapId: effectiveMapId };
+    pendingLaunchRef.current = {
+      mode: safeMode,
+      customRoom,
+      allyBotAgentIds,
+      mapId: effectiveMapId,
+      tdmTeamSize: effectiveTdmSize,
+    };
 
     if (skipPrematch) {
-      mountAndStartEngine(mode, customRoom, allyBotAgentIds, false, effectiveMapId);
+      mountAndStartEngine(safeMode, customRoom, allyBotAgentIds, false, effectiveMapId, effectiveTdmSize);
     } else {
-      setPrematchRoster(buildPreMatchRoster(mode, customRoom, allyBotAgentIds, effectiveMapId));
+      setPrematchRoster(buildPreMatchRoster(safeMode, customRoom, allyBotAgentIds, effectiveMapId, effectiveTdmSize));
       setAppState('prematch');
     }
   };
@@ -478,9 +596,17 @@ export default function App() {
       customRoom: activeRoom,
       allyBotAgentIds: lastAllyBotIds,
       mapId: selectedMapId,
+      tdmTeamSize,
     };
     pendingLaunchRef.current = null;
-    mountAndStartEngine(pending.mode, pending.customRoom, pending.allyBotAgentIds, fromUserClick, pending.mapId);
+    mountAndStartEngine(
+      pending.mode,
+      pending.customRoom,
+      pending.allyBotAgentIds,
+      fromUserClick,
+      pending.mapId,
+      pending.tdmTeamSize
+    );
   };
 
   // Keyboard shortcut listener honoring custom KeyBindings
@@ -627,6 +753,8 @@ export default function App() {
             onSelectAgent={setSelectedAgentId}
             selectedMapId={selectedMapId}
             onSelectMap={handleSelectMap}
+            tdmTeamSize={tdmTeamSize}
+            onSelectTdmTeamSize={setTdmTeamSize}
             difficulty={botDifficulty}
             onSelectDifficulty={(diff) => {
               setBotDifficulty(diff);
@@ -635,18 +763,22 @@ export default function App() {
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             profile={profile}
+            currentUser={currentUser}
             onUpdateProfile={handleUpdateProfile}
             onResetProfile={() => setProfile(resetProfileData())}
             onStartGame={startGame}
+            onOpenLeaderboard={() => setShowLeaderboard(true)}
+            onUserAuthChange={(u) => setCurrentUser(u)}
           />
         </div>
       )}
 
-      {/* Screen 1.5: Pre-Match 5v5 Versus Loading Screen */}
+      {/* Screen 1.5: Pre-Match Versus Loading Screen */}
       {appState === 'prematch' && prematchRoster && (
         <PreMatchScreen
           mode={prematchRoster.mode}
           mapId={prematchRoster.mapId}
+          tdmTeamSize={prematchRoster.tdmTeamSize}
           playerTeam={prematchRoster.playerTeam}
           defenders={prematchRoster.defenders}
           attackers={prematchRoster.attackers}
@@ -696,6 +828,10 @@ export default function App() {
             revealedEnemyIds={engineRef.current.abilityMgr.revealedEnemyIds}
             fps={fps}
             showFps={settings.showFps}
+            isTdmMatch={engineRef.current.isTdmMatch}
+            tdmKillTarget={engineRef.current.tdmKillTarget}
+            isTrainingMatch={engineRef.current.isTrainingMatch}
+            teamSize={engineRef.current.tdmTeamSize}
             spectateState={spectateState}
             onTriggerAbility={(slot) => engineRef.current?.input.triggerMobileAbility(slot)}
             onSwitchWeapon={(slot) => engineRef.current?.switchWeaponSlot(slot)}
@@ -713,6 +849,18 @@ export default function App() {
             onToggleSpectateMode={() => engineRef.current?.toggleSpectateMode()}
             onChatFocusChange={setIsChatFocused}
           />
+
+          {/* The Range Training Console HUD */}
+          {engineRef.current.isTrainingMatch && trainingState && (
+            <TrainingHUD
+              trainingState={trainingState}
+              isMobile={isMobile}
+              onSelectDrill={(drill) => engineRef.current?.setTrainingDrill(drill)}
+              onWarpZone={(zone) => engineRef.current?.warpToTrainingZone(zone)}
+              onUpdateConfig={(patch) => engineRef.current?.setTrainingConfig(patch)}
+              onResetStats={() => engineRef.current?.resetTrainingStats()}
+            />
+          )}
 
           {/* Mobile Virtual Controls */}
           {isMobile && (
@@ -734,6 +882,7 @@ export default function App() {
                 setAppState('paused');
                 engineRef.current?.setPaused(true);
               }}
+              hideSpike={engineRef.current.isTdmMatch}
               isSpectating={Boolean(spectateState?.active)}
               canPlantOrDefuse={
                 (engineRef.current.playerCombatant.team === 'ATTACKERS' &&
@@ -754,7 +903,14 @@ export default function App() {
           currentWeaponId={currentWeapon.id}
           currentArmor={armor}
           agent={currentAgent}
-          canBuy={roundPhase === 'BUY_PHASE' || lastMatchMode === 'PRACTICE'}
+          isFreeMode={Boolean(engineRef.current?.isTrainingMatch || lastMatchMode === 'PRACTICE')}
+          isTdmMode={Boolean(engineRef.current?.isTdmMatch)}
+          canBuy={
+            roundPhase === 'BUY_PHASE' ||
+            lastMatchMode === 'PRACTICE' ||
+            Boolean(engineRef.current?.isTrainingMatch) ||
+            Boolean(engineRef.current?.isTdmMatch)
+          }
           onBuyWeapon={handleBuyWeapon}
           onBuyShield={handleBuyShield}
           onClose={() => setShowBuyMenu(false)}
@@ -780,6 +936,8 @@ export default function App() {
           stats={playerStats}
           attackerRoundsWon={attackerRoundsWon}
           defenderRoundsWon={defenderRoundsWon}
+          isTdmMatch={Boolean(engineRef.current?.isTdmMatch)}
+          tdmKillTarget={tdmKillTarget}
           onClose={() => setShowScoreboard(false)}
         />
       )}
@@ -790,6 +948,8 @@ export default function App() {
           attackerScore={attackerRoundsWon}
           defenderScore={defenderRoundsWon}
           currentRound={currentRound}
+          isTdmMatch={Boolean(engineRef.current?.isTdmMatch)}
+          teamSize={engineRef.current?.tdmTeamSize}
           onResume={handleResumeGame}
           onOpenSettings={() => setShowSettings(true)}
           onReturnToTitle={handleReturnToTitle}
@@ -813,8 +973,21 @@ export default function App() {
           attackerRounds={attackerRoundsWon}
           defenderRounds={defenderRoundsWon}
           stats={playerStats}
+          isTdmMatch={Boolean(engineRef.current?.isTdmMatch)}
+          currentUser={currentUser}
           onPlayAgain={handlePlayAgain}
           onReturnToTitle={handleReturnToTitle}
+          onOpenLeaderboard={() => setShowLeaderboard(true)}
+        />
+      )}
+
+      {/* Global Cloud Leaderboard Modal */}
+      {showLeaderboard && (
+        <GlobalLeaderboardModal
+          currentUser={currentUser}
+          profile={profile}
+          onClose={() => setShowLeaderboard(false)}
+          onUserAuthChange={(u) => setCurrentUser(u)}
         />
       )}
     </div>

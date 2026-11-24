@@ -12,15 +12,20 @@ import {
   BUY_BARRIER_ATTACKERS_Z,
   BUY_BARRIER_DEFENDERS_Z,
   MAP_COLLIDERS,
+  MAP_HALF_EXTENT,
   MAP_SCALE_XZ,
   MAP_SCALE_Y,
   MapAABB,
   SPAWN_ATTACKERS,
   SPAWN_DEFENDERS,
+  getActiveMapDef,
+  COURTYARD_FALLBACK_COLLIDERS,
+  setActiveMeshCollider,
   setExtractedMapColliders,
 } from './mapData';
 import { loadGLBModel } from './modelLoader';
-import { extractGridWallAABBs } from './rules';
+import { extractGridWallAABBs, isTdmMap } from './rules';
+import { buildMeshColliderFromObject, extractMinimapAABBsFromMesh } from './meshCollider';
 
 export interface BuiltMap {
   group: THREE.Group;
@@ -71,14 +76,16 @@ function yieldFrame(): Promise<void> {
  * Slices structural Warehouse meshes (walls, frames, crates, props) at torso planes
  * in chunked async batches (yielding every 8,000 triangles) and caches results per map URL.
  */
-const STORAGE_AABB_PREFIX = 'hs_map_aabbs_v1_';
+const STORAGE_AABB_PREFIX = 'hs_map_aabbs_v2_';
 
 async function extractWallCollidersAsync(
   root: THREE.Object3D,
   cacheKey: string,
+  halfExtent: number,
   isCancelled: () => boolean
 ): Promise<void> {
-  const cached = extractedColliderCache.get(cacheKey);
+  const fullCacheKey = `${cacheKey}_h${Math.round(halfExtent)}`;
+  const cached = extractedColliderCache.get(fullCacheKey);
   if (cached) {
     if (!isCancelled()) {
       setExtractedMapColliders(cached);
@@ -87,11 +94,11 @@ async function extractWallCollidersAsync(
   }
 
   try {
-    const rawStored = window.localStorage.getItem(`${STORAGE_AABB_PREFIX}${cacheKey}`);
+    const rawStored = window.localStorage.getItem(`${STORAGE_AABB_PREFIX}${fullCacheKey}`);
     if (rawStored) {
       const parsed = JSON.parse(rawStored) as MapAABB[];
       if (Array.isArray(parsed) && parsed.length > 0) {
-        extractedColliderCache.set(cacheKey, parsed);
+        extractedColliderCache.set(fullCacheKey, parsed);
         if (!isCancelled()) {
           setExtractedMapColliders(parsed);
         }
@@ -104,31 +111,35 @@ async function extractWallCollidersAsync(
 
   root.updateMatrixWorld(true);
 
-  const minWorldX = -30;
-  const maxWorldX = 30;
-  const minWorldZ = -22;
-  const maxWorldZ = 22;
-  const cellSize = 0.5;
+  const minWorldX = -halfExtent;
+  const maxWorldX = halfExtent;
+  const minWorldZ = -halfExtent;
+  const maxWorldZ = halfExtent;
+  const cellSize = halfExtent > 34 ? 0.65 : 0.5;
   const cols = Math.round((maxWorldX - minWorldX) / cellSize);
   const rows = Math.round((maxWorldZ - minWorldZ) / cellSize);
 
-  const occupied: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
-  const sliceHeights = [0.65, 1.35, 1.95];
+  // Separate waist-high cover (0.45..1.05m -> extruded 0..1.10m) from full eye-height walls (1.25..1.72m -> extruded 0..2.85m)
+  // so players can walk under doorways/arches and shoot cleanly over waist-high cover & through gaps.
+  const lowOccupied: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const tallOccupied: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const lowSliceHeights = [0.55, 0.95];
+  const tallSliceHeights = [1.35, 1.72];
 
-  const markCell = (wx: number, wz: number) => {
+  const markCell = (grid: boolean[][], wx: number, wz: number) => {
     const gx = Math.floor((wx - minWorldX) / cellSize);
     const gz = Math.floor((wz - minWorldZ) / cellSize);
     if (gx >= 0 && gx < cols && gz >= 0 && gz < rows) {
-      occupied[gz][gx] = true;
+      grid[gz][gx] = true;
     }
   };
 
-  const rasterizeSegment = (ax: number, az: number, bx: number, bz: number) => {
+  const rasterizeSegment = (grid: boolean[][], ax: number, az: number, bx: number, bz: number) => {
     const dist = Math.hypot(bx - ax, bz - az);
-    const steps = Math.max(1, Math.min(48, Math.ceil(dist / 0.25)));
+    const steps = Math.max(1, Math.min(48, Math.ceil(dist / 0.28)));
     for (let s = 0; s <= steps; s++) {
       const t = s / steps;
-      markCell(ax + (bx - ax) * t, az + (bz - az) * t);
+      markCell(grid, ax + (bx - ax) * t, az + (bz - az) * t);
     }
   };
 
@@ -147,6 +158,44 @@ async function extractWallCollidersAsync(
   const vc = new THREE.Vector3();
   const pts: Array<[number, number]> = [];
   let processedSinceYield = 0;
+
+  const sliceAtPlanes = (
+    heights: number[],
+    targetGrid: boolean[][],
+    triMinY: number,
+    triMaxY: number
+  ) => {
+    for (let hIdx = 0; hIdx < heights.length; hIdx++) {
+      const yPlane = heights[hIdx];
+      if (yPlane < triMinY || yPlane > triMaxY) continue;
+
+      pts.length = 0;
+      const pairs: Array<[THREE.Vector3, THREE.Vector3]> = [
+        [va, vb],
+        [vb, vc],
+        [vc, va],
+      ];
+      for (let p = 0; p < 3; p++) {
+        const p0 = pairs[p][0];
+        const p1 = pairs[p][1];
+        const dy0 = p0.y - yPlane;
+        const dy1 = p1.y - yPlane;
+        if ((dy0 <= 0 && dy1 >= 0) || (dy0 >= 0 && dy1 <= 0)) {
+          const denom = p1.y - p0.y;
+          if (Math.abs(denom) > 1e-5) {
+            const frac = (yPlane - p0.y) / denom;
+            if (frac >= -0.001 && frac <= 1.001) {
+              pts.push([p0.x + (p1.x - p0.x) * frac, p0.z + (p1.z - p0.z) * frac]);
+            }
+          }
+        }
+      }
+
+      if (pts.length >= 2) {
+        rasterizeSegment(targetGrid, pts[0][0], pts[0][1], pts[1][0], pts[1][1]);
+      }
+    }
+  };
 
   for (const mesh of collidableMeshes) {
     if (isCancelled()) return;
@@ -169,38 +218,10 @@ async function extractWallCollidersAsync(
 
       const triMinY = Math.min(va.y, vb.y, vc.y);
       const triMaxY = Math.max(va.y, vb.y, vc.y);
-      if (triMaxY < 0.3 || triMinY > 2.2) continue;
+      if (triMaxY < 0.4 || triMinY > 1.85) continue;
 
-      for (let hIdx = 0; hIdx < sliceHeights.length; hIdx++) {
-        const yPlane = sliceHeights[hIdx];
-        if (yPlane < triMinY || yPlane > triMaxY) continue;
-
-        pts.length = 0;
-        const pairs: Array<[THREE.Vector3, THREE.Vector3]> = [
-          [va, vb],
-          [vb, vc],
-          [vc, va],
-        ];
-        for (let p = 0; p < 3; p++) {
-          const p0 = pairs[p][0];
-          const p1 = pairs[p][1];
-          const dy0 = p0.y - yPlane;
-          const dy1 = p1.y - yPlane;
-          if ((dy0 <= 0 && dy1 >= 0) || (dy0 >= 0 && dy1 <= 0)) {
-            const denom = p1.y - p0.y;
-            if (Math.abs(denom) > 1e-5) {
-              const frac = (yPlane - p0.y) / denom;
-              if (frac >= -0.001 && frac <= 1.001) {
-                pts.push([p0.x + (p1.x - p0.x) * frac, p0.z + (p1.z - p0.z) * frac]);
-              }
-            }
-          }
-        }
-
-        if (pts.length >= 2) {
-          rasterizeSegment(pts[0][0], pts[0][1], pts[1][0], pts[1][1]);
-        }
-      }
+      sliceAtPlanes(lowSliceHeights, lowOccupied, triMinY, triMaxY);
+      sliceAtPlanes(tallSliceHeights, tallOccupied, triMinY, triMaxY);
 
       processedSinceYield++;
       if (processedSinceYield >= 2500) {
@@ -213,31 +234,38 @@ async function extractWallCollidersAsync(
 
   // Clear compact safety discs around spawns & site centers so players never spawn clipped
   const clearDiscs = [
-    { x: SPAWN_ATTACKERS.x, z: SPAWN_ATTACKERS.z, r: 2.8 },
-    { x: SPAWN_DEFENDERS.x, z: SPAWN_DEFENDERS.z, r: 2.8 },
-    { x: BOMB_SITE_A.x, z: BOMB_SITE_A.z, r: 2.4 },
-    { x: BOMB_SITE_B.x, z: BOMB_SITE_B.z, r: 2.0 },
+    { x: SPAWN_ATTACKERS.x, z: SPAWN_ATTACKERS.z, r: 3.0 },
+    { x: SPAWN_DEFENDERS.x, z: SPAWN_DEFENDERS.z, r: 3.0 },
+    { x: BOMB_SITE_A.x, z: BOMB_SITE_A.z, r: 2.5 },
+    { x: BOMB_SITE_B.x, z: BOMB_SITE_B.z, r: 2.2 },
   ];
 
   for (let gz = 0; gz < rows; gz++) {
     const wz = minWorldZ + (gz + 0.5) * cellSize;
     for (let gx = 0; gx < cols; gx++) {
-      if (!occupied[gz][gx]) continue;
+      // Remove low cell if a full tall wall already covers the same cell
+      if (tallOccupied[gz][gx]) {
+        lowOccupied[gz][gx] = false;
+      }
+      if (!lowOccupied[gz][gx] && !tallOccupied[gz][gx]) continue;
       const wx = minWorldX + (gx + 0.5) * cellSize;
       for (const disc of clearDiscs) {
         if ((wx - disc.x) * (wx - disc.x) + (wz - disc.z) * (wz - disc.z) < disc.r * disc.r) {
-          occupied[gz][gx] = false;
+          lowOccupied[gz][gx] = false;
+          tallOccupied[gz][gx] = false;
           break;
         }
       }
     }
   }
 
-  const wallBoxes = extractGridWallAABBs(occupied, minWorldX, minWorldZ, cellSize, 0, 4.5);
-  extractedColliderCache.set(cacheKey, wallBoxes);
+  const tallBoxes = extractGridWallAABBs(tallOccupied, minWorldX, minWorldZ, cellSize, 0, 2.85);
+  const lowBoxes = extractGridWallAABBs(lowOccupied, minWorldX, minWorldZ, cellSize, 0, 1.10);
+  const wallBoxes = [...tallBoxes, ...lowBoxes];
+  extractedColliderCache.set(fullCacheKey, wallBoxes);
   try {
     if (wallBoxes.length <= 2400) {
-      window.localStorage.setItem(`${STORAGE_AABB_PREFIX}${cacheKey}`, JSON.stringify(wallBoxes));
+      window.localStorage.setItem(`${STORAGE_AABB_PREFIX}${fullCacheKey}`, JSON.stringify(wallBoxes));
     }
   } catch {
     // Ignore storage quota overflow
@@ -246,8 +274,6 @@ async function extractWallCollidersAsync(
     setExtractedMapColliders(wallBoxes);
   }
 }
-
-import { getActiveMapDef, MAP_HALF_EXTENT } from './mapData';
 
 function createTacticalFloorTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -289,12 +315,16 @@ export function buildTacticalMap(
   const softwareGl = options.isSoftwareGl === true;
   const activeDef = getActiveMapDef();
   const isProcedural = activeDef.modelUrl === 'procedural';
+  const isTdm = isTdmMap(activeDef);
+  const isTraining = Boolean(activeDef.isTrainingMap);
 
   const mapGroup = new THREE.Group();
   mapGroup.name = `TacticalMap_${activeDef.id}`;
   const collidableMeshes: THREE.Mesh[] = [];
+  let loadedMapModel: THREE.Group | null = null;
   let disposed = false;
 
+  setActiveMeshCollider(null);
   setExtractedMapColliders([]);
 
   // 1. Ground Floor Plane (patterned grid for Proving Grid / sub-grade floor under GLBs)
@@ -314,7 +344,7 @@ export function buildTacticalMap(
   floor.updateMatrix();
   mapGroup.add(floor);
 
-  // 2. Perimeter & Structured Architectural Cover Blocks from active MAP_COLLIDERS
+  // 2. Procedural Architectural Blocks (ONLY rendered on procedural maps or if GLB fails to load)
   const defaultWallMat = new THREE.MeshStandardMaterial({
     color: 0x33445c,
     roughness: 0.8,
@@ -329,45 +359,50 @@ export function buildTacticalMap(
   const coverMaterials: THREE.Material[] = [defaultWallMat, trimMat];
   const createdGeometries: THREE.BufferGeometry[] = [floorGeo];
 
-  for (const c of MAP_COLLIDERS) {
-    const width = c.maxX - c.minX;
-    const height = c.maxY - c.minY;
-    const depth = c.maxZ - c.minZ;
-    const centerX = (c.minX + c.maxX) / 2;
-    const centerY = (c.minY + c.maxY) / 2;
-    const centerZ = (c.minZ + c.maxZ) / 2;
+  const appendColliderBlocks = (blocks: MapAABB[]) => {
+    for (const c of blocks) {
+      const width = c.maxX - c.minX;
+      const height = c.maxY - c.minY;
+      const depth = c.maxZ - c.minZ;
+      const centerX = (c.minX + c.maxX) / 2;
+      const centerY = (c.minY + c.maxY) / 2;
+      const centerZ = (c.minZ + c.maxZ) / 2;
 
-    let mat = defaultWallMat;
-    if (c.color) {
-      mat = new THREE.MeshStandardMaterial({
-        color: c.color,
-        roughness: 0.72,
-        metalness: 0.18,
-      });
-      coverMaterials.push(mat);
+      let mat = defaultWallMat;
+      if (c.color) {
+        mat = new THREE.MeshStandardMaterial({
+          color: c.color,
+          roughness: 0.72,
+          metalness: 0.18,
+        });
+        coverMaterials.push(mat);
+      }
+
+      const blockGeo = new THREE.BoxGeometry(width, height, depth);
+      createdGeometries.push(blockGeo);
+      const block = new THREE.Mesh(blockGeo, mat);
+      block.position.set(centerX, centerY, centerZ);
+      block.castShadow = false;
+      block.receiveShadow = !lowDetail;
+      block.matrixAutoUpdate = false;
+      block.updateMatrix();
+      mapGroup.add(block);
+      collidableMeshes.push(block);
+
+      if (c.color && height < 6) {
+        const capGeo = new THREE.BoxGeometry(width + 0.08, 0.12, depth + 0.08);
+        createdGeometries.push(capGeo);
+        const cap = new THREE.Mesh(capGeo, trimMat);
+        cap.position.set(centerX, c.maxY - 0.06, centerZ);
+        cap.matrixAutoUpdate = false;
+        cap.updateMatrix();
+        mapGroup.add(cap);
+      }
     }
+  };
 
-    const blockGeo = new THREE.BoxGeometry(width, height, depth);
-    createdGeometries.push(blockGeo);
-    const block = new THREE.Mesh(blockGeo, mat);
-    block.position.set(centerX, centerY, centerZ);
-    block.castShadow = false;
-    block.receiveShadow = !lowDetail;
-    block.matrixAutoUpdate = false;
-    block.updateMatrix();
-    mapGroup.add(block);
-    collidableMeshes.push(block);
-
-    // Add tactical accent cap rail on interior Proving Grid / Courtyard structures
-    if (c.color && height < 6) {
-      const capGeo = new THREE.BoxGeometry(width + 0.08, 0.12, depth + 0.08);
-      createdGeometries.push(capGeo);
-      const cap = new THREE.Mesh(capGeo, trimMat);
-      cap.position.set(centerX, c.maxY - 0.06, centerZ);
-      cap.matrixAutoUpdate = false;
-      cap.updateMatrix();
-      mapGroup.add(cap);
-    }
+  if (isProcedural) {
+    appendColliderBlocks(MAP_COLLIDERS);
   }
 
   // 3. Bomb Site Decal Rings (Site A Teal & Site B Crimson)
@@ -381,7 +416,8 @@ export function buildTacticalMap(
   });
   const siteAMarker = new THREE.Mesh(ringGeoA, siteAMat);
   siteAMarker.rotation.x = -Math.PI / 2;
-  siteAMarker.position.set(BOMB_SITE_A.x, 0.05, BOMB_SITE_A.z);
+  siteAMarker.position.set(BOMB_SITE_A.x, (BOMB_SITE_A.y || 0) + 0.08, BOMB_SITE_A.z);
+  siteAMarker.visible = !isTdm;
   mapGroup.add(siteAMarker);
 
   const ringGeoB = new THREE.RingGeometry(BOMB_SITE_B.radius - 0.35, BOMB_SITE_B.radius, 32);
@@ -394,10 +430,11 @@ export function buildTacticalMap(
   });
   const siteBMarker = new THREE.Mesh(ringGeoB, siteBMat);
   siteBMarker.rotation.x = -Math.PI / 2;
-  siteBMarker.position.set(BOMB_SITE_B.x, 0.05, BOMB_SITE_B.z);
+  siteBMarker.position.set(BOMB_SITE_B.x, (BOMB_SITE_B.y || 0) + 0.08, BOMB_SITE_B.z);
+  siteBMarker.visible = !isTdm;
   mapGroup.add(siteBMarker);
 
-  // 4. Buy Phase Energy Barriers sized to active map width
+  // 4. Buy Phase Energy Barriers sized to active map width (disabled in TDM & Training Range)
   const barrierWidth = Math.max(58, MAP_HALF_EXTENT * 2);
   const barrierGeo = new THREE.PlaneGeometry(barrierWidth, 2.5);
   const barrierRailGeo = new THREE.BoxGeometry(barrierWidth, 0.05, 0.05);
@@ -420,6 +457,7 @@ export function buildTacticalMap(
   const attRail = new THREE.Mesh(barrierRailGeo, barrierRailMatAtt);
   attRail.position.set(0, 1.25, 0);
   barrierAttackers.add(attRail);
+  barrierAttackers.visible = !isTdm && !isTraining;
   mapGroup.add(barrierAttackers);
 
   const barrierMatDef = new THREE.MeshBasicMaterial({
@@ -439,6 +477,7 @@ export function buildTacticalMap(
   const defRail = new THREE.Mesh(barrierRailGeo, barrierRailMatDef);
   defRail.position.set(0, 1.25, 0);
   barrierDefenders.add(defRail);
+  barrierDefenders.visible = !isTdm && !isTraining;
   mapGroup.add(barrierDefenders);
 
   // 5. Async non-blocking GLB load when map uses a 3D GLB model
@@ -451,8 +490,16 @@ export function buildTacticalMap(
       maxTextureSize: isLightWeight ? 256 : 512,
       stripSecondaryMaps: isLightWeight,
     }).then((mapModel) => {
-      if (!mapModel || disposed) return;
+      if (disposed) return;
+      if (!mapModel) {
+        if (!isTraining) {
+          appendColliderBlocks(activeDef.id === 'COURTYARD' ? COURTYARD_FALLBACK_COLLIDERS : MAP_COLLIDERS);
+        }
+        return;
+      }
 
+      mapModel.removeFromParent();
+      loadedMapModel = mapModel;
       const seenMaterials = new Set<THREE.Material>();
 
       mapModel.traverse((obj) => {
@@ -463,10 +510,16 @@ export function buildTacticalMap(
           const isExteriorBackdrop = lowerName.includes('exterior') || lowerName.includes('rubble') || lowerName.includes('background');
           const isPassThrough = isNonCollidableEnvMesh(lowerName);
 
-          if ((lowDetail && isFoliage) || (isLightWeight && isExteriorBackdrop)) {
+          if (isTraining) {
+            if (lowDetail && (lowerName.includes('clouds') || lowerName.includes('foliage'))) {
+              mesh.visible = false;
+              return;
+            }
+          } else if ((lowDetail && isFoliage) || (isLightWeight && isExteriorBackdrop)) {
             mesh.visible = false;
             return;
           }
+          mesh.visible = true;
 
           mesh.castShadow = false;
           mesh.receiveShadow = !lowDetail && !isFoliage;
@@ -509,7 +562,15 @@ export function buildTacticalMap(
               }
             }
 
-            if (!isFoliage) {
+            const lowerMatName = (m.name || '').toLowerCase();
+            const keepAlpha =
+              isTraining &&
+              ['foliage', 'blossom', 'grass', 'foam', 'water', 'shadow', 'glass', 'cloud', 'sky'].some((tag) =>
+                lowerMatName.includes(tag)
+              );
+
+            const isDecalOrGlass = m.name === 'glass' || m.name === 'shadow';
+            if (!isFoliage && !isDecalOrGlass && !keepAlpha) {
               if (m.transparent) {
                 m.transparent = false;
                 m.opacity = 1.0;
@@ -529,16 +590,32 @@ export function buildTacticalMap(
         }
       });
 
+      const rotY = activeDef.rotationY ?? 0;
+      mapModel.rotation.set(0, rotY, 0);
       mapModel.scale.set(MAP_SCALE_XZ, MAP_SCALE_Y, MAP_SCALE_XZ);
       mapModel.position.set(0, 0, 0);
       mapModel.updateMatrixWorld(true);
 
       mapGroup.add(mapModel);
-      window.setTimeout(() => {
-        if (!disposed) {
-          extractWallCollidersAsync(mapModel, url, () => disposed);
-        }
-      }, 150);
+
+      if (isTraining) {
+        floor.visible = false;
+        window.setTimeout(() => {
+          if (disposed) return;
+          const meshGrid = buildMeshColliderFromObject(mapModel, { cellSize: 2.4, minWorldY: 0.4 });
+          if (!disposed && meshGrid) {
+            setActiveMeshCollider(meshGrid);
+            const miniAABBs = extractMinimapAABBsFromMesh(meshGrid, activeDef.halfExtent);
+            setExtractedMapColliders(miniAABBs);
+          }
+        }, 60);
+      } else {
+        window.setTimeout(() => {
+          if (!disposed) {
+            extractWallCollidersAsync(mapModel, `${url}_r${rotY.toFixed(2)}`, activeDef.halfExtent, () => disposed);
+          }
+        }, 150);
+      }
     });
   }
 
@@ -553,6 +630,12 @@ export function buildTacticalMap(
     collidableMeshes,
     dispose: () => {
       disposed = true;
+      setActiveMeshCollider(null);
+      if (loadedMapModel) {
+        loadedMapModel.removeFromParent();
+        loadedMapModel = null;
+      }
+      mapGroup.clear();
       scene.remove(mapGroup);
       setExtractedMapColliders([]);
       floorTex?.dispose();

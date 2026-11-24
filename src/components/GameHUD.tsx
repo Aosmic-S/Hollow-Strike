@@ -64,6 +64,10 @@ interface GameHUDProps {
   revealedEnemyIds?: Map<string, number>;
   fps: number;
   showFps: boolean;
+  isTdmMatch?: boolean;
+  tdmKillTarget?: number;
+  isTrainingMatch?: boolean;
+  teamSize?: number;
   spectateState?: SpectateState | null;
   onTriggerAbility: (slot: 'Q' | 'E' | 'C' | 'X') => void;
   onSwitchWeapon: (slot: 1 | 2 | 3) => void;
@@ -117,6 +121,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   revealedEnemyIds,
   fps,
   showFps,
+  isTdmMatch = false,
+  tdmKillTarget = 25,
+  isTrainingMatch = false,
+  teamSize = 5,
   spectateState = null,
   onTriggerAbility,
   onSwitchWeapon,
@@ -134,6 +142,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const isSpectating = Boolean(spectateState?.active);
   const aliveAttackers = allCombatants.filter((c) => c.alive && c.team === 'ATTACKERS').length;
   const aliveDefenders = allCombatants.filter((c) => c.alive && c.team === 'DEFENDERS').length;
+  const pipCount = Math.max(1, Math.min(5, isTdmMatch ? teamSize : isTrainingMatch ? 1 : 5));
 
   const resolvedCrosshair = resolveCrosshairConfig({
     crosshairColor,
@@ -176,38 +185,54 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 bg-[#0F1923]/88 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-mono border border-[#ECE8E1]/15 clip-val-card">
-            <div className="flex items-center gap-1 text-[#FF4655]">
-              <span className="font-bold">ATT</span>
-              <div className="flex gap-0.5">
-                {[...Array(5)].map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${i < aliveAttackers ? 'bg-[#FF4655]' : 'bg-[#18232E]'}`}
-                  />
-                ))}
-              </div>
-            </div>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            {!isTrainingMatch && (
+              <div className="flex items-center gap-2 sm:gap-3 bg-[#0F1923]/88 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-mono border border-[#ECE8E1]/15 clip-val-card">
+                <div className="flex items-center gap-1 text-[#FF4655]">
+                  <span className="font-bold">ATT</span>
+                  <div className="flex gap-0.5">
+                    {[...Array(pipCount)].map((_, i) => (
+                      <span
+                        key={i}
+                        className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${i < aliveAttackers ? 'bg-[#FF4655]' : 'bg-[#18232E]'}`}
+                      />
+                    ))}
+                  </div>
+                </div>
 
-            <span className="text-[#8B978F]/50">|</span>
+                <span className="text-[#8B978F]/50">|</span>
 
-            <div className="flex items-center gap-1 text-[#17E5B8]">
-              <div className="flex gap-0.5">
-                {[...Array(5)].map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${i < aliveDefenders ? 'bg-[#17E5B8]' : 'bg-[#18232E]'}`}
-                  />
-                ))}
+                <div className="flex items-center gap-1 text-[#17E5B8]">
+                  <div className="flex gap-0.5">
+                    {[...Array(pipCount)].map((_, i) => (
+                      <span
+                        key={i}
+                        className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${i < aliveDefenders ? 'bg-[#17E5B8]' : 'bg-[#18232E]'}`}
+                      />
+                    ))}
+                  </div>
+                  <span className="font-bold">DEF</span>
+                </div>
               </div>
-              <span className="font-bold">DEF</span>
-            </div>
+            )}
+
+            {isMobile && showFps && (
+              <div
+                data-testid="hud-fps-counter"
+                className={`border border-[#ECE8E1]/15 bg-[#0F1923]/92 px-2 py-0.5 font-mono text-[10px] font-bold tabular-nums clip-val-card ${
+                  fps >= 50 ? 'text-[#17E5B8]' : fps >= 30 ? 'text-amber-400' : 'text-[#FF4655]'
+                }`}
+              >
+                {fps} FPS
+              </div>
+            )}
           </div>
         </div>
 
         {/* Center: Tactical Scoreboard & Round Timer */}
         <div className="flex flex-col items-center">
           <div
+            data-testid="hud-score-banner"
             className={`flex items-center border border-[#ECE8E1]/20 bg-[#0F1923]/92 shadow-2xl clip-val-panel ${
               isMobile ? 'px-2.5 py-1 gap-2.5' : 'px-5 py-1.5 gap-5'
             }`}
@@ -220,7 +245,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
 
             <div className={`flex flex-col items-center border-x border-[#ECE8E1]/15 ${isMobile ? 'px-2.5' : 'px-4'}`}>
-              {spikeState === 'planted' ? (
+              {!isTdmMatch && spikeState === 'planted' ? (
                 <div className="flex items-center gap-1 text-[#FF4655] font-mono font-black text-base sm:text-lg animate-pulse">
                   <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
@@ -234,13 +259,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
               )}
               <span className="text-[8px] sm:text-[9px] font-mono uppercase tracking-widest text-[#8B978F]">
-                {roundPhase === 'BUY_PHASE'
-                  ? 'BUY PHASE'
-                  : roundPhase === 'SPIKE_PLANTED'
-                    ? 'DETONATING'
-                    : roundPhase === 'ROUND_END'
-                      ? 'ROUND OVER'
-                      : `RND ${currentRound}`}
+                {isTrainingMatch
+                  ? 'THE RANGE'
+                  : isTdmMatch
+                    ? roundPhase === 'BUY_PHASE'
+                      ? `${teamSize}V${teamSize} TDM · BUY`
+                      : `${teamSize}V${teamSize} TDM · TO ${tdmKillTarget}`
+                    : roundPhase === 'BUY_PHASE'
+                      ? 'BUY PHASE'
+                      : roundPhase === 'SPIKE_PLANTED'
+                        ? 'DETONATING'
+                        : roundPhase === 'ROUND_END'
+                          ? 'ROUND OVER'
+                          : `RND ${currentRound}`}
               </span>
             </div>
 
@@ -252,11 +283,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
 
-          {/* Buy Phase Banner with Skip Button */}
-          {roundPhase === 'BUY_PHASE' && (
+          {/* Buy Phase Banner with Skip Button (hidden in Training Range) */}
+          {!isTrainingMatch && roundPhase === 'BUY_PHASE' && (
             <div className="pointer-events-auto relative z-40 mt-1 flex items-center gap-1.5 sm:gap-2 border border-[#FF4655]/50 bg-[#18232E]/95 px-2.5 sm:px-3 py-1 text-[10px] sm:text-[11px] font-mono text-[#ECE8E1] shadow-lg clip-val-card">
-              {!isMobile && <span className="hidden md:inline text-[#8B978F]">BUY PHASE · BARRIER UP</span>}
-              {isMobile && <span>BUY</span>}
+              {!isMobile && (
+                <span className="hidden md:inline text-[#8B978F]">
+                  {isTdmMatch ? 'TDM LOADOUT · FREE SWAP' : 'BUY PHASE · BARRIER UP'}
+                </span>
+              )}
+              {isMobile && <span>{isTdmMatch ? 'LOADOUT' : 'BUY'}</span>}
               <button
                 onClick={onOpenBuyMenu}
                 className="border border-[#ECE8E1]/30 bg-[#0F1923] px-2 py-0.5 font-bold text-[#ECE8E1] hover:border-[#17E5B8] hover:text-[#17E5B8] cursor-pointer"
@@ -280,45 +315,50 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           )}
         </div>
 
-        {/* Right: Kill Feed & Desktop Controls */}
-        <div className="flex flex-1 flex-col items-end gap-2">
-          {!isMobile && (
-            <div className="pointer-events-auto relative z-40 flex items-center gap-1.5 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-1 clip-val-card">
-              {showFps && (
-                <span className="font-mono text-[10px] text-[#17E5B8] px-2 font-bold tabular-nums">{fps} FPS</span>
-              )}
-              <button
-                onClick={onOpenBuyMenu}
-                className="px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-[#ECE8E1] bg-[#FF4655]/20 border border-[#FF4655]/50 hover:bg-[#FF4655] hover:text-white transition cursor-pointer"
+        {/* Right: Kill Feed & Utility Controls */}
+        <div className="flex flex-1 flex-col items-end gap-2 min-w-0">
+          <div className="pointer-events-auto relative z-40 flex flex-wrap justify-end items-center gap-1 border border-[#ECE8E1]/15 bg-[#0F1923]/92 p-1 clip-val-card max-w-[96vw]">
+            {showFps && (
+              <span
+                data-testid="hud-fps-counter"
+                className={`font-mono text-[9px] sm:text-[10px] px-1.5 sm:px-2 font-bold tabular-nums border-r border-[#ECE8E1]/15 shrink-0 ${
+                  fps >= 50 ? 'text-[#17E5B8]' : fps >= 30 ? 'text-amber-400' : 'text-[#FF4655]'
+                }`}
               >
-                Armory [B]
-              </button>
-              <button
-                onClick={onOpenMap}
-                className="px-2 py-1 text-[10px] font-mono font-bold uppercase text-[#17E5B8] bg-[#17E5B8]/10 border border-[#17E5B8]/40 hover:bg-[#17E5B8]/25 transition cursor-pointer"
-              >
-                Map [M]
-              </button>
-              <button
-                onClick={onOpenScoreboard}
-                className="px-2 py-1 text-[10px] font-mono uppercase text-[#ECE8E1]/80 hover:bg-[#18232E] hover:text-[#ECE8E1] transition cursor-pointer"
-              >
-                Scores [Tab]
-              </button>
-              <button
-                onClick={onOpenSettings}
-                className="px-2 py-1 text-[10px] font-mono uppercase text-[#17E5B8] hover:bg-[#18232E] hover:text-white transition cursor-pointer"
-              >
-                Settings
-              </button>
-              <button
-                onClick={onOpenPause}
-                className="px-2 py-1 text-[10px] font-mono uppercase text-[#ECE8E1]/80 hover:bg-[#18232E] hover:text-[#ECE8E1] transition cursor-pointer"
-              >
-                Pause [Esc]
-              </button>
-            </div>
-          )}
+                {fps} FPS
+              </span>
+            )}
+            <button
+              onClick={onOpenBuyMenu}
+              className="px-2 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-mono font-bold uppercase text-[#ECE8E1] bg-[#FF4655]/20 border border-[#FF4655]/50 hover:bg-[#FF4655] hover:text-white transition cursor-pointer shrink-0"
+            >
+              Armory [B]
+            </button>
+            <button
+              onClick={onOpenMap}
+              className="px-2 sm:px-2 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-mono font-bold uppercase text-[#17E5B8] bg-[#17E5B8]/10 border border-[#17E5B8]/40 hover:bg-[#17E5B8]/25 transition cursor-pointer shrink-0"
+            >
+              Map [M]
+            </button>
+            <button
+              onClick={onOpenScoreboard}
+              className="hidden sm:inline-block px-2 py-1 text-[10px] font-mono uppercase text-[#ECE8E1]/80 hover:bg-[#18232E] hover:text-[#ECE8E1] transition cursor-pointer shrink-0"
+            >
+              Scores [Tab]
+            </button>
+            <button
+              onClick={onOpenSettings}
+              className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-mono uppercase text-[#17E5B8] hover:bg-[#18232E] hover:text-white transition cursor-pointer shrink-0"
+            >
+              Settings
+            </button>
+            <button
+              onClick={onOpenPause}
+              className="px-1.5 sm:px-2 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-mono uppercase text-[#ECE8E1]/80 hover:bg-[#18232E] hover:text-[#ECE8E1] transition cursor-pointer shrink-0"
+            >
+              Pause
+            </button>
+          </div>
 
           <div className={`flex flex-col gap-1 ${isMobile ? 'mt-12 items-end max-w-[52vw]' : 'w-64'}`}>
             {killFeed.slice(isMobile ? -2 : -4).map((k) => (

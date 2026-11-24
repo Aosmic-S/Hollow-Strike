@@ -18,7 +18,7 @@ export const ARMORY_SPOTLIGHT_ART = cardBannerCrimson;
 
 export function getMapArtwork(mapId?: string): string {
   if (mapId === 'COURTYARD') return COURTYARD_ALT_ART;
-  if (mapId === 'PROVING_GRID') return cardBannerTeal;
+  if (mapId === 'PROVING_GRID' || mapId === 'TRAINING_GROUND') return cardBannerTeal;
   return WAREHOUSE_MAP_ART;
 }
 

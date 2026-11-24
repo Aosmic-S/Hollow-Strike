@@ -4,15 +4,17 @@
  */
 
 import React from 'react';
+import { Trophy } from 'lucide-react';
 import { AGENT_REGISTRY, PlayerProfile, WEAPON_REGISTRY } from '../../game/types';
 import { computeRankProgress } from '../../game/profileStore';
 
 interface CareerPageProps {
   profile: PlayerProfile;
   onStartQuickMatch: () => void;
+  onOpenLeaderboard?: () => void;
 }
 
-export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMatch }) => {
+export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMatch, onOpenLeaderboard }) => {
   const rank = computeRankProgress(profile);
   const kd = profile.deaths > 0 ? (profile.kills / profile.deaths).toFixed(2) : profile.kills.toFixed(2);
   const winRate = profile.totalMatches > 0 ? Math.round((profile.wins / profile.totalMatches) * 100) : 0;
@@ -32,10 +34,24 @@ export const CareerPage: React.FC<CareerPageProps> = ({ profile, onStartQuickMat
     <div className="relative z-10 flex flex-1 flex-col overflow-y-auto px-4 sm:px-6 py-4 gap-5">
       {/* Top KPI Summary Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
-        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">
-          <div className="text-[10px] uppercase text-[#8B978F]">Rank Standing</div>
-          <div className="mt-1 font-display text-xl font-extrabold text-[#17E5B8] uppercase">{rank.tier}</div>
-          <div className="text-[11px] text-[#8B978F] tabular-nums">LVL {rank.level} · {rank.xp} XP</div>
+        <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase text-[#8B978F]">Rank Standing</span>
+              {onOpenLeaderboard && (
+                <button
+                  type="button"
+                  onClick={onOpenLeaderboard}
+                  className="text-[#F59E0B] hover:text-[#fbbf24] transition cursor-pointer"
+                  title="View Global Leaderboard"
+                >
+                  <Trophy className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <div className="mt-1 font-display text-xl font-extrabold text-[#17E5B8] uppercase">{rank.tier}</div>
+          </div>
+          <div className="text-[11px] text-[#8B978F] tabular-nums mt-1">LVL {rank.level} · {rank.xp} XP</div>
         </div>
 
         <div className="border border-[#ECE8E1]/15 bg-[#18232E]/90 p-4 clip-val-card">

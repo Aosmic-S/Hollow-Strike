@@ -21,6 +21,8 @@ interface BuyMenuProps {
   currentArmor: number;
   agent: AgentDef;
   canBuy?: boolean;
+  isFreeMode?: boolean;
+  isTdmMode?: boolean;
   onBuyWeapon: (weaponId: string) => void;
   onBuyShield: (shieldId: 'LIGHT_SHIELD' | 'HEAVY_SHIELD') => void;
   onClose: () => void;
@@ -46,6 +48,8 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
   currentArmor,
   agent,
   canBuy = true,
+  isFreeMode = false,
+  isTdmMode = false,
   onBuyWeapon,
   onBuyShield,
   onClose,
@@ -61,6 +65,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
         : allWeapons.filter((w) => w.category === filter);
 
   const showShieldsSection = filter === 'ALL' || filter === 'SHIELD_KIT';
+  const effectiveCanBuy = isFreeMode || canBuy;
 
   return (
     <div
@@ -73,15 +78,23 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 shrink-0 rotate-45 ${canBuy ? 'bg-[#17E5B8]' : 'bg-[#FF4655]'}`} />
+                <span className={`h-2.5 w-2.5 shrink-0 rotate-45 ${effectiveCanBuy ? 'bg-[#17E5B8]' : 'bg-[#FF4655]'}`} />
                 <h2 className="font-display text-base sm:text-2xl font-extrabold uppercase tracking-[0.14em] text-[#ECE8E1] truncate">
-                  {canBuy ? 'ARMORY · BUY PHASE' : 'ARMORY · ROUND ACTIVE'}
+                  {isFreeMode
+                    ? 'THE RANGE · ALL GUNS FREE'
+                    : isTdmMode && effectiveCanBuy
+                      ? 'TDM ARMORY · FREE SWAP'
+                      : effectiveCanBuy
+                        ? 'ARMORY · BUY PHASE'
+                        : 'ARMORY · ROUND ACTIVE'}
                 </h2>
               </div>
               <p className="hidden sm:block font-mono text-[11px] text-[#8B978F]">
-                {canBuy
-                  ? 'Equip your Sidearm, Primary firearm, Hollow Blade & tactical armor'
-                  : 'Purchases are allowed during Buy Phase or Practice Range'}
+                {isFreeMode
+                  ? 'Every firearm, sniper, shotgun & shield is unlocked free at any time in The Range'
+                  : effectiveCanBuy
+                    ? 'Equip your Sidearm, Primary firearm, Hollow Blade & tactical armor'
+                    : 'Purchases are allowed during Buy Phase or Practice Range'}
               </p>
             </div>
 
@@ -145,7 +158,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {Object.values(SHIELD_REGISTRY).map((s: ShieldDef) => {
                 const isEquipped = currentArmor >= s.armorPoints;
-                const canAfford = credits >= s.cost;
+                const canAfford = isFreeMode || isTdmMode || credits >= s.cost;
                 return (
                   <div
                     key={s.id}
@@ -160,23 +173,33 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                     <div>
                       <div className="flex items-start justify-between">
                         <h4 className="font-display text-base font-extrabold uppercase text-[#ECE8E1]">{s.name}</h4>
-                        <span className="font-mono text-sm font-bold text-[#17E5B8]">${s.cost}</span>
+                        <span className="font-mono text-sm font-bold text-[#17E5B8]">
+                          {isFreeMode ? 'FREE' : `$${s.cost}`}
+                        </span>
                       </div>
                       <p className="mt-1 text-xs text-[#8B978F]">{s.description}</p>
                     </div>
                     <button
                       type="button"
-                      disabled={isEquipped || !canAfford || !canBuy}
+                      disabled={isEquipped || !canAfford || !effectiveCanBuy}
                       onClick={() => onBuyShield(s.id)}
                       className={`mt-3 min-h-[44px] w-full py-2 font-display text-xs font-extrabold uppercase tracking-wider transition cursor-pointer clip-val-card ${
                         isEquipped
                           ? 'border border-[#17E5B8]/50 bg-[#17E5B8]/20 text-[#17E5B8] cursor-default'
-                          : canBuy && canAfford
+                          : effectiveCanBuy && canAfford
                             ? 'bg-[#17E5B8] text-[#0F1923] hover:opacity-90'
                             : 'bg-[#18232E] text-[#8B978F] cursor-not-allowed'
                       }`}
                     >
-                      {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'BUY SHIELD' : 'LOCKED'}
+                      {isEquipped
+                        ? 'EQUIPPED'
+                        : !effectiveCanBuy
+                          ? 'BUY PHASE ONLY'
+                          : canAfford
+                            ? isFreeMode
+                              ? 'EQUIP FREE'
+                              : 'BUY SHIELD'
+                            : 'LOCKED'}
                     </button>
                   </div>
                 );
@@ -189,7 +212,8 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-2.5">
               {filteredWeapons.map((w: WeaponDef) => {
                 const isEquipped = currentWeaponId === w.id;
-                const canAfford = credits >= w.cost;
+                const isWeaponFree = isFreeMode || isTdmMode || w.cost === 0;
+                const canAfford = isWeaponFree || credits >= w.cost;
                 const pelletsText = w.pellets && w.pellets > 1 ? `${w.pellets}× ` : '';
 
                 return (
@@ -215,7 +239,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                           </h4>
                         </div>
                         <span className="font-mono text-xs font-bold text-[#17E5B8] tabular-nums shrink-0">
-                          {w.cost === 0 ? 'FREE' : `$${w.cost.toLocaleString()}`}
+                          {isWeaponFree ? 'FREE' : `$${w.cost.toLocaleString()}`}
                         </span>
                       </div>
 
@@ -243,12 +267,12 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                     <button
                       type="button"
                       data-testid={`buy-weapon-${w.id}`}
-                      disabled={isEquipped || !canAfford || (!canBuy && !w.isMelee)}
+                      disabled={isEquipped || !canAfford || (!effectiveCanBuy && !w.isMelee)}
                       onClick={() => onBuyWeapon(w.id)}
                       className={`mt-2.5 min-h-[44px] w-full py-2 font-display text-xs font-extrabold uppercase tracking-widest transition cursor-pointer clip-val-card ${
                         isEquipped
                           ? 'border border-[#17E5B8]/50 bg-[#17E5B8]/20 text-[#17E5B8] cursor-default'
-                          : (canBuy || w.isMelee) && canAfford
+                          : (effectiveCanBuy || w.isMelee) && canAfford
                             ? 'bg-[#FF4655] text-[#ECE8E1] hover:bg-[#ff5e6b] active:scale-[0.98]'
                             : 'bg-[#18232E] text-[#8B978F] cursor-not-allowed'
                       }`}
@@ -257,10 +281,12 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                         ? 'EQUIPPED'
                         : w.isMelee
                           ? 'EQUIP BLADE'
-                          : !canBuy
+                          : !effectiveCanBuy
                             ? 'BUY PHASE ONLY'
                             : canAfford
-                              ? 'PURCHASE'
+                              ? isWeaponFree
+                                ? 'EQUIP FREE'
+                                : 'PURCHASE'
                               : 'LOCKED'}
                     </button>
                   </div>
@@ -280,7 +306,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                   <div className="grid grid-cols-2 gap-2.5">
                     {Object.values(SHIELD_REGISTRY).map((s: ShieldDef) => {
                       const isEquipped = currentArmor >= s.armorPoints;
-                      const canAfford = credits >= s.cost;
+                      const canAfford = isFreeMode || isTdmMode || credits >= s.cost;
 
                       return (
                         <div
@@ -296,24 +322,34 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                           <div>
                             <div className="flex items-start justify-between gap-1">
                               <h4 className="font-display text-xs sm:text-sm font-extrabold uppercase text-[#ECE8E1]">{s.name}</h4>
-                              <span className="font-mono text-xs font-bold text-[#17E5B8]">${s.cost}</span>
+                              <span className="font-mono text-xs font-bold text-[#17E5B8]">
+                                {isFreeMode || isTdmMode ? 'FREE' : `$${s.cost}`}
+                              </span>
                             </div>
                             <p className="mt-1 text-[10px] text-[#8B978F]">{s.description}</p>
                           </div>
 
                           <button
                             type="button"
-                            disabled={isEquipped || !canAfford || !canBuy}
+                            disabled={isEquipped || !canAfford || !effectiveCanBuy}
                             onClick={() => onBuyShield(s.id)}
                             className={`mt-2.5 min-h-[44px] w-full py-2 font-display text-xs font-extrabold uppercase tracking-wider transition cursor-pointer clip-val-card ${
                               isEquipped
                                 ? 'border border-[#17E5B8]/50 bg-[#17E5B8]/20 text-[#17E5B8] cursor-default'
-                                : canBuy && canAfford
+                                : effectiveCanBuy && canAfford
                                   ? 'bg-[#17E5B8] text-[#0F1923] hover:opacity-90'
                                   : 'bg-[#18232E] text-[#8B978F] cursor-not-allowed'
                             }`}
                           >
-                            {isEquipped ? 'EQUIPPED' : !canBuy ? 'BUY PHASE ONLY' : canAfford ? 'BUY' : 'LOCKED'}
+                            {isEquipped
+                              ? 'EQUIPPED'
+                              : !effectiveCanBuy
+                                ? 'BUY PHASE ONLY'
+                                : canAfford
+                                  ? isFreeMode || isTdmMode
+                                    ? 'EQUIP FREE'
+                                    : 'BUY'
+                                  : 'LOCKED'}
                           </button>
                         </div>
                       );

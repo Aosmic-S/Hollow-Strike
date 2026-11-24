@@ -96,7 +96,7 @@ export const TacticalComms: React.FC<TacticalCommsProps> = ({
       <div
         data-testid="hud-comms-bar"
         className={`pointer-events-auto fixed z-30 flex items-center gap-1.5 ${
-          compact ? 'left-2 top-[134px]' : 'left-3 bottom-[104px]'
+          compact ? 'left-2 top-[168px]' : 'left-3 bottom-[104px]'
         }`}
       >
         <button
@@ -164,7 +164,7 @@ export const TacticalComms: React.FC<TacticalCommsProps> = ({
       className={
         variant === 'hud'
           ? `pointer-events-auto fixed z-40 flex flex-col border border-[#ECE8E1]/25 bg-[#0F1923]/94 p-2.5 shadow-2xl clip-val-card ${
-              compact ? 'left-2 top-[134px] w-[265px]' : 'left-3 bottom-[104px] w-[320px]'
+              compact ? 'left-2 top-[118px] w-[265px] max-h-[250px]' : 'left-3 bottom-[104px] w-[320px]'
             }`
           : 'flex flex-col border border-[#ECE8E1]/15 bg-[#0F1923]/85 p-3 clip-val-card'
       }

@@ -192,9 +192,34 @@ export function computeRankProgress(profile: PlayerProfile): {
   return { xp, level, tier, nextLevelXp, progressPct };
 }
 
-export function loadSavedSettings(defaults: GameSettings): GameSettings {
+export const DEFAULT_SETTINGS: GameSettings = {
+  graphics: 'HIGH',
+  fpsCap: 60,
+  showFps: true,
+  mouseSensitivity: 0.0022,
+  touchSensitivity: 0.0035,
+  adsSensitivityMultiplier: 0.7,
+  invertY: false,
+  fov: 90,
+  crosshairColor: 'cyan',
+  crosshairSize: 'medium',
+  volume: 0.7,
+  soundEnabled: true,
+  autoFireMobile: false,
+  aimAssistMobile: true,
+  touchScale: 1.0,
+  touchOpacity: 0.85,
+  controlMode: 'AUTO',
+  keyBindings: { ...DEFAULT_KEY_BINDINGS },
+};
+
+export function loadSettings(): GameSettings {
+  return loadSavedSettings(DEFAULT_SETTINGS);
+}
+
+export function loadSavedSettings(defaults: GameSettings = DEFAULT_SETTINGS): GameSettings {
   try {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(SETTINGS_STORAGE_KEY) : null;
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
     const merged: GameSettings = { ...defaults, ...parsed };

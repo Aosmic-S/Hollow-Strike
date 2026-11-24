@@ -6,7 +6,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronRight, MapPin, Plus, Users, X } from 'lucide-react';
+import { ArrowLeft, ChevronRight, MapPin, Plus, Trophy, Users, X } from 'lucide-react';
+import { User } from '../firebase';
 import {
   AGENT_REGISTRY,
   AgentDef,
@@ -18,7 +19,7 @@ import {
   PlayerProfile,
   getAvailableMaps,
 } from '../game/types';
-import { formatKeyCode } from '../game/rules';
+import { formatKeyCode, isTdmMap, clampTeamSizeForMap } from '../game/rules';
 import { computeRankProgress } from '../game/profileStore';
 import { multiplayerClient } from '../game/multiplayerClient';
 import { registerCustomMaps, resolveMapDef } from '../game/mapData';
@@ -45,14 +46,26 @@ interface LobbyScreenProps {
   onSelectAgent: (agentId: string) => void;
   selectedMapId: string;
   onSelectMap: (mapId: string) => void;
+  tdmTeamSize: 1 | 2;
+  onSelectTdmTeamSize: (size: 1 | 2) => void;
   difficulty: BotDifficulty;
   onSelectDifficulty: (diff: BotDifficulty) => void;
   settings: GameSettings;
   onUpdateSettings: (settings: GameSettings) => void;
   profile: PlayerProfile;
+  currentUser?: User | null;
   onUpdateProfile: (profile: PlayerProfile) => void;
   onResetProfile: () => void;
-  onStartGame: (mode: MatchMode, customRoom?: CustomRoomState | null, allyBotAgentIds?: string[]) => void;
+  onStartGame: (
+    mode: MatchMode,
+    customRoom?: CustomRoomState | null,
+    allyBotAgentIds?: string[],
+    skipPrematch?: boolean,
+    overrideMapId?: string,
+    overrideTdmTeamSize?: 1 | 2
+  ) => void;
+  onOpenLeaderboard?: () => void;
+  onUserAuthChange?: (user: User | null) => void;
 }
 
 const DEFAULT_BOT_AGENTS: string[] = [];
@@ -113,14 +126,19 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   onSelectAgent,
   selectedMapId,
   onSelectMap,
+  tdmTeamSize,
+  onSelectTdmTeamSize,
   difficulty,
   onSelectDifficulty,
   settings,
   onUpdateSettings,
   profile,
+  currentUser,
   onUpdateProfile,
   onResetProfile,
   onStartGame,
+  onOpenLeaderboard,
+  onUserAuthChange,
 }) => {
   const currentAgent = AGENT_REGISTRY[selectedAgentId] || AGENT_REGISTRY.KAEL;
   const rank = computeRankProgress(profile);
@@ -166,8 +184,38 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     }
   };
 
+  const activeRoom = multiplayerClient.currentRoom;
+  const effectiveMapId = activeRoom?.mapId || selectedMapId;
+  const currentMap = resolveMapDef(effectiveMapId);
+  const isTdm = isTdmMap(currentMap);
+  const isTrainingMap = Boolean(currentMap.isTrainingMap);
+  const effectiveTdmSize = (activeRoom?.tdmTeamSize ?? tdmTeamSize) as 1 | 2;
+  const maxTeamSlots = isTdm
+    ? clampTeamSizeForMap(currentMap, effectiveTdmSize)
+    : isTrainingMap || queueMode === 'PRACTICE'
+      ? 1
+      : 5;
+  const maxBotAllies = Math.max(0, maxTeamSlots - 1);
+
+  const isNonHostInRoom = Boolean(
+    activeRoom && activeRoom.hostUsername !== multiplayerClient.username
+  );
+
+  // Enforce no Spike-mode selection on TDM-only Warehouse & enforce Practice Range on Training Ground
+  useEffect(() => {
+    if (isTdm && queueMode === 'COMPETITIVE') {
+      setQueueMode('SKIRMISH');
+    }
+    if (botAgentIds.length > maxBotAllies) {
+      setBotAgentIds((prev) => prev.slice(0, maxBotAllies));
+    }
+  }, [isTdm, queueMode, maxBotAllies, botAgentIds.length]);
+
   const handleStart = async (overrideMode?: MatchMode) => {
-    const modeToRun = overrideMode ?? queueMode;
+    const requestedMode = overrideMode ?? queueMode;
+    const modeToRun: MatchMode =
+      isTdm && requestedMode === 'COMPETITIVE' ? 'SKIRMISH' : requestedMode;
+
     if (modeToRun === 'CUSTOM') {
       if (multiplayerClient.currentRoom && multiplayerClient.currentRoom.hostUsername === multiplayerClient.username) {
         multiplayerClient.startMatch();
@@ -190,7 +238,15 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     } catch {
       // Ignored if unsupported (e.g. iOS Safari)
     }
-    onStartGame(modeToRun, null, botAgentIds);
+
+    if (modeToRun === 'PRACTICE') {
+      onSelectMap('TRAINING_GROUND');
+      onStartGame('PRACTICE', null, [], false, 'TRAINING_GROUND', 1);
+      return;
+    }
+
+    const launchBots = botAgentIds.slice(0, maxBotAllies);
+    onStartGame(modeToRun, null, launchBots, false, currentMap.id, effectiveTdmSize);
   };
 
   const handleCycleBotAgent = (botIndex: number) => {
@@ -208,7 +264,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
   };
 
   const handleAddBotSlot = () => {
-    if (botAgentIds.length >= 4) return;
+    if (botAgentIds.length >= maxBotAllies) return;
     const nextAgentId = agentKeys[(botAgentIds.length + 1) % agentKeys.length];
     setBotAgentIds([...botAgentIds, nextAgentId]);
   };
@@ -219,18 +275,29 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
     onSelectDifficulty(next);
   };
 
-  const activeRoom = multiplayerClient.currentRoom;
-  const effectiveMapId = activeRoom?.mapId || selectedMapId;
-  const currentMap = resolveMapDef(effectiveMapId);
-  const isNonHostInRoom = Boolean(
-    activeRoom && activeRoom.hostUsername !== multiplayerClient.username
-  );
   const handleChooseMap = (mapId: string) => {
     onSelectMap(mapId);
+    const chosen = resolveMapDef(mapId);
+    if (isTdmMap(chosen) && queueMode === 'COMPETITIVE') {
+      setQueueMode('SKIRMISH');
+    } else if (chosen.isTrainingMap) {
+      setQueueMode('PRACTICE');
+    }
     if (activeRoom && activeRoom.hostUsername === multiplayerClient.username) {
-      multiplayerClient.updateRoomConfig({ mapId });
+      multiplayerClient.updateRoomConfig({
+        mapId,
+        ...(isTdmMap(chosen) ? { tdmTeamSize: effectiveTdmSize } : {}),
+      });
     }
   };
+
+  const handleToggleTdmSize = (nextSize: 1 | 2) => {
+    onSelectTdmTeamSize(nextSize);
+    if (activeRoom && activeRoom.hostUsername === multiplayerClient.username) {
+      multiplayerClient.updateRoomConfig({ tdmTeamSize: nextSize });
+    }
+  };
+
   const myUsernameLower = (multiplayerClient.username || '').toLowerCase();
   const myRoomMember = activeRoom?.members.find((m) => m.username.toLowerCase() === myUsernameLower);
   const myRoomTeam = myRoomMember?.team ?? 'ATTACKERS';
@@ -239,6 +306,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
       (m) => m.team === myRoomTeam && m.username.toLowerCase() !== myUsernameLower
     ) ?? [];
 
+  const visibleBots = botAgentIds.slice(0, maxBotAllies);
   const squadMembers = [
     {
       name: multiplayerClient.usernameClaimed
@@ -254,7 +322,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
       botIndex: -1,
     },
     ...(queueMode === 'CUSTOM'
-      ? roomTeammates.slice(0, 4).map((tm) => {
+      ? roomTeammates.slice(0, maxBotAllies).map((tm) => {
           const ag: AgentDef = AGENT_REGISTRY[tm.agentId] || AGENT_REGISTRY.KAEL;
           return {
             name: `@${tm.username}`,
@@ -266,7 +334,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
             botIndex: -1,
           };
         })
-      : botAgentIds.map((agId, idx) => {
+      : visibleBots.map((agId, idx) => {
           const ag: AgentDef = AGENT_REGISTRY[agId] || AGENT_REGISTRY.KAEL;
           return {
             name: `Ally ${ag.name}`,
@@ -280,7 +348,20 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
         })),
   ];
 
-  const activeModeMeta = QUEUE_MODES.find((q) => q.id === queueMode) || QUEUE_MODES[0];
+  const baseModeMeta = QUEUE_MODES.find((q) => q.id === queueMode) || QUEUE_MODES[0];
+  const activeModeMeta = isTdm
+    ? {
+        ...baseModeMeta,
+        fullLabel: `${effectiveTdmSize}V${effectiveTdmSize} TDM (NO SPIKE)`,
+        desc: `${effectiveTdmSize === 1 ? '1v1 First to 15 kills' : '2v2 First to 25 kills'} · No Spike`,
+      }
+    : isTrainingMap
+      ? {
+          ...baseModeMeta,
+          fullLabel: 'THE RANGE · TRAINING',
+          desc: 'All guns free · Bots & Spike drills',
+        }
+      : baseModeMeta;
   const winRate =
     profile.totalMatches > 0 ? Math.round((profile.wins / profile.totalMatches) * 100) : 0;
   const kdRatio =
@@ -410,6 +491,19 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
         {/* Right: Online/Friends Trigger + Operative */}
         <div className="flex items-center gap-2 text-xs font-mono shrink-0">
 
+          {onOpenLeaderboard && (
+            <button
+              type="button"
+              data-testid="open-leaderboard-btn"
+              onClick={onOpenLeaderboard}
+              className="relative flex items-center gap-1.5 border border-[#F59E0B]/55 bg-[#121C27]/90 px-2.5 sm:px-3 py-1.5 text-[11px] font-bold uppercase text-[#F59E0B] hover:bg-[#F59E0B]/15 transition cursor-pointer"
+              title="Global Cloud Leaderboard"
+            >
+              <Trophy className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">LEADERBOARD</span>
+            </button>
+          )}
+
           <button
             type="button"
             data-testid="open-multiplayer-btn"
@@ -452,12 +546,19 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
       ) : activeTab === 'ARMORY' ? (
         <ArmoryPage />
       ) : activeTab === 'CAREER' ? (
-        <CareerPage profile={profile} onStartQuickMatch={() => handleStart('COMPETITIVE')} />
+        <CareerPage
+          profile={profile}
+          onStartQuickMatch={() => handleStart('COMPETITIVE')}
+          onOpenLeaderboard={onOpenLeaderboard}
+        />
       ) : activeTab === 'PROFILE' ? (
         <ProfilePage
           profile={profile}
+          currentUser={currentUser}
           onUpdateProfile={onUpdateProfile}
           onResetProfile={onResetProfile}
+          onOpenLeaderboard={onOpenLeaderboard}
+          onUserAuthChange={onUserAuthChange}
         />
       ) : activeTab === 'SETTINGS' ? (
         <div className="relative z-10 flex-1 overflow-y-auto px-4 sm:px-6 py-4">
@@ -563,33 +664,84 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
 
                 {/* 4-Mode Selector Grid */}
                 <div className="grid grid-cols-4 border-t border-[#ECE8E1]/10 divide-x divide-[#ECE8E1]/10">
-                  {QUEUE_MODES.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      data-testid={`queue-mode-${m.id}`}
-                      onClick={() => setQueueMode(m.id)}
-                      className={`py-2 px-1 text-center font-mono text-[9px] font-bold uppercase tracking-wider transition cursor-pointer ${
-                        queueMode === m.id
-                          ? 'bg-[#FF4655] text-white'
-                          : 'bg-[#0C131B] text-[#8B978F] hover:bg-[#172230] hover:text-[#ECE8E1]'
-                      }`}
-                    >
-                      {m.shortLabel}
-                    </button>
-                  ))}
+                  {QUEUE_MODES.map((m) => {
+                    const isSpikeLockedOnTdm = isTdm && m.id === 'COMPETITIVE';
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        data-testid={`queue-mode-${m.id}`}
+                        disabled={isSpikeLockedOnTdm}
+                        title={
+                          isSpikeLockedOnTdm
+                            ? 'Warehouse is strictly 1v1 / 2v2 TDM (No Spike matches)'
+                            : m.fullLabel
+                        }
+                        onClick={() => {
+                          if (isSpikeLockedOnTdm) return;
+                          setQueueMode(m.id);
+                          if (m.id === 'PRACTICE' && !isNonHostInRoom) {
+                            onSelectMap('TRAINING_GROUND');
+                          }
+                        }}
+                        className={`py-2 px-1 text-center font-mono text-[9px] font-bold uppercase tracking-wider transition ${
+                          isSpikeLockedOnTdm
+                            ? 'bg-[#090E15] text-[#8B978F]/35 cursor-not-allowed line-through'
+                            : queueMode === m.id
+                              ? 'bg-[#FF4655] text-white cursor-pointer'
+                              : 'bg-[#0C131B] text-[#8B978F] hover:bg-[#172230] hover:text-[#ECE8E1] cursor-pointer'
+                        }`}
+                      >
+                        {isTdm && m.id === 'SKIRMISH'
+                          ? `${effectiveTdmSize}V${effectiveTdmSize} TDM`
+                          : isTdm && m.id === 'CUSTOM'
+                            ? 'MP TDM'
+                            : m.shortLabel}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Stacked Dark Tactical Menu Rows (Reference #1 Close-Up Stack) */}
+              {/* Stacked Dark Tactical Menu Rows */}
               <div className="border border-[#ECE8E1]/15 bg-[#0C131B]/92 divide-y divide-[#ECE8E1]/10 font-mono text-[11px]">
+                {isTdm && (
+                  <div
+                    data-testid="lobby-tdm-size-row"
+                    className="flex items-center justify-between px-3 py-2 bg-[#16121A]/85"
+                  >
+                    <span className="font-bold uppercase tracking-wider text-[#FF4655]">
+                      TDM FORMAT
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {([1, 2] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          disabled={isNonHostInRoom}
+                          data-testid={`lobby-tdm-size-${sz}`}
+                          onClick={() => handleToggleTdmSize(sz)}
+                          className={`border px-2 py-0.5 text-[10px] font-black uppercase transition cursor-pointer ${
+                            effectiveTdmSize === sz
+                              ? 'border-[#FF4655] bg-[#FF4655] text-white'
+                              : 'border-[#ECE8E1]/20 bg-[#0C131B] text-[#8B978F] hover:text-[#ECE8E1]'
+                          }`}
+                        >
+                          {sz}V{sz}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <button
                   type="button"
+                  data-testid="lobby-practice-range-btn"
                   onClick={() => handleStart('PRACTICE')}
                   className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-[#172330] transition cursor-pointer group"
                 >
                   <span className="font-bold uppercase tracking-wider text-[#ECE8E1]/90 group-hover:text-[#17E5B8]">
-                    PRACTICE RANGE
+                    THE RANGE (TRAINING)
                   </span>
                   <ChevronRight className="h-3.5 w-3.5 text-[#8B978F] group-hover:text-[#17E5B8]" />
                 </button>
@@ -604,7 +756,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                   </span>
                   <span className="text-[10px] font-bold uppercase text-[#17E5B8]">
                     {activeRoom
-                      ? `${activeRoom.members.length}/10`
+                      ? `${activeRoom.members.length}/${maxTeamSlots * 2}`
                       : `${multiplayerClient.publicRooms.length} OPEN`}
                   </span>
                 </button>
@@ -666,6 +818,22 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                     {currentAgent.name} &gt;
                   </span>
                 </button>
+
+                {onOpenLeaderboard && (
+                  <button
+                    type="button"
+                    data-testid="lobby-leaderboard-menu-btn"
+                    onClick={onOpenLeaderboard}
+                    className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-[#172330] transition cursor-pointer group"
+                  >
+                    <span className="font-bold uppercase tracking-wider text-[#ECE8E1]/90 group-hover:text-[#F59E0B]">
+                      LEADERBOARD
+                    </span>
+                    <span className="text-[10px] font-bold uppercase text-[#F59E0B]">
+                      GLOBAL &gt;
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -687,7 +855,7 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               className="w-full overflow-x-auto no-scrollbar pb-2"
             >
               <div className="mx-auto flex w-max items-start justify-center gap-2 sm:gap-3 lg:gap-3.5 px-2 pt-3">
-                {[0, 1, 2, 3, 4].map((idx) => {
+                {Array.from({ length: maxTeamSlots }, (_, idx) => idx).map((idx) => {
                   const member = squadMembers[idx];
                   const slotLayout = DESKTOP_STEPPED_CLASSES[idx];
 
@@ -908,7 +1076,8 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
                 <div className="px-3 py-2 flex items-center justify-between gap-2">
                   <div>
                     <div className="font-display text-sm font-extrabold uppercase tracking-wider text-[#ECE8E1] group-hover:text-[#17E5B8] transition">
-                      {currentMap.name.toUpperCase()} 5V5
+                      {currentMap.name.toUpperCase()}{' '}
+                      {isTdm ? `${effectiveTdmSize}V${effectiveTdmSize} TDM` : isTrainingMap ? 'RANGE' : '5V5'}
                     </div>
                     <div className="font-mono text-[9px] text-[#8B978F] uppercase tracking-wider mt-0.5">
                       {currentMap.tagline}
@@ -924,13 +1093,25 @@ export const LobbyScreen: React.FC<LobbyScreenProps> = ({
               <div className="border border-[#ECE8E1]/15 bg-[#0C131B]/90 p-3 font-mono">
                 <div className="flex items-center justify-between border-b border-[#ECE8E1]/10 pb-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#8B978F]">
                   <span>STANDING</span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('CAREER')}
-                    className="text-[#FF4655] hover:underline cursor-pointer"
-                  >
-                    CAREER &gt;
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {onOpenLeaderboard && (
+                      <button
+                        type="button"
+                        onClick={onOpenLeaderboard}
+                        className="text-[#F59E0B] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <Trophy className="h-2.5 w-2.5" />
+                        <span>RANKS</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('CAREER')}
+                      className="text-[#FF4655] hover:underline cursor-pointer"
+                    >
+                      CAREER &gt;
+                    </button>
+                  </div>
                 </div>
 
                 {profile.totalMatches === 0 ? (

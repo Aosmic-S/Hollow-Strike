@@ -140,6 +140,13 @@ function cloneEntry(entry: CachedModelEntry, shouldClone: boolean): THREE.Group 
   return entry.group.clone(true);
 }
 
+function buildGLBCacheKey(path: string, options: LoadGLBOptions = {}): string {
+  const maxTex = options.maxTextureSize ?? 512;
+  const stripSecondary = options.stripSecondaryMaps === true;
+  const normalizePbr = options.normalizePbrForLighting === true;
+  return `${path}|t${maxTex}|s${stripSecondary ? 1 : 0}|p${normalizePbr ? 1 : 0}`;
+}
+
 /**
  * Loads and caches a GLB scene with optional texture downscaling & fast GPU-buffer sharing.
  */
@@ -149,7 +156,7 @@ export function loadGLBModel(path: string, options: LoadGLBOptions = {}): Promis
   const maxTex = options.maxTextureSize ?? 512;
   const stripSecondary = options.stripSecondaryMaps === true;
   const normalizePbr = options.normalizePbrForLighting === true;
-  const cacheKey = `${path}|t${maxTex}|s${stripSecondary ? 1 : 0}|p${normalizePbr ? 1 : 0}`;
+  const cacheKey = buildGLBCacheKey(path, options);
 
   if (modelCache.has(cacheKey)) {
     return Promise.resolve(cloneEntry(modelCache.get(cacheKey)!, shouldClone));
@@ -260,6 +267,43 @@ export function loadGLBModel(path: string, options: LoadGLBOptions = {}): Promis
   return promise
     .then((entry) => cloneEntry(entry, shouldClone))
     .catch(() => null);
+}
+
+/**
+ * Concurrently preloads a batch of map + weapon GLBs into modelCache with matching options
+ * so in-match instantiation and weapon swaps are instantaneous.
+ */
+export async function preloadGLBAssets(
+  items: Array<{ path: string; options?: LoadGLBOptions }>,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<void> {
+  const unique = new Map<string, { path: string; options: LoadGLBOptions }>();
+  for (const item of items) {
+    if (!item?.path) continue;
+    const opts: LoadGLBOptions = { ...item.options, clone: false };
+    const key = buildGLBCacheKey(item.path, opts);
+    if (!unique.has(key)) {
+      unique.set(key, { path: item.path, options: opts });
+    }
+  }
+
+  const list = Array.from(unique.values());
+  const total = list.length;
+  if (total === 0) {
+    onProgress?.(1, 1);
+    return;
+  }
+
+  let loaded = 0;
+  onProgress?.(0, total);
+  await Promise.all(
+    list.map((entry) =>
+      loadGLBModel(entry.path, entry.options).finally(() => {
+        loaded++;
+        onProgress?.(loaded, total);
+      })
+    )
+  );
 }
 
 export type ForwardAxis = '-z' | '+z' | '+x' | '-x';

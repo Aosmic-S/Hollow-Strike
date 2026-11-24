@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with combat statistics and callsign for cloud persistence and global leaderboards",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "callsign": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 512 },
+        "wins": { "type": "number" },
+        "losses": { "type": "number" },
+        "kills": { "type": "number" },
+        "deaths": { "type": "number" },
+        "headshots": { "type": "number" },
+        "damageDealt": { "type": "number" },
+        "totalMatches": { "type": "number" },
+        "score": { "type": "number" },
+        "level": { "type": "number" },
+        "tier": { "type": "string", "maxLength": 32 },
+        "favoriteAgentId": { "type": "string", "maxLength": 32 },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["uid", "callsign", "wins", "kills", "totalMatches"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Historical record of a completed match",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "callsign": { "type": "string", "maxLength": 32 },
+        "mode": { "type": "string", "maxLength": 32 },
+        "mapId": { "type": "string", "maxLength": 32 },
+        "won": { "type": "boolean" },
+        "agentId": { "type": "string", "maxLength": 32 },
+        "playerTeam": { "type": "string", "maxLength": 16 },
+        "attackerScore": { "type": "number" },
+        "defenderScore": { "type": "number" },
+        "kills": { "type": "number" },
+        "deaths": { "type": "number" },
+        "headshots": { "type": "number" },
+        "damageDealt": { "type": "number" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "uid", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles storing cumulative stats for cloud sync and global leaderboards"
+    },
+    "/matches/{matchId}": {
+      "schema": "MatchRecord",
+      "description": "Match summary records saved when a game concludes"
+    }
+  }
+}

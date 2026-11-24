@@ -81,6 +81,7 @@ export class InputManager {
   private lastMouseX: number = 0;
   private lastMouseY: number = 0;
   private suppressNextLockLost: boolean = false;
+  private skipNextPointerLockMove: boolean = false;
 
   constructor(controlMode: ControlMode = 'AUTO', keyBindings?: KeyBindings) {
     if (keyBindings) {
@@ -176,6 +177,12 @@ export class InputManager {
     this.isPointerLocked = document.pointerLockElement === this.element;
     this.onPointerLockChange?.(this.isPointerLocked);
 
+    if (this.isPointerLocked && !previous) {
+      // Discard first huge browser movement spike right after acquiring Pointer Lock
+      this.suppressNextLockLost = false;
+      this.skipNextPointerLockMove = true;
+    }
+
     if (this.suppressNextLockLost) {
       this.suppressNextLockLost = false;
       return;
@@ -253,8 +260,16 @@ export class InputManager {
   private handleMouseDown = (e: MouseEvent): void => {
     soundEngine.init();
     if (this.isMobile || this.uiBlocking) return;
-    // Ignore clicks on HUD buttons or overlays — only canvas clicks fire/aim
-    if (this.element && e.target !== this.element) return;
+    // Ignore clicks on interactive HUD buttons/inputs — allow canvas clicks or pointer-locked clicks
+    const targetEl = e.target instanceof HTMLElement ? e.target : null;
+    const isInteractiveHud = Boolean(
+      targetEl?.closest('button, input, textarea, select, a, [role="button"], [data-hud-interactive]')
+    );
+    const pointerLockedToCanvas = Boolean(this.element && document.pointerLockElement === this.element);
+    if (!pointerLockedToCanvas && isInteractiveHud) return;
+    if (!pointerLockedToCanvas && this.element && e.target !== this.element && targetEl?.closest('.pointer-events-auto')) {
+      return;
+    }
 
     if (e.button === 0) {
       this.isCanvasMouseDown = true;
@@ -277,10 +292,23 @@ export class InputManager {
   private handleMouseMove = (e: MouseEvent): void => {
     if (this.uiBlocking || this.isMobile) return;
 
+    // Reconcile released primary mouse button if mouseup occurred outside window/iframe
+    if (this.isCanvasMouseDown && (e.buttons & 1) === 0) {
+      this.isCanvasMouseDown = false;
+      this.state.fireHeld = false;
+    }
+
     const adsMult = this.state.adsHeld ? this.adsSensitivityMultiplier : 1.0;
     const ySign = this.invertY ? -1 : 1;
 
     if (this.isPointerLocked) {
+      if (this.skipNextPointerLockMove) {
+        this.skipNextPointerLockMove = false;
+        return;
+      }
+      if (Math.abs(e.movementX) > 220 || Math.abs(e.movementY) > 220) {
+        return;
+      }
       this.state.lookDeltaX += e.movementX * this.mouseSensitivity * adsMult;
       this.state.lookDeltaY += e.movementY * this.mouseSensitivity * adsMult * ySign;
     } else if (this.isCanvasMouseDown) {

@@ -275,7 +275,7 @@ export function createAgentModel(agent: AgentDef, team: TeamSide): AgentMeshPack
       weaponHolder.remove(currentWeaponMesh);
     }
 
-    currentWeaponMesh = createWeaponModel(weaponId);
+    currentWeaponMesh = createWeaponModel(weaponId, { proceduralOnly: true });
     currentWeaponMesh.scale.setScalar(1.05);
     currentWeaponMesh.traverse((obj) => {
       obj.layers.mask = root.layers.mask;

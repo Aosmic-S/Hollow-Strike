@@ -25,6 +25,7 @@ export interface PublicRoomSummary {
   hostUsername: string;
   mode: MatchMode;
   mapId?: string;
+  tdmTeamSize?: 1 | 2;
   memberCount: number;
   fillBots: boolean;
 }
@@ -332,6 +333,7 @@ class MultiplayerClient {
     name?: string;
     mode: MatchMode;
     mapId?: string;
+    tdmTeamSize?: 1 | 2;
     botDifficulty: BotDifficulty;
     fillBots: boolean;
     isPublic: boolean;
@@ -345,9 +347,9 @@ class MultiplayerClient {
     this.send({ type: 'JOIN_ROOM', code: code.trim().toUpperCase() });
   }
 
-  public quickMatch(mode: MatchMode, botDifficulty: BotDifficulty, mapId?: string): void {
+  public quickMatch(mode: MatchMode, botDifficulty: BotDifficulty, mapId?: string, tdmTeamSize?: 1 | 2): void {
     this.notice = null;
-    this.send({ type: 'QUICK_MATCH', mode, botDifficulty, mapId });
+    this.send({ type: 'QUICK_MATCH', mode, botDifficulty, mapId, tdmTeamSize });
   }
 
   public leaveRoom(): void {
@@ -365,7 +367,7 @@ class MultiplayerClient {
   }
 
   public updateRoomConfig(
-    patch: Partial<Pick<CustomRoomState, 'mode' | 'mapId' | 'botDifficulty' | 'fillBots' | 'isPublic'>>
+    patch: Partial<Pick<CustomRoomState, 'mode' | 'mapId' | 'tdmTeamSize' | 'botDifficulty' | 'fillBots' | 'isPublic'>>
   ): void {
     this.send({ type: 'UPDATE_ROOM_CONFIG', ...patch });
   }

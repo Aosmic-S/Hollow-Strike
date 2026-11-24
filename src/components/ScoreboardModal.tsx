@@ -10,6 +10,8 @@ interface ScoreboardModalProps {
   stats: PlayerStats[];
   attackerRoundsWon: number;
   defenderRoundsWon: number;
+  isTdmMatch?: boolean;
+  tdmKillTarget?: number;
   onClose: () => void;
 }
 
@@ -17,6 +19,8 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
   stats,
   attackerRoundsWon,
   defenderRoundsWon,
+  isTdmMatch = false,
+  tdmKillTarget = 25,
   onClose,
 }) => {
   const attackers = stats.filter((s) => s.team === 'ATTACKERS');
@@ -34,7 +38,7 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
           <div className="flex items-center gap-2">
             <span className="font-display text-base sm:text-lg font-extrabold uppercase tracking-widest">{team}</span>
             <span className="bg-[#0F1923] px-2 py-0.5 text-[10px] sm:text-xs font-mono font-bold text-[#ECE8E1] border border-[#ECE8E1]/15">
-              {score} WINS
+              {score} {isTdmMatch ? 'KILLS' : 'WINS'}
             </span>
           </div>
         </div>
@@ -84,7 +88,9 @@ export const ScoreboardModal: React.FC<ScoreboardModalProps> = ({
               MATCH SCOREBOARD
             </h2>
             <p className="font-mono text-[10px] sm:text-xs text-[#8B978F]">
-              First to 13 round wins · Tactical Plant / Defuse
+              {isTdmMatch
+                ? `First to ${tdmKillTarget} eliminations · Team Deathmatch (No Spike)`
+                : 'First to 13 round wins · Tactical Plant / Defuse'}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">

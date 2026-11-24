@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { multiplayerClient } from '../../game/multiplayerClient';
 import { resolveMapDef } from '../../game/mapData';
+import { clampTeamSizeForMap, isTdmMap } from '../../game/rules';
 import { AGENT_REGISTRY, BotDifficulty, MapDef, MatchMode, OnlinePresenceStatus } from '../../game/types';
 import { TacticalComms } from '../TacticalComms';
 
@@ -59,6 +60,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
   const [roomCodeInput, setRoomCodeInput] = useState<string>('');
   const [createMode, setCreateMode] = useState<MatchMode>('CUSTOM');
   const [createMapId, setCreateMapId] = useState<string>(selectedMapId);
+  const [createTdmSize, setCreateTdmSize] = useState<1 | 2>(2);
   const [createFillBots, setCreateFillBots] = useState<boolean>(false);
   const [createPublic, setCreatePublic] = useState<boolean>(true);
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
@@ -96,6 +98,11 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
   };
 
   const room = multiplayerClient.currentRoom;
+  const roomMapDef = resolveMapDef(room?.mapId);
+  const roomIsTdm = isTdmMap(roomMapDef);
+  const roomTeamCapacity = roomIsTdm
+    ? clampTeamSizeForMap(roomMapDef, room?.tdmTeamSize)
+    : (roomMapDef.maxTeamSize ?? 5);
   const isHost = Boolean(room && room.hostUsername === multiplayerClient.username);
   const attackers = room?.members.filter((m) => m.team === 'ATTACKERS') ?? [];
   const defenders = room?.members.filter((m) => m.team === 'DEFENDERS') ?? [];
@@ -296,7 +303,9 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                     </button>
                   </div>
                   <div className="font-mono text-[11px] text-[#8B978F] mt-0.5">
-                    Host: @{room.hostUsername} · Map: <span className="text-[#ECE8E1] font-bold">{resolveMapDef(room.mapId).name}</span> · Mode: {room.mode} · AI Fill: {room.fillBots ? '5v5 ON' : 'HUMANS ONLY'} ·{' '}
+                    Host: @{room.hostUsername} · Map: <span className="text-[#ECE8E1] font-bold">{roomMapDef.name}</span> · Mode:{' '}
+                    {roomIsTdm ? `${roomTeamCapacity}V${roomTeamCapacity} TDM (NO SPIKE)` : room.mode} · AI Fill:{' '}
+                    {room.fillBots ? `${roomTeamCapacity}v${roomTeamCapacity} ON` : 'HUMANS ONLY'} ·{' '}
                     {room.isPublic ? 'PUBLIC' : 'PRIVATE'}
                   </div>
                 </div>
@@ -319,6 +328,23 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                         </option>
                       ))}
                     </select>
+                  )}
+
+                  {isHost && roomIsTdm && (
+                    <div className="flex items-center border border-[#FF4655]/50 bg-[#18232E]">
+                      {([1, 2] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => multiplayerClient.updateRoomConfig({ tdmTeamSize: sz })}
+                          className={`px-2 py-1.5 font-mono text-[10px] font-black uppercase cursor-pointer ${
+                            roomTeamCapacity === sz ? 'bg-[#FF4655] text-white' : 'text-[#8B978F] hover:text-[#ECE8E1]'
+                          }`}
+                        >
+                          {sz}V{sz}
+                        </button>
+                      ))}
+                    </div>
                   )}
 
                   {isHost && (
@@ -358,7 +384,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                   >
                     <div className="flex items-center justify-between border-b border-[#ECE8E1]/10 pb-2">
                       <span className="font-display text-sm font-extrabold uppercase tracking-wider" style={{ color: teamBox.color }}>
-                        {teamBox.title} ({teamBox.list.length}/5)
+                        {teamBox.title} ({teamBox.list.length}/{roomTeamCapacity})
                       </span>
                       {meInRoom?.team !== teamBox.side && (
                         <button
@@ -500,6 +526,28 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                   </div>
                 </div>
 
+                {isTdmMap(resolveMapDef(createMapId)) && (
+                  <div className="flex items-center justify-between border border-[#FF4655]/45 bg-[#FF4655]/10 px-2.5 py-1.5 font-mono text-[10px]">
+                    <span className="font-bold text-[#FF4655]">TDM FORMAT (NO SPIKE)</span>
+                    <div className="flex items-center gap-1">
+                      {([1, 2] as const).map((sz) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setCreateTdmSize(sz)}
+                          className={`border px-2 py-0.5 font-bold uppercase cursor-pointer ${
+                            createTdmSize === sz
+                              ? 'border-[#FF4655] bg-[#FF4655] text-white'
+                              : 'border-[#ECE8E1]/20 bg-[#18232E] text-[#8B978F]'
+                          }`}
+                        >
+                          {sz}V{sz}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-2 font-mono text-[10px]">
                   <button
                     type="button"
@@ -516,7 +564,9 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                     className="flex items-center justify-center gap-1.5 border border-[#ECE8E1]/15 bg-[#18232E] py-2 font-bold text-[#ECE8E1] cursor-pointer"
                   >
                     <Shield className="h-3.5 w-3.5 text-[#17E5B8]" />
-                    {createFillBots ? 'FILL 5V5 BOTS' : 'HUMANS ONLY'}
+                    {createFillBots
+                      ? `FILL ${isTdmMap(resolveMapDef(createMapId)) ? `${createTdmSize}V${createTdmSize}` : '5V5'} BOTS`
+                      : 'HUMANS ONLY'}
                   </button>
                 </div>
 
@@ -528,6 +578,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                       multiplayerClient.createRoom({
                         mode: createMode,
                         mapId: createMapId,
+                        tdmTeamSize: isTdmMap(resolveMapDef(createMapId)) ? createTdmSize : undefined,
                         botDifficulty: defaultDifficulty,
                         fillBots: createFillBots,
                         isPublic: createPublic,
@@ -541,7 +592,14 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => multiplayerClient.quickMatch('CUSTOM', defaultDifficulty, createMapId)}
+                    onClick={() =>
+                      multiplayerClient.quickMatch(
+                        'CUSTOM',
+                        defaultDifficulty,
+                        createMapId,
+                        isTdmMap(resolveMapDef(createMapId)) ? createTdmSize : undefined
+                      )
+                    }
                     className="flex items-center justify-center gap-1.5 border border-[#17E5B8]/60 bg-[#17E5B8]/15 py-2.5 font-display text-xs font-extrabold uppercase tracking-wider text-[#17E5B8] hover:bg-[#17E5B8]/25 cursor-pointer clip-val-card"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -582,7 +640,10 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-56 overflow-y-auto">
-                      {multiplayerClient.publicRooms.map((r) => (
+                      {multiplayerClient.publicRooms.map((r) => {
+                        const rDef = resolveMapDef(r.mapId);
+                        const rCap = isTdmMap(rDef) ? clampTeamSizeForMap(rDef, r.tdmTeamSize) * 2 : 10;
+                        return (
                         <div
                           key={r.code}
                           className="flex items-center justify-between border border-[#ECE8E1]/15 bg-[#18232E] px-3 py-2 font-mono text-xs"
@@ -590,7 +651,7 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                           <div>
                             <div className="font-bold text-[#ECE8E1]">{r.name}</div>
                             <div className="text-[10px] text-[#8B978F]">
-                              Host @{r.hostUsername} · {resolveMapDef(r.mapId).name} · {r.mode} · {r.memberCount}/10 Players
+                              Host @{r.hostUsername} · {rDef.name} · {isTdmMap(rDef) ? `${rCap / 2}V${rCap / 2} TDM` : r.mode} · {r.memberCount}/{rCap} Players
                             </div>
                           </div>
                           <button
@@ -601,7 +662,8 @@ export const MultiplayerDrawer: React.FC<MultiplayerDrawerProps> = ({
                             JOIN
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
